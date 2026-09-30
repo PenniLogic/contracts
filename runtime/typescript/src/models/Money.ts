@@ -15,6 +15,7 @@ export type MoneyReason = 'shape' | 'number_not_string' | 'grammar' | 'currency_
 
 export const MONEY_REASONS: readonly MoneyReason[] = ['shape', 'number_not_string', 'grammar', 'currency_unknown', 'scale_mismatch', 'out_of_range'];
 export const MAX_MINOR_UNITS = 9223372036854775807n;
+const MAX_DIGITS = 19; // digits of MAX_MINOR_UNITS; a longer digit string is out of range before any conversion
 
 const GRAMMAR = /^(0(\.[0-9]+)?|-?[1-9][0-9]*(\.[0-9]+)?|-0\.[0-9]*[1-9][0-9]*)$/;
 const MEMBERS = ['amount', 'currency'] as const;
@@ -57,6 +58,9 @@ function minorUnitsFromCanonical(amount: string, exponent: number): bigint {
     if (fraction.length !== exponent) {
         throw new MoneyWireError('scale_mismatch', 'amount');
     }
+    if (integerPart.length + fraction.length > MAX_DIGITS) {
+        throw new MoneyWireError('out_of_range', 'amount');
+    }
     const magnitude = BigInt(integerPart + fraction);
     if (magnitude > MAX_MINOR_UNITS) {
         throw new MoneyWireError('out_of_range', 'amount');
@@ -97,13 +101,19 @@ export class Money {
         return new Money(minorUnits, currency);
     }
 
-    /** Construct from a canonical amount string; a non-string amount is a programming error. */
+    /**
+     * Construct from a canonical amount string; a non-string amount is a programming error.
+     * Checks run in the ADR-015 §1.5 order shared by every language: grammar, currency, scale, range.
+     */
     static parse(amount: string, currency: string): Money {
         if (typeof amount !== 'string') {
             throw new TypeError('Money.parse takes the canonical decimal string; numbers are refused (ADR-015)');
         }
         if (typeof currency !== 'string') {
             throw new TypeError('currency must be a string ISO 4217 code');
+        }
+        if (!GRAMMAR.test(amount)) {
+            throw new MoneyWireError('grammar', 'amount');
         }
         const exponent = exponentOf(currency);
         return new Money(minorUnitsFromCanonical(amount, exponent), currency);

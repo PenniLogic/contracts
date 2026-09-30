@@ -6,10 +6,13 @@ import gzip
 import io
 import json
 import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from support import ROOT, run_script
 
@@ -35,6 +38,75 @@ class DeterministicArchiveTest(unittest.TestCase):
             self.assertEqual(names, ["pkg/a.txt", "pkg/b", "pkg/b/y.txt"])
             for member in archive.getmembers():
                 self.assertEqual((member.uid, member.gid, member.uname, member.gname, member.mtime), (0, 0, "", "", 1790000000))
+
+
+class PublishedMainGuardTest(unittest.TestCase):
+    """A release is cut only from the commit origin/main carries: an unpushed local commit is refused before any tag."""
+
+    def git(self, cwd: Path, *args: str) -> str:
+        completed = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return completed.stdout.strip()
+
+    def test_published_main_follows_the_remote_not_the_local_branch(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        origin, clone = root / "origin.git", root / "clone"
+        self.git(root, "init", "--bare", "--initial-branch=main", str(origin))
+        self.git(root, "clone", "--quiet", str(origin), str(clone))
+        self.git(clone, "config", "user.email", "test@example.invalid")
+        self.git(clone, "config", "user.name", "test")
+        self.git(clone, "checkout", "-q", "-b", "main")
+        (clone / "a.txt").write_text("a\n", encoding="utf-8")
+        self.git(clone, "add", "a.txt")
+        self.git(clone, "commit", "-q", "-m", "reviewed")
+        self.git(clone, "push", "-q", "-u", "origin", "main")
+        head = self.git(clone, "rev-parse", "HEAD")
+        self.assertEqual(release.published_main("origin", cwd=clone), head)
+        (clone / "b.txt").write_text("b\n", encoding="utf-8")
+        self.git(clone, "add", "b.txt")
+        self.git(clone, "commit", "-q", "-m", "unpushed")
+        self.assertNotEqual(release.published_main("origin", cwd=clone), self.git(clone, "rev-parse", "HEAD"))
+
+    def test_unpushed_head_is_refused_and_nothing_is_tagged(self) -> None:
+        state = {"HEAD": "a" * 40, "status": "", "branch": "main", "tags": ""}
+
+        def fake_git(*args: str, cwd: Path = release.ROOT) -> str:
+            key = " ".join(args)
+            if key == "rev-parse HEAD":
+                return state["HEAD"]
+            if key == "status --porcelain":
+                return state["status"]
+            if key == "rev-parse --abbrev-ref HEAD":
+                return state["branch"]
+            if key.startswith("tag --list"):
+                return state["tags"]
+            if key.startswith("tag -a") or key.startswith("push"):
+                raise AssertionError(f"git {key} must not run when preconditions fail")
+            raise AssertionError(f"unexpected git call: {key}")
+
+        with mock.patch.object(release, "git_output", side_effect=fake_git), \
+                mock.patch.object(release, "spec_version", return_value="0.1.0"), \
+                mock.patch.object(release, "published_main", return_value="b" * 40), \
+                mock.patch.object(release, "run_checks") as checks, \
+                mock.patch.object(release, "build_release_set") as build, \
+                mock.patch.object(release, "publish") as publish, \
+                mock.patch.object(sys, "argv", ["release.py", "--version", "0.1.0"]):
+            self.assertEqual(release.main(), 1)
+            checks.assert_not_called()
+            build.assert_not_called()
+            publish.assert_not_called()
+        with mock.patch.object(release, "git_output", side_effect=fake_git), \
+                mock.patch.object(release, "spec_version", return_value="0.1.0"), \
+                mock.patch.object(release, "published_main", return_value="b" * 40):
+            with self.assertRaises(release.PipelineError) as caught:
+                release.preconditions("0.1.0", dry_run=False, allow_branch=False)
+            self.assertIn("is not origin/main", str(caught.exception))
+            self.assertEqual(release.preconditions("0.1.0", dry_run=False, allow_branch=True), "a" * 40)
+        with mock.patch.object(release, "git_output", side_effect=fake_git), \
+                mock.patch.object(release, "spec_version", return_value="0.1.0"), \
+                mock.patch.object(release, "published_main", return_value="a" * 40):
+            self.assertEqual(release.preconditions("0.1.0", dry_run=False, allow_branch=False), "a" * 40)
 
 
 class DryRunTest(unittest.TestCase):

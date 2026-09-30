@@ -78,6 +78,46 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertIn("refund_amount", output)
         self.assertIn("[pl-problem-detail-no-money]", output)
 
+    def test_minor_unit_names_are_money_and_unit_counts_are_not(self) -> None:
+        text = replace_once(spec_text(), "        reason:\n          type: string\n          pattern: '^[a-z][a-z0-9_]*$'\n          maxLength: 64\n",
+                            "        reason:\n          type: string\n          pattern: '^[a-z][a-z0-9_]*$'\n          maxLength: 64\n"
+                            "        balance_minor_units:\n          type: integer\n          format: int64\n        amountMinorUnits:\n          type: integer\n"
+                            "        minor_units:\n          type: integer\n        quantity_units:\n          type: integer\n        unit_count:\n          type: integer\n")
+        output = self.lint(text)
+        for name in ("balance_minor_units", "amountMinorUnits", "minor_units"):
+            self.assertIn(f"property '{name}' looks like money", output)
+        for name in ("quantity_units", "unit_count"):
+            self.assertNotIn(name, output)
+        self.assertEqual(output.count("[pl-money-bearing-property-references-money]"), 3)
+
+    def test_binding_fragment_refuses_an_extra_property_named_like_a_descriptive_key(self) -> None:
+        text = replace_once(spec_text(), "          pattern: '^[A-Z]{3}$'\n          description: ISO 4217 alphabetic code present in the published currency registry.\n",
+                            "          pattern: '^[A-Z]{3}$'\n          description: ISO 4217 alphabetic code present in the published currency registry.\n        title:\n          type: string\n")
+        output = self.lint(text)
+        self.assertIn("Money.properties.title is not part of the binding fragment", output)
+        # A descriptive key on the schema object itself stays allowed.
+        text = replace_once(spec_text(), "    Money:\n      type: object\n", "    Money:\n      title: Money\n      type: object\n")
+        completed = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_money_behind_a_reference_chain_cannot_be_exempt(self) -> None:
+        # Entry -> lines[] -> Line -> allOf -> Money, plus a self-reference (Entry.parent) that must not loop the walk.
+        chain = ("  schemas:\n    Entry:\n      type: object\n      properties:\n        lines:\n          type: array\n          items:\n            $ref: '#/components/schemas/Line'\n"
+                 "        parent:\n          $ref: '#/components/schemas/Entry'\n    Line:\n      type: object\n      allOf:\n        - type: object\n          properties:\n"
+                 "            value:\n              $ref: '#/components/schemas/Money'\n    Money:\n")
+        text = replace_once(with_probe_paths(spec_text()), "  schemas:\n    Money:\n", chain)
+        indirect = replace_once(text, "      parameters:\n        - $ref: '#/components/parameters/IdempotencyKey'\n      requestBody:\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                total:\n                  $ref: '#/components/schemas/Money'\n",
+                                "      x-idempotency: not-applicable\n      requestBody:\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/Entry'\n")
+        output = self.lint(indirect)
+        self.assertIn("carries Money (directly or through referenced schemas) can never be exempt", output)
+        # Positive: the same indirect Money-bearing body with the key declared passes.
+        keyed = replace_once(indirect, "      x-idempotency: not-applicable\n", "      parameters:\n        - $ref: '#/components/parameters/IdempotencyKey'\n")
+        completed = run_script("lint_spec.py", "--spec", str(self.spec.write(keyed)))
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        # Positive: an exemption on a body whose reference chain carries no Money passes.
+        money_free = replace_once(indirect, "            value:\n              $ref: '#/components/schemas/Money'\n", "            value:\n              type: string\n")
+        completed = run_script("lint_spec.py", "--spec", str(self.spec.write(money_free)))
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
     def test_x_not_money_escape_hatch_needs_a_reason(self) -> None:
         text = with_probe_paths(spec_text())
         text = replace_once(text, "                total:\n                  $ref: '#/components/schemas/Money'\n      responses:\n        '204':",

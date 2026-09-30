@@ -7,14 +7,19 @@ import json
 import unittest
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from fixtures import load
+from pennilogic_contracts.models import ProblemDetail
 from pennilogic_contracts.models.currency_registry import REGISTRY
 from pennilogic_contracts.models.money import MAX_MINOR_UNITS, MONEY_CONTEXT, REASONS, Money, MoneyWireError
 
 
 class Holder(BaseModel):
+    """A Money-bearing model with the same model_config the generator emits (see generator/templates/python)."""
+
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True, validate_assignment=True)
+
     total: Money
 
 
@@ -91,6 +96,19 @@ class WireConformanceTest(unittest.TestCase):
             Money.from_wire({"amount": "1234.567", "currency": "INR"})
         self.assertNotIn("1234", str(caught.exception))
 
+    def test_parse_checks_in_the_shared_order_with_the_digit_bound_first(self) -> None:
+        self.assertEqual(list(self.fixtures["parse_reason_order"]), ["grammar", "currency_unknown", "scale_mismatch", "out_of_range"])
+        for vector in self.fixtures["parse_invalid"]:
+            with self.subTest(vector["name"]):
+                with self.assertRaises(MoneyWireError) as caught:
+                    Money.parse(vector["amount"], vector["currency"])
+                self.assertEqual(caught.exception.reason, vector["reason"])
+                self.assertNotIn(vector["amount"][:12], str(caught.exception))
+        # The 5003-digit vector must be refused by the digit bound, never by int()'s own conversion limit.
+        with self.assertRaises(MoneyWireError) as bounded:
+            Money.from_wire({"amount": "9" * 5003, "currency": "JPY"})
+        self.assertEqual(bounded.exception.reason, "out_of_range")
+
     def test_range_boundaries(self) -> None:
         self.assertEqual(Money(MAX_MINOR_UNITS, "JPY").to_wire()["amount"], "9223372036854775807")
         self.assertEqual(Money(-MAX_MINOR_UNITS, "JPY").to_wire()["amount"], "-9223372036854775807")
@@ -163,11 +181,26 @@ class PydanticSeamTest(unittest.TestCase):
         self.assertNotIn('"amount":-1234.56', text)  # never a bare JSON number
         self.assertEqual(Holder.model_validate_json(text), holder)
 
-    def test_wire_error_becomes_validation_error(self) -> None:
+    def test_wire_error_becomes_validation_error_without_echoing_the_value(self) -> None:
         with self.assertRaises(ValidationError) as caught:
             Holder.model_validate({"total": {"amount": "12.5", "currency": "INR"}})
-        self.assertIn("scale_mismatch", str(caught.exception))
-        self.assertNotIn("12.5", str(caught.exception).split("input_value")[0])
+        text = str(caught.exception)
+        self.assertIn("scale_mismatch", text)
+        self.assertNotIn("12.5", text)
+        # hide_input_in_errors covers str(); the structured forms keep the input unless include_input=False is passed,
+        # which is the documented rule for consumers (docs/development.md, T-AI-01).
+        self.assertNotIn("12.5", caught.exception.json(include_input=False))
+        self.assertNotIn("12.5", repr(caught.exception.errors(include_input=False)))
+        self.assertIn("12.5", repr(caught.exception.errors()))
+
+    def test_generated_models_are_strict_and_hide_input(self) -> None:
+        # ProblemDetail is generated from the template override; every generated model shares this config.
+        self.assertIs(ProblemDetail.model_config.get("strict"), True)
+        self.assertIs(ProblemDetail.model_config.get("hide_input_in_errors"), True)
+        with self.assertRaises(ValidationError) as caught:
+            ProblemDetail.model_validate({"type": "about:blank", "title": "x", "status": "422"})
+        self.assertNotIn("422", str(caught.exception))
+        self.assertEqual(ProblemDetail.model_validate({"type": "about:blank", "title": "x", "status": 422}).status, 422)
 
     def test_instance_passes_through(self) -> None:
         money = Money(5, "KWD")

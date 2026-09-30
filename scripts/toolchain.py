@@ -61,15 +61,15 @@ def download(url: str, expected_sha256: str, attempts: int = 3) -> bytes:
     return data
 
 
-def generator_jar_path(pins: dict | None = None) -> Path:
+def generator_jar_path(pins: dict | None = None, toolchain_dir: Path = TOOLCHAIN) -> Path:
     pins = pins or versions()
-    return TOOLCHAIN / f"openapi-generator-cli-{pins['openapi_generator']['version']}.jar"
+    return toolchain_dir / f"openapi-generator-cli-{pins['openapi_generator']['version']}.jar"
 
 
-def oasdiff_path(pins: dict | None = None) -> Path:
+def oasdiff_path(pins: dict | None = None, toolchain_dir: Path = TOOLCHAIN) -> Path:
     pins = pins or versions()
     suffix = ".exe" if sys.platform.startswith("win") else ""
-    return TOOLCHAIN / f"oasdiff-{pins['oasdiff']['version']}{suffix}"
+    return toolchain_dir / f"oasdiff-{pins['oasdiff']['version']}{suffix}"
 
 
 def install_generator(pins: dict, quiet: bool = False) -> Path:
@@ -88,13 +88,23 @@ def install_generator(pins: dict, quiet: bool = False) -> Path:
 
 
 def _marker(target: Path) -> Path:
-    return TOOLCHAIN / f"{target.name}.tarball.sha256"
+    return target.with_name(f"{target.name}.verified.json")
 
 
-def _oasdiff_verified(target: Path, expected_sha256: str) -> bool:
-    # The extracted binary is recorded against the verified tarball digest it came from.
+def _oasdiff_verified(target: Path, expected_tarball_sha256: str) -> bool:
+    """True when the cached binary is the one extracted from the pinned tarball.
+
+    The marker records the verified tarball digest and the extracted binary's own SHA-256; the
+    binary is re-hashed on every check, so a tampered cache entry is refused exactly like the jar.
+    """
     marker = _marker(target)
-    return target.is_file() and marker.is_file() and marker.read_text(encoding="utf-8").strip() == expected_sha256
+    if not (target.is_file() and marker.is_file()):
+        return False
+    try:
+        record = json.loads(marker.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return record.get("tarball_sha256") == expected_tarball_sha256 and record.get("binary_sha256") == sha256_file(target)
 
 
 def install_oasdiff(pins: dict, quiet: bool = False) -> Path:
@@ -120,20 +130,21 @@ def install_oasdiff(pins: dict, quiet: bool = False) -> Path:
     target.write_bytes(binary)
     if os.name != "nt":
         target.chmod(0o755)
-    _marker(target).write_text(asset["sha256"] + "\n", encoding="utf-8")
-    print(f"oasdiff {pin['version']} verified (tarball sha256 {asset['sha256']})")
+    binary_sha256 = sha256_bytes(binary)
+    _marker(target).write_text(json.dumps({"tarball_sha256": asset["sha256"], "binary_sha256": binary_sha256}, indent=2) + "\n", encoding="utf-8")
+    print(f"oasdiff {pin['version']} verified (tarball sha256 {asset['sha256']}; binary sha256 {binary_sha256})")
     return target
 
 
-def verify(pins: dict) -> None:
-    jar = generator_jar_path(pins)
+def verify(pins: dict, toolchain_dir: Path = TOOLCHAIN) -> None:
+    jar = generator_jar_path(pins, toolchain_dir)
     if not jar.is_file():
         raise PipelineError(f"{jar} is missing; run: python scripts/toolchain.py install")
     if sha256_file(jar) != pins["openapi_generator"]["sha256"]:
         raise PipelineError(f"{jar} does not match the pinned SHA-256; delete .toolchain/ and run: python scripts/toolchain.py install")
-    binary = oasdiff_path(pins)
+    binary = oasdiff_path(pins, toolchain_dir)
     if not _oasdiff_verified(binary, pins["oasdiff"]["assets"][platform_key()]["sha256"]):
-        raise PipelineError(f"{binary} is missing or unverified; run: python scripts/toolchain.py install")
+        raise PipelineError(f"{binary} is missing, unverified or does not match the SHA-256 recorded at install; delete .toolchain/ and run: python scripts/toolchain.py install")
 
 
 def ensure_installed(quiet: bool = True) -> dict:

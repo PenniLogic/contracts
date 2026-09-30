@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from support import ROOT, REGISTRY, SpecDir, replace_once, run_script, spec_text
 
@@ -76,6 +81,29 @@ class GoldenAndManifestTest(unittest.TestCase):
             self.assertEqual(record["spec_sha256"], gc.spec_digest(gc.SPEC), f"{language}: golden was recorded for another specification; run --update-golden")
             self.assertEqual(len(record["tree_sha256"]), 64)
             self.assertEqual(record["file_count"], len(record["files"]))
+            # The per-file map is not diagnostic only: its fold must reproduce the recorded tree digest.
+            self.assertEqual(pl_contracts.combined_digest(record["files"]), record["tree_sha256"], language)
+            self.assertIsNone(gc.golden_inconsistency(record), language)
+
+    def test_a_tampered_per_file_hash_is_refused(self) -> None:
+        golden = json.loads((ROOT / "generator" / "golden.json").read_text(encoding="utf-8"))
+        record = json.loads(json.dumps(golden["python"]))
+        first = sorted(record["files"])[0]
+        record["files"][first] = "0" * 64
+        problem = gc.golden_inconsistency(record)
+        self.assertIsNotNone(problem)
+        self.assertIn("edited inconsistently", problem or "")
+        # verify() refuses the record before comparing it with a generation.
+        with mock.patch.object(gc, "load_golden", return_value={"python": record}), \
+                mock.patch.object(gc, "generate", return_value={"tree_sha256": golden["python"]["tree_sha256"], "file_count": 1, "files": [], "spec_version": "0.1.0", "spec_sha256": "x"}), \
+                mock.patch.object(gc, "remove_tree"), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(gc.verify(["python"], {"openapi_generator": "", "oasdiff": ""}, update_golden=False), 1)
+        self.assertIn("edited inconsistently", stderr.getvalue())
+        dropped = json.loads(json.dumps(golden["python"]))
+        del dropped["files"][first]
+        self.assertIn("file_count", gc.golden_inconsistency(dropped) or "")
 
     def test_manifest_of_a_generated_output_records_versions(self) -> None:
         manifest_path = ROOT / "build" / "generated" / "python" / "contracts-manifest.json"
@@ -116,6 +144,13 @@ class SeamWiringTest(unittest.TestCase):
         self.assertIn("java.time.LocalDate", model)
         self.assertFalse((self.output / "kotlin" / "src/main/kotlin/com/pennilogic/contracts/models/Money.kt").exists(), "the raw wire shape must not be generated as a model")
         self.assertTrue((self.output / "kotlin" / "src/main/kotlin/com/pennilogic/contracts/money/Money.kt").is_file())
+        # The generated client registers the seams itself (ADR-015 s2): converter + dependency come from the template override.
+        client = (self.output / "kotlin" / "src/main/kotlin/com/pennilogic/contracts/infrastructure/ApiClient.kt").read_text(encoding="utf-8")
+        self.assertIn("json(PennilogicJson.json)", client)
+        self.assertIn("import com.pennilogic.contracts.serialization.PennilogicJson", client)
+        self.assertNotIn("install(ContentNegotiation) {\n            }", client)
+        self.assertIn('implementation "io.ktor:ktor-serialization-kotlinx-json:$ktor_version"', (self.output / "kotlin" / "build.gradle").read_text(encoding="utf-8"))
+        self.assertTrue((self.output / "kotlin" / "src/main/kotlin/com/pennilogic/contracts/serialization/PennilogicJson.kt").is_file())
 
     def test_typescript_model_calls_the_seam_functions(self) -> None:
         gc.generate("typescript", self.output / "typescript", self.tools, self.spec_path)
@@ -123,8 +158,11 @@ class SeamWiringTest(unittest.TestCase):
         self.assertIn("MoneyFromJSON(json['total'])", model)
         self.assertIn("MoneyToJSON(value['total'])", model)
         self.assertIn("InstantFromJSON(json['recorded_at'])", model)
+        self.assertIn("LocalDateFromJSON(json['booked_on'])", model)
         self.assertIn("total: Money;", model)
         self.assertIn("recordedAt: Instant;", model)
+        self.assertIn("bookedOn?: LocalDate;", model)
+        self.assertTrue((self.output / "typescript" / "src/models/LocalDate.ts").is_file())
         index = (self.output / "typescript" / "src/models/index.ts").read_text(encoding="utf-8")
         self.assertIn("./Money.js", index)
         self.assertTrue((self.output / "typescript" / "src/models/Money.ts").is_file())
@@ -141,37 +179,125 @@ class SeamWiringTest(unittest.TestCase):
         self.assertIn("recorded_at: Instant", model)
         self.assertIn("Money.from_dict(obj[\"total\"])", model)
         self.assertIn("Instant.from_dict(obj[\"recorded_at\"])", model)
+        self.assertIn("booked_on: Optional[LocalDate]", model)
+        self.assertIn("LocalDate.from_dict(obj[\"booked_on\"])", model)
         self.assertIn("def recorded_at_validate_regular_expression(cls, value: Any) -> Any", model)
+        self.assertIn("strict=True,", model)
+        self.assertIn("hide_input_in_errors=True,", model)
         for forbidden in ("git_push.sh", ".travis.yml", ".gitlab-ci.yml", "tox.ini", ".github/workflows/python.yml"):
             self.assertFalse((self.output / "python" / forbidden).exists(), forbidden)
         self.assertFalse((self.output / "python" / "test").exists(), "generated test stubs are replaced by the smoke consumer")
 
+    def test_generated_python_money_model_never_echoes_the_offending_value(self) -> None:
+        """Runtime proof on a GENERATED Money-bearing model, executed in the smoke venv (created by scripts/smoke.py python)."""
+        interpreter = ROOT / "build" / "venv" / ("Scripts/python.exe" if sys.platform.startswith("win") else "bin/python")
+        if not interpreter.is_file():
+            self.skipTest("smoke venv missing; run python scripts/smoke.py python first (CI runs it before this suite)")
+        gc.generate("python", self.output / "python", self.tools, self.spec_path)
+        probe = (
+            "import json, sys\n"
+            "from pydantic import ValidationError\n"
+            "from pennilogic_contracts.models.synthetic_envelope import SyntheticEnvelope\n"
+            "from pennilogic_contracts.models.money import Money\n"
+            "assert SyntheticEnvelope.model_config['strict'] is True and SyntheticEnvelope.model_config['hide_input_in_errors'] is True\n"
+            "ok = SyntheticEnvelope.from_dict({'total': {'amount': '-1234.56', 'currency': 'INR'}, 'recorded_at': '2026-09-30T04:52:08.439Z', 'booked_on': '2026-09-30'})\n"
+            "assert isinstance(ok.total, Money) and ok.total.minor_units == -123456 and ok.booked_on.to_wire() == '2026-09-30'\n"
+            "assert json.loads(ok.to_json()) == {'total': {'amount': '-1234.56', 'currency': 'INR'}, 'recorded_at': '2026-09-30T04:52:08.439Z', 'booked_on': '2026-09-30'}\n"
+            "for bad in ({'amount': '12.5', 'currency': 'INR'}, {'amount': 12.5, 'currency': 'INR'}):\n"
+            "    try:\n"
+            "        SyntheticEnvelope.model_validate({'total': bad, 'recorded_at': '2026-09-30T04:52:08.439Z'})\n"
+            "    except ValidationError as error:\n"
+            "        assert '12.5' not in str(error), str(error)\n"
+            "        assert '12.5' not in error.json(include_input=False)\n"
+            "    else:\n"
+            "        raise SystemExit('accepted an invalid amount')\n"
+            "try:\n"
+            "    SyntheticEnvelope.model_validate({'total': {'amount': '0.00', 'currency': 'INR'}, 'recorded_at': '2026-09-30T04:52:08.439Z', 'note': 5})\n"
+            "except ValidationError as error:\n"
+            "    assert '5' not in str(error).split('[')[-1]\n"
+            "else:\n"
+            "    raise SystemExit('strict model coerced a non-string note')\n"
+            "print('generated model: strict, no echo')\n"
+        )
+        completed = subprocess.run([str(interpreter), "-c", probe], capture_output=True, text=True, encoding="utf-8",
+                                   env={**os.environ, "PYTHONPATH": str(self.output / "python"), "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("generated model: strict, no echo", completed.stdout)
+
 
 class TemplateOverrideDriftTest(unittest.TestCase):
-    """The committed Python template equals the pinned generator's stock template plus the documented edits."""
+    """Every committed template override equals the pinned generator's stock template plus the documented edits."""
 
-    def test_override_is_stock_plus_known_edits(self) -> None:
+    def stock(self, name: str) -> str:
         pins = pl_contracts.versions()
         jar = toolchain.generator_jar_path(pins)
         if not jar.is_file():
             self.skipTest("generator jar not installed; run python scripts/toolchain.py install")
         with zipfile.ZipFile(jar) as archive:
-            stock = archive.read("python/model_generic.mustache").decode("utf-8")
+            return archive.read(name).decode("utf-8")
+
+    def replace_once(self, text: str, old: str, new: str) -> str:
+        self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
+        return text.replace(old, new)
+
+    def test_python_model_override_is_stock_plus_known_edits(self) -> None:
+        stock = self.stock("python/model_generic.mustache")
         override = (ROOT / "generator" / "templates" / "python" / "model_generic.mustache").read_text(encoding="utf-8")
         marker = "{{#vendorExtensions.x-py-model-imports}}\n{{{.}}}\n{{/vendorExtensions.x-py-model-imports}}\n"
-        expected = stock.replace(
-            marker,
+        expected = self.replace_once(
+            stock, marker,
             marker + "# PenniLogic: the ADR-015 Instant seam is type-mapped for date-time and is not a generated model, so its import is added by generator/templates/python (see docs/development.md#generator-templates).\n"
-            "from pennilogic_contracts.models.instant import Instant  # noqa: F401\n",
-        ).replace(
-            "    def {{{name}}}_validate_regular_expression(cls, value):\n",
+            "from pennilogic_contracts.models.instant import Instant  # noqa: F401\n"
+            "from pennilogic_contracts.models.local_date import LocalDate  # noqa: F401\n",
+        )
+        expected = self.replace_once(
+            expected, "    def {{{name}}}_validate_regular_expression(cls, value):\n",
             "    def {{{name}}}_validate_regular_expression(cls, value: Any) -> Any:  # PenniLogic: annotated for mypy --strict\n",
-        ).replace(
-            "    def {{{name}}}_validate_enum(cls, value):\n",
+        )
+        expected = self.replace_once(
+            expected, "    def {{{name}}}_validate_enum(cls, value):\n",
             "    def {{{name}}}_validate_enum(cls, value: Any) -> Any:  # PenniLogic: annotated for mypy --strict\n",
+        )
+        config = "    model_config = ConfigDict(\n        validate_by_name=True,\n        validate_by_alias=True,\n        validate_assignment=True,\n"
+        expected = self.replace_once(
+            expected, config,
+            config + "        # PenniLogic: ADR-015 s2.2 strict models; diagnostics never echo the offending value (s1.5, s5).\n        strict=True,\n        hide_input_in_errors=True,\n",
         )
         self.assertEqual(override, expected, "generator/templates/python/model_generic.mustache drifted from the pinned generator's template; re-apply the documented edits on the new stock template")
 
+    def test_kotlin_api_client_override_is_stock_plus_known_edits(self) -> None:
+        stock = self.stock("kotlin-client/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache")
+        override = (ROOT / "generator" / "templates" / "kotlin" / "libraries" / "jvm-ktor" / "infrastructure" / "ApiClient.kt.mustache").read_text(encoding="utf-8")
+        imports = "{{#jackson}}\nimport io.ktor.serialization.jackson.*\n"
+        expected = self.replace_once(
+            stock, imports,
+            "{{#kotlinx_serialization}}\n// PenniLogic: register the ADR-015 seams (Money, @Contextual instants and dates) on the client (generator/templates/kotlin).\n"
+            "import io.ktor.serialization.kotlinx.json.json\nimport {{packageName}}.serialization.PennilogicJson\n{{/kotlinx_serialization}}\n" + imports,
+        )
+        install = "                {{#jackson}}\n                  jackson { jsonBlock() }\n                {{/jackson}}\n"
+        expected = self.replace_once(expected, install, install + "                {{#kotlinx_serialization}}\n                  json(PennilogicJson.json)\n                {{/kotlinx_serialization}}\n")
+        self.assertEqual(override, expected, "generator/templates/kotlin/.../ApiClient.kt.mustache drifted from the pinned generator's template; re-apply the documented edits")
+
+    def test_kotlin_build_gradle_override_is_stock_plus_known_edits(self) -> None:
+        stock = self.stock("kotlin-client/build.gradle.mustache")
+        override = (ROOT / "generator" / "templates" / "kotlin" / "build.gradle.mustache").read_text(encoding="utf-8")
+        anchor = (
+            "    {{#jackson}}\n    implementation \"io.ktor:ktor-client-jackson:$ktor_version\"\n"
+            "    implementation \"io.ktor:ktor-serialization-jackson:$ktor_version\"\n    {{/jackson}}\n    {{/jvm-ktor}}\n"
+        )
+        expected = self.replace_once(
+            stock, anchor,
+            anchor.replace(
+                "    {{/jvm-ktor}}\n",
+                "    {{#kotlinx_serialization}}\n    // PenniLogic: converter for the ADR-015 seams registered by ApiClient (generator/templates/kotlin).\n"
+                "    implementation \"io.ktor:ktor-serialization-kotlinx-json:$ktor_version\"\n    {{/kotlinx_serialization}}\n    {{/jvm-ktor}}\n",
+            ),
+        )
+        self.assertEqual(override, expected, "generator/templates/kotlin/build.gradle.mustache drifted from the pinned generator's template; re-apply the documented edits")
+
+    def test_no_other_template_is_overridden(self) -> None:
+        overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
+        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache", "python/model_generic.mustache"])
 
 class DeterminismTest(unittest.TestCase):
     def test_verify_passes_on_the_committed_golden(self) -> None:

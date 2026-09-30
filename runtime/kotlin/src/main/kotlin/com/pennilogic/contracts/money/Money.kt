@@ -36,8 +36,12 @@ class MoneyWireException(val reason: MoneyReason, val field: String) :
 @Serializable(with = MoneySerializer::class)
 class Money private constructor(val minorUnits: Long, val currency: String) : Comparable<Money> {
 
-    /** Render the wire object; the amount is self-checked against the grammar and re-parsed. */
-    fun toWire(): MoneyWire {
+    /**
+     * Render the wire object; the amount is self-checked against the grammar and re-parsed. The raw
+     * shape is internal to the client (ADR-015 §1.1): only [MoneySerializer] puts it on the wire, and
+     * application code reads [minorUnits] and [currency].
+     */
+    internal fun toWire(): MoneyWire {
         val exponent = CurrencyRegistry.exponentOf(currency) ?: throw MoneyWireException(MoneyReason.CURRENCY_UNKNOWN, "currency")
         val amount = formatMinorUnits(minorUnits, exponent)
         check(minorUnitsFromCanonical(amount, exponent) == minorUnits) { "money destruction seam produced a non-canonical amount" }
@@ -123,9 +127,8 @@ class Money private constructor(val minorUnits: Long, val currency: String) : Co
     }
 }
 
-/** The raw wire shape; internal to the client package and produced only by [Money.toWire]. */
-@Serializable
-data class MoneyWire(val amount: String, val currency: String)
+/** The raw wire shape; internal to the client and produced only by [Money.toWire]. Deliberately not @Serializable: the only serializable money type is [Money]. */
+internal data class MoneyWire(val amount: String, val currency: String)
 
 /** The single construction and destruction seam between the wire object and [Money]. */
 object MoneySerializer : KSerializer<Money> {

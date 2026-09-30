@@ -5,8 +5,11 @@ const MONEY_REF = "#/components/schemas/Money";
 const AMOUNT_GRAMMAR = /^(0(\.[0-9]+)?|-?[1-9][0-9]*(\.[0-9]+)?|-0\.[0-9]*[1-9][0-9]*)$/;
 // A property name says money when one of its words is a money word and none of its words says the
 // value is a count, rate, code or name (fee_rate, total_count, currency_code are not money).
+// `unit`/`units` are deliberately not exclusion words: `amount_minor_units`, `balanceMinorUnits` and
+// `minor_units` are the int64 minor-unit shape ADR-015 s8 migrates away from and must be flagged;
+// a non-money `quantity_units` or `unit_count` has no money word and stays unflagged.
 const MONEY_WORDS = new Set(["amount", "amounts", "balance", "balances", "price", "prices", "fee", "fees", "total", "totals", "cost", "costs", "minor"]);
-const NOT_MONEY_WORDS = new Set(["count", "counts", "percent", "percentage", "rate", "rates", "ratio", "bps", "exponent", "scale", "digits", "name", "names", "code", "codes", "id", "ids", "type", "kind", "currency", "unit", "units", "label", "at", "date", "time"]);
+const NOT_MONEY_WORDS = new Set(["count", "counts", "percent", "percentage", "rate", "rates", "ratio", "bps", "exponent", "scale", "digits", "name", "names", "code", "codes", "id", "ids", "type", "kind", "currency", "label", "at", "date", "time"]);
 
 function words(name) {
   return String(name)
@@ -53,11 +56,30 @@ function mentionsMoney(value) {
   return JSON.stringify(value).includes(`"${MONEY_REF}"`);
 }
 
+/**
+ * True when `value` references Money directly or through any chain of local `$ref`s in the
+ * unresolved document (components.schemas, requestBodies, responses, parameters, headers), walking
+ * properties, items, additionalProperties, allOf/oneOf/anyOf, content and schema. Cycle-safe.
+ */
+function referencesMoney(value, document, visited = new Set()) {
+  if (Array.isArray(value)) return value.some((item) => referencesMoney(item, document, visited));
+  if (!value || typeof value !== "object") return false;
+  if (typeof value.$ref === "string") {
+    if (value.$ref === MONEY_REF) return true;
+    if (!value.$ref.startsWith("#/") || visited.has(value.$ref)) return false;
+    visited.add(value.$ref);
+    const target = value.$ref.slice(2).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
+      .reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), document);
+    return referencesMoney(target, document, visited);
+  }
+  return Object.values(value).some((item) => referencesMoney(item, document, visited));
+}
+
 function pathString(pathParts) {
   return pathParts.map((part) => (typeof part === "number" ? `[${part}]` : `.${part}`)).join("").replace(/^\./, "");
 }
 
 module.exports = {
   MONEY_REF, AMOUNT_GRAMMAR, HTTP_METHODS, SAFE_METHODS, MUTATING_METHODS, EXEMPTIONS,
-  registry, isMoneyRef, isMoneyName, mentionsMoney, pathString,
+  registry, isMoneyRef, isMoneyName, mentionsMoney, referencesMoney, pathString,
 };

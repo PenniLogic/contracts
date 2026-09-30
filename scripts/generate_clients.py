@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
-    BUILD, GENERATOR_DIR, LANGUAGES, REGISTRY, ROOT, RUNTIME_DIR, SPEC, PipelineError, fail, java_executable,
+    BUILD, GENERATOR_DIR, LANGUAGES, REGISTRY, ROOT, RUNTIME_DIR, SPEC, PipelineError, combined_digest, fail, java_executable,
     remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions,
 )
 from toolchain import ensure_installed  # noqa: E402
@@ -31,7 +31,7 @@ from toolchain import ensure_installed  # noqa: E402
 MANIFEST_NAME = "contracts-manifest.json"
 GOLDEN = GENERATOR_DIR / "golden.json"
 IGNORE_OVERRIDE = GENERATOR_DIR / "openapi-generator-ignore"
-TEMPLATE_DIRS = {"python": GENERATOR_DIR / "templates" / "python"}
+TEMPLATE_DIRS = {"python": GENERATOR_DIR / "templates" / "python", "kotlin": GENERATOR_DIR / "templates" / "kotlin"}
 TEXT_SUFFIXES = {".kt", ".kts", ".ts", ".py", ".md", ".json", ".txt", ".properties", ".gradle", ".toml", ".cfg", ".ini", ".yaml", ".yml", ".mustache"}
 
 
@@ -179,6 +179,23 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
     return manifest
 
 
+def golden_inconsistency(record: dict) -> str | None:
+    """Return why a golden record is internally inconsistent, or None.
+
+    The per-file map is not diagnostic only: its fold must reproduce the recorded tree digest, so a
+    committed golden file whose entries were edited independently is refused before any comparison.
+    """
+    files = record.get("files")
+    if not isinstance(files, dict) or not files:
+        return "generator/golden.json record has no per-file map; run python scripts/generate_clients.py --update-golden"
+    if len(files) != record.get("file_count"):
+        return f"generator/golden.json file_count {record.get('file_count')} does not match its {len(files)} per-file entries"
+    folded = combined_digest(files)
+    if folded != record.get("tree_sha256"):
+        return f"generator/golden.json per-file hashes fold to {folded}, not the recorded tree_sha256 {record.get('tree_sha256')}; the record was edited inconsistently"
+    return None
+
+
 def load_golden() -> dict:
     if not GOLDEN.is_file():
         return {}
@@ -207,6 +224,8 @@ def verify(languages: list[str], tools: dict, update_golden: bool) -> int:
             }
         elif record is None:
             problems.append(f"{language}: generator/golden.json has no entry; run python scripts/generate_clients.py --update-golden and commit it")
+        elif golden_inconsistency(record):
+            problems.append(f"{language}: {golden_inconsistency(record)}")
         elif record["tree_sha256"] != first["tree_sha256"]:
             golden_files = record.get("files", {})
             differing = sorted(p for p in set(golden_files) | set(current_files) if golden_files.get(p) != current_files.get(p))

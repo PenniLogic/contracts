@@ -10,6 +10,8 @@ export const ROOT: string = root;
 
 export interface MoneyWireFixture {
     readonly reason_order: readonly string[];
+    readonly parse_reason_order: readonly string[];
+    readonly parse_invalid: readonly { readonly name: string; readonly amount: string; readonly currency: string; readonly reason: string }[];
     readonly valid: readonly { readonly name: string; readonly wire: { readonly amount: string; readonly currency: string }; readonly minor_units: string }[];
     readonly invalid: readonly { readonly name: string; readonly wire: unknown; readonly reason: string; readonly field: string }[];
 }

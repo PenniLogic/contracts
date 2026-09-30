@@ -79,10 +79,15 @@ def tree_hash(root: Path, exclude: tuple[str, ...] = ()) -> tuple[str, list[tupl
         if relative in exclude:
             continue
         entries.append((relative, sha256_file(path)))
+    return combined_digest(dict(entries)), entries
+
+
+def combined_digest(files: dict[str, str]) -> str:
+    """Fold per-file digests into the tree digest; the same fold everywhere so a recorded map can be re-verified."""
     combined = hashlib.sha256()
-    for relative, digest in entries:
-        combined.update(f"{digest}  {relative}\n".encode("utf-8"))
-    return combined.hexdigest(), entries
+    for relative in sorted(files):
+        combined.update(f"{files[relative]}  {relative}\n".encode("utf-8"))
+    return combined.hexdigest()
 
 
 def node_executable() -> str:

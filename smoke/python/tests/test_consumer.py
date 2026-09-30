@@ -65,8 +65,13 @@ class EnvelopeTest(unittest.TestCase):
         self.assertEqual(envelope_to_wire(envelope), wire)
 
     def test_envelope_rejects_float_money(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             envelope_from_wire({"total": {"amount": -1234.56, "currency": "INR"}, "recorded_at": "2026-09-30T04:52:08.439Z"})
+        self.assertNotIn("1234.56", str(caught.exception))
+
+    def test_envelope_round_trips_a_date_only_fact(self) -> None:
+        wire = {"total": {"amount": "0.00", "currency": "INR"}, "recorded_at": "2026-09-30T04:52:08.439Z", "booked_on": "2026-09-30"}
+        self.assertEqual(envelope_to_wire(envelope_from_wire(wire)), wire)
 
 
 if __name__ == "__main__":

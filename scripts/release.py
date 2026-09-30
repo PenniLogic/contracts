@@ -41,14 +41,20 @@ DIST = BUILD / "dist"
 GENERATED = BUILD / "generated"
 
 
-def git_output(*args: str) -> str:
-    completed = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, check=False)
+def git_output(*args: str, cwd: Path = ROOT) -> str:
+    completed = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         raise PipelineError(f"git {' '.join(args)} failed: {completed.stderr.strip()}")
     return completed.stdout.strip()
 
 
-def preconditions(version: str, dry_run: bool, allow_branch: bool) -> str:
+def published_main(remote: str, cwd: Path = ROOT) -> str:
+    """Fetch the remote's main and return its commit; the release must be built from exactly that commit."""
+    git_output("fetch", "--quiet", remote, "main", cwd=cwd)
+    return git_output("rev-parse", f"{remote}/main", cwd=cwd)
+
+
+def preconditions(version: str, dry_run: bool, allow_branch: bool, remote: str = "origin") -> str:
     if not SEMVER.match(version):
         raise PipelineError(f"--version must be MAJOR.MINOR.PATCH, got {version!r}")
     declared = spec_version()
@@ -65,6 +71,17 @@ def preconditions(version: str, dry_run: bool, allow_branch: bool) -> str:
         if not dry_run:
             raise PipelineError(f"HEAD is on {branch!r}; releases are cut from main (or pass --allow-branch deliberately)")
         print(f"warning: HEAD is on {branch!r} (allowed for --dry-run only)")
+    if not allow_branch:
+        # A local main with an unpushed commit passes the branch-name check; only the reviewed, merged
+        # commit on the remote may be tagged, so HEAD must equal <remote>/main after a fetch.
+        published = published_main(remote) if not dry_run else None
+        if dry_run:
+            print(f"dry run: the HEAD == {remote}/main requirement is enforced when tagging, not here")
+        if published is not None and published != head:
+            raise PipelineError(
+                f"HEAD {head[:12]} is not {remote}/main ({published[:12]}); a release is cut only from the merged, reviewed commit on {remote}. "
+                "Pull or reset to it (or pass --allow-branch deliberately for a non-main release)."
+            )
     tag = f"v{version}"
     if git_output("tag", "--list", tag):
         raise PipelineError(f"tag {tag} already exists locally; a published version is immutable, publish a new version instead")
@@ -197,7 +214,7 @@ def main() -> int:
     if args.skip_checks and not args.dry_run:
         return fail("--skip-checks is allowed with --dry-run only")
     try:
-        head = preconditions(args.version, args.dry_run, args.allow_branch)
+        head = preconditions(args.version, args.dry_run, args.allow_branch, args.remote)
         if not args.skip_checks:
             run_checks()
         mtime = args.source_date_epoch if args.source_date_epoch is not None else int(git_output("show", "-s", "--format=%ct", "HEAD"))

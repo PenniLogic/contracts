@@ -11,6 +11,7 @@ import json
 {{/vendorExtensions.x-py-model-imports}}
 # PenniLogic: the ADR-015 Instant seam is type-mapped for date-time and is not a generated model, so its import is added by generator/templates/python (see docs/development.md#generator-templates).
 from pennilogic_contracts.models.instant import Instant  # noqa: F401
+from pennilogic_contracts.models.local_date import LocalDate  # noqa: F401
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -198,6 +199,9 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
         validate_by_name=True,
         validate_by_alias=True,
         validate_assignment=True,
+        # PenniLogic: ADR-015 s2.2 strict models; diagnostics never echo the offending value (s1.5, s5).
+        strict=True,
+        hide_input_in_errors=True,
 {{#compatibleWithPythonLegacy}}
 {{!
 python-legacy generated explicit constructor parameters, so unknown kwargs failed:

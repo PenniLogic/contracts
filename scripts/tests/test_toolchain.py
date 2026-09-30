@@ -5,7 +5,10 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from support import ROOT
@@ -84,6 +87,39 @@ class DownloadRefusalTest(unittest.TestCase):
         with mock.patch.object(toolchain.urllib.request, "urlopen", return_value=response):
             self.assertEqual(toolchain.download("https://example.invalid/tool.jar", pl_contracts.sha256_bytes(payload)), payload)
 
+    def test_tampered_cached_oasdiff_binary_is_refused(self) -> None:
+        """Works on a copy of the cache in a temp directory; the shared .toolchain/ is never modified."""
+        pins = pl_contracts.versions()
+        real_jar = toolchain.generator_jar_path(pins)
+        if not real_jar.is_file():
+            self.skipTest("generator jar not installed; run python scripts/toolchain.py install")
+        cache = Path(tempfile.mkdtemp(prefix="pl-toolchain-"))
+        self.addCleanup(shutil.rmtree, cache, True)
+        shutil.copyfile(real_jar, toolchain.generator_jar_path(pins, cache))
+        binary = toolchain.oasdiff_path(pins, cache)
+        payload = b"not a real oasdiff, but the digest logic does not care"
+        binary.write_bytes(payload)
+        expected = pins["oasdiff"]["assets"][toolchain.platform_key()]["sha256"]
+        toolchain._marker(binary).write_text(json.dumps({"tarball_sha256": expected, "binary_sha256": pl_contracts.sha256_bytes(payload)}), encoding="utf-8")
+        self.assertTrue(toolchain._oasdiff_verified(binary, expected))
+        toolchain.verify(pins, cache)
+        # Marker intact, binary changed: refused, exactly like a tampered jar.
+        binary.write_bytes(payload + b"\0")
+        self.assertFalse(toolchain._oasdiff_verified(binary, expected))
+        with self.assertRaises(pl_contracts.PipelineError) as caught:
+            toolchain.verify(pins, cache)
+        self.assertIn("does not match the SHA-256 recorded at install", str(caught.exception))
+        # Binary intact, marker naming another tarball: refused.
+        binary.write_bytes(payload)
+        self.assertFalse(toolchain._oasdiff_verified(binary, "0" * 64))
+        # A legacy or unparsable marker is refused rather than trusted.
+        toolchain._marker(binary).write_text(expected + "\n", encoding="utf-8")
+        self.assertFalse(toolchain._oasdiff_verified(binary, expected))
+        # The real cache records the real binary's digest.
+        real_marker = toolchain._marker(toolchain.oasdiff_path(pins))
+        if real_marker.is_file():
+            record = json.loads(real_marker.read_text(encoding="utf-8"))
+            self.assertEqual(record["binary_sha256"], pl_contracts.sha256_file(toolchain.oasdiff_path(pins)))
     def test_verify_reports_missing_tools_actionably(self) -> None:
         pins = json.loads(json.dumps(pl_contracts.versions()))
         pins["openapi_generator"]["version"] = "0.0.0-absent"

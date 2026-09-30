@@ -13,10 +13,12 @@
   },
   "typeMappings": {
     "Money": "Money",
-    "DateTime": "Instant"
+    "DateTime": "Instant",
+    "date": "LocalDate"
   },
   "importMappings": {
     "Money": "./Money",
-    "Instant": "./Instant"
+    "Instant": "./Instant",
+    "LocalDate": "./LocalDate"
   }
 }

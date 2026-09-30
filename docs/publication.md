@@ -10,7 +10,8 @@ A contract version is an **immutable annotated git tag** `vMAJOR.MINOR.PATCH` on
 whose commit contains, at that tag:
 
 - `spec/openapi.yaml` with `info.version` equal to the tag version;
-- `spec/currency-registry.v1.json` and `spec/fixtures/*.json`;
+- `spec/currency-registry.v1.json` and `spec/fixtures/*.json` (the hand-written money and instant
+  vectors and the seeded `money-roundtrip-generated.v1.json`, ADR-015 §7);
 - the committed generator configuration (`generator/*.json`, `generator/openapi-generator-ignore`,
   `generator/templates/`), the runtime seams (`runtime/`) and the generator lock
   (`toolchain/versions.json`: generator version and jar SHA-256; `generator/golden.json`: SHA-256 of
@@ -23,7 +24,8 @@ A GitHub Release with the same tag carries, for convenience and audit: the speci
 and generated-tree SHA-256) and `SHA256SUMS`.
 
 A tag or Release is never moved, deleted or re-uploaded with different bytes. A mistake is fixed by
-publishing the next version.
+publishing the next version. Until the owner adds a repository ruleset for `refs/tags/v*` (creation
+allowed; update and deletion blocked), this immutability is procedural.
 
 ### How a version is published
 
@@ -35,8 +37,9 @@ python scripts/release.py --version X.Y.Z --dry-run   # builds build/dist/vX.Y.Z
 python scripts/release.py --version X.Y.Z             # re-runs every CI command, tags, pushes the tag, creates the Release
 ```
 
-The script refuses a dirty tree, a non-`main` HEAD, a version that differs from `info.version` or a
-tag that already exists, and re-runs the full CI command list before building. Archives are
+The script refuses a dirty tree, a non-`main` HEAD, a HEAD that is not the commit `origin/main`
+carries after a fetch (an unpushed local commit is never tagged), a version that differs from
+`info.version` or a tag that already exists, and re-runs the full CI command list before building. Archives are
 deterministic (sorted entries, commit time as mtime, numeric owner 0), so a second run from the
 same commit reproduces every digest in `SHA256SUMS`. Record the tag, commit and digests on the
 ticket that published the version.

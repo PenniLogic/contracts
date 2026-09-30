@@ -11,16 +11,23 @@ from pydantic import BaseModel, ConfigDict
 from pennilogic_contracts import ApiClient, Configuration
 from pennilogic_contracts.models import ProblemDetail
 from pennilogic_contracts.models.instant import Instant
+from pennilogic_contracts.models.local_date import LocalDate
 from pennilogic_contracts.models.money import Money
 
 
 class SyntheticEnvelope(BaseModel):
-    """What a generated Money-bearing model looks like: the wrapper types are the field types (ADR-015 §2)."""
+    """What a generated Money-bearing model looks like: the wrapper types are the field types (ADR-015 §2).
 
-    model_config = ConfigDict(strict=True)
+    `strict` and `hide_input_in_errors` mirror the generated model_config (generator/templates/python):
+    a consumer that logs a ValidationError verbatim, or structured through `errors(include_input=False)`,
+    never logs an amount.
+    """
+
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
 
     total: Money
     recorded_at: Instant
+    booked_on: LocalDate | None = None
     note: str | None = None
 
 

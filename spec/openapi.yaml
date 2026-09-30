@@ -24,6 +24,7 @@ servers:
 x-pennilogic-contract-metadata:
   currency_registry: currency-registry.v1.json
   money_wire_fixtures: fixtures/money-wire-fixtures.v1.json
+  money_roundtrip_fixtures: fixtures/money-roundtrip-generated.v1.json
   instant_wire_fixtures: fixtures/instant-wire-fixtures.v1.json
   idempotency_key_lifetime: P30D
   client_retry_horizon: P14D
@@ -81,6 +82,11 @@ components:
         It carries a machine-readable `code` (vocabulary owned by T-CON-12), a correlation identifier
         and field names; it never carries a monetary value, an offending input value, a stored
         response or raw message content (ADR-015 §1.5, §4.4, §5).
+
+        Boundary: this component publishes the basics only. T-CON-12 (PenniLogic/contracts#16) owns
+        the `code` vocabulary and extends this shape additively (for example the idempotency-key
+        member of ADR-015 §4.4 item 4); it never redefines an existing member, and making an optional
+        member required is a breaking change that the breaking-change check flags.
       required: [type, title, status]
       properties:
         type:

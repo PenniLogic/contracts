@@ -1,5 +1,5 @@
 "use strict";
-const { EXEMPTIONS, mentionsMoney } = require("./_shared");
+const { EXEMPTIONS, referencesMoney } = require("./_shared");
 
 const KEY_REF = "#/components/parameters/IdempotencyKey";
 
@@ -23,9 +23,11 @@ module.exports = function mutatingOperationIdempotency(targetVal, _options, cont
         path: [...context.path, "x-idempotency"],
       });
     }
-    if (mentionsMoney(targetVal) || mentionsMoney(pathItem.parameters || [])) {
+    // Money may hide behind any chain of $refs (requestBody -> Entry -> Money); the walk follows them.
+    const document = context.document.data;
+    if (referencesMoney(targetVal, document) || referencesMoney(pathItem.parameters || [], document)) {
       results.push({
-        message: `${where}: an operation whose request or response carries Money can never be exempt from the Idempotency-Key requirement (ADR-015 §4.1)`,
+        message: `${where}: an operation whose request or response carries Money (directly or through referenced schemas) can never be exempt from the Idempotency-Key requirement (ADR-015 §4.1)`,
         path: [...context.path, "x-idempotency"],
       });
     }

@@ -57,6 +57,15 @@ test('every invalid vector is rejected with exactly the fixture reason and field
     }
 });
 
+test('parse checks in the shared order with the digit bound first', () => {
+    assert.deepEqual([...fixture.parse_reason_order], ['grammar', 'currency_unknown', 'scale_mismatch', 'out_of_range']);
+    for (const vector of fixture.parse_invalid) {
+        const outcome = reasonOf(() => Money.parse(vector.amount, vector.currency));
+        assert.equal(outcome.reason, vector.reason, vector.name);
+    }
+    assert.equal(reasonOf(() => Money.fromWire({ amount: '9'.repeat(5003), currency: 'JPY' })).reason, 'out_of_range');
+});
+
 test('rejections never echo the offending value', () => {
     try {
         Money.fromWire({ amount: '1234.567', currency: 'INR' });

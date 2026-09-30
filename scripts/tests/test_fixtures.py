@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unittest
 from datetime import datetime, timezone
 
-from support import REGISTRY, ROOT
+from support import REGISTRY, ROOT, run_script
 
 FIXTURES = ROOT / "spec" / "fixtures"
 GRAMMAR = re.compile(r"^(0(\.[0-9]+)?|-?[1-9][0-9]*(\.[0-9]+)?|-0\.[0-9]*[1-9][0-9]*)$")
@@ -71,6 +72,40 @@ class MoneyFixtureTest(unittest.TestCase):
         self.assertIn(("JPY", "-9223372036854775808"), invalid)
         self.assertIn(("INR", "-0.00"), invalid)
 
+
+class RoundTripFixtureTest(unittest.TestCase):
+    fixture = load("money-roundtrip-generated.v1.json")
+
+    def test_committed_file_equals_the_generator_output(self) -> None:
+        completed = run_script("generate_money_fixtures.py", "--check")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_header_and_rows_are_consistent(self) -> None:
+        rows = self.fixture["values"]
+        self.assertEqual(len(rows), self.fixture["count"])
+        self.assertGreaterEqual(self.fixture["generated_count"], 10_000)
+        self.assertEqual(self.fixture["boundary_count"], len([r for r in rows if "name" in r]))
+        exponents = {e["code"]: e["exponent"] for e in json.loads(REGISTRY.read_text(encoding="utf-8"))["currencies"]}
+        digest = hashlib.sha256()
+        for row in rows:
+            amount, currency = row["wire"]["amount"], row["wire"]["currency"]
+            self.assertIsNotNone(GRAMMAR.fullmatch(amount))
+            fraction = amount.split(".")[1] if "." in amount else ""
+            self.assertEqual(len(fraction), exponents[currency])
+            minor = int(amount.replace(".", "").replace("-", "")) * (-1 if amount.startswith("-") else 1)
+            self.assertEqual(str(minor), row["minor_units"])
+            self.assertLessEqual(abs(minor), 2**63 - 1)
+            digest.update(f"{amount}|{currency}|{row['minor_units']}\n".encode("ascii"))
+        self.assertEqual(digest.hexdigest(), self.fixture["round_trip_sha256"])
+        self.assertEqual({r["wire"]["currency"] for r in rows}, set(exponents))
+
+    def test_generator_is_deterministic_and_seed_sensitive(self) -> None:
+        import generate_money_fixtures as gmf
+        self.assertEqual(gmf.render(), gmf.render())
+        self.assertNotEqual(gmf.render(seed=gmf.SEED + 1), gmf.render())
+        # Reference vectors of the published SplitMix64 algorithm (seed 0): any language can reproduce the stream.
+        rng = gmf.SplitMix64(0)
+        self.assertEqual([rng.next() for _ in range(2)], [0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4])
 
 class InstantFixtureTest(unittest.TestCase):
     fixture = load("instant-wire-fixtures.v1.json")

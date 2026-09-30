@@ -34,6 +34,7 @@ MONEY_CONTEXT: Final = decimal.Context(
     ],
 )
 MAX_MINOR_UNITS: Final = 2**63 - 1
+_MAX_DIGITS: Final = 19  # len(str(MAX_MINOR_UNITS)); a longer digit string is out of range before any conversion
 REASONS: Final = ("shape", "number_not_string", "grammar", "currency_unknown", "scale_mismatch", "out_of_range")
 _GRAMMAR: Final = re.compile(r"^(0(\.[0-9]+)?|-?[1-9][0-9]*(\.[0-9]+)?|-0\.[0-9]*[1-9][0-9]*)$", re.ASCII)
 _MEMBERS: Final = ("amount", "currency")
@@ -66,7 +67,10 @@ def _minor_units_from_canonical(amount: str, exponent: int) -> int:
     integer_part, _, fraction = unsigned.partition(".")
     if len(fraction) != exponent:
         raise MoneyWireError("scale_mismatch", "amount")
-    magnitude = int(integer_part + fraction)
+    digits = integer_part + fraction
+    if len(digits) > _MAX_DIGITS:  # bounded before int(): the same reason in every language, and never a foreign ValueError
+        raise MoneyWireError("out_of_range", "amount")
+    magnitude = int(digits)
     if magnitude > MAX_MINOR_UNITS:
         raise MoneyWireError("out_of_range", "amount")
     return -magnitude if negative else magnitude
@@ -96,9 +100,14 @@ class Money:
 
     @classmethod
     def parse(cls, amount: str, currency: str) -> Money:
-        """Construct from a canonical amount string; non-str input is a programming error (TypeError)."""
+        """Construct from a canonical amount string; non-str input is a programming error (TypeError).
+
+        Checks run in the ADR-015 §1.5 order shared by every language: grammar, currency, scale, range.
+        """
         if type(amount) is not str:
             raise TypeError("Money.parse takes the canonical decimal string; floats and numbers are refused (ADR-015)")
+        if not _GRAMMAR.fullmatch(amount):
+            raise MoneyWireError("grammar", "amount")
         exponent = _exponent(currency)
         return cls(_minor_units_from_canonical(amount, exponent), currency)
 
@@ -160,6 +169,13 @@ class Money:
 
     @property
     def amount(self) -> decimal.Decimal:
+        """The value in major units as a `Decimal` at the registry scale, for display and fixtures only.
+
+        Outside the seam the default decimal context applies, so arithmetic on this value can round
+        silently and an ordering against a float returns a result instead of raising. Application code
+        keeps money inside `Money` (ADR-015 §2: a bare Decimal outside the class is forbidden) and uses
+        `minor_units`/`currency` or `to_wire()`; the ai-service money lint covers `.amount` uses.
+        """
         return self._amount
 
     # -- value semantics: equality and same-currency ordering only ---------------------------------

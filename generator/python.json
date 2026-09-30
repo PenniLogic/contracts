@@ -10,10 +10,12 @@
   },
   "typeMappings": {
     "Money": "Money",
-    "DateTime": "Instant"
+    "DateTime": "Instant",
+    "date": "LocalDate"
   },
   "importMappings": {
     "Money": "pennilogic_contracts.models.money.Money",
-    "Instant": "pennilogic_contracts.models.instant.Instant"
+    "Instant": "pennilogic_contracts.models.instant.Instant",
+    "LocalDate": "pennilogic_contracts.models.local_date.LocalDate"
   }
 }
