@@ -1,0 +1,22 @@
+{
+  "generatorName": "typescript-fetch",
+  "additionalProperties": {
+    "npmName": "@pennilogic/contracts",
+    "supportsES6": true,
+    "importFileExtension": ".js",
+    "typescriptThreePlus": true,
+    "sortParamsByRequiredFlag": true,
+    "sortModelPropertiesByRequiredFlag": true,
+    "ensureUniqueParams": true,
+    "stringEnums": true,
+    "withoutRuntimeChecks": false
+  },
+  "typeMappings": {
+    "Money": "Money",
+    "DateTime": "Instant"
+  },
+  "importMappings": {
+    "Money": "./Money",
+    "Instant": "./Instant"
+  }
+}

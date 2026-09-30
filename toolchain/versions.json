@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "description": "Exact pins for every tool the contracts pipeline downloads or invokes. Binaries are verified by SHA-256 before use and refused on mismatch. Node packages are pinned by package-lock.json integrity; Python packages by smoke/python/requirements.txt hashes; Gradle by the wrapper distributionSha256Sum and the wrapper jar hash below.",
+  "openapi_generator": {
+    "version": "7.25.0",
+    "url": "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.25.0/openapi-generator-cli-7.25.0.jar",
+    "sha256": "41ce4f6b07f196676439d710759fa1ced7a08066d06ff1bf314681470289efae",
+    "why": "One generator for all three targets (kotlin jvm-ktor + kotlinx.serialization, typescript-fetch, python pydantic v2) so a version bump is one reviewed change; supports type/import mappings that substitute the hand-written Money and Instant seams for the raw wire shapes; OpenAPI 3.1 input."
+  },
+  "oasdiff": {
+    "version": "1.32.1",
+    "assets": {
+      "linux_amd64": {
+        "url": "https://github.com/oasdiff/oasdiff/releases/download/v1.32.1/oasdiff_1.32.1_linux_amd64.tar.gz",
+        "sha256": "7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f"
+      },
+      "windows_amd64": {
+        "url": "https://github.com/oasdiff/oasdiff/releases/download/v1.32.1/oasdiff_1.32.1_windows_amd64.tar.gz",
+        "sha256": "4d0758b32d454e6011e59db93884af1ca27ae2b212d990f36738ea5efb5d7f28"
+      }
+    },
+    "why": "Purpose-built OpenAPI breaking-change classifier with stable change identifiers, a single static binary and no service dependency."
+  },
+  "spectral": {
+    "version": "6.16.3",
+    "pinned_by": "package-lock.json",
+    "why": "OpenAPI 3.1 aware linter with a committed ruleset and custom functions for the ADR-015 money, time and idempotency rules."
+  },
+  "typescript": {
+    "version": "7.0.2",
+    "pinned_by": "package-lock.json"
+  },
+  "gradle": {
+    "version": "9.8.0",
+    "distribution_sha256": "bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c",
+    "wrapper_jar_sha256": "238e777fcddd7e34f9708186085def2abd6e08e658505b38718d79d74c21abd5",
+    "pinned_by": "smoke/kotlin/gradle/wrapper/gradle-wrapper.properties"
+  },
+  "kotlin": {
+    "version": "2.4.20",
+    "kotlinx_serialization": "1.11.0",
+    "kotlinx_coroutines": "1.11.0",
+    "ktor": "3.6.0",
+    "pinned_by": "smoke/kotlin/build.gradle.kts"
+  },
+  "python": {
+    "pinned_by": "smoke/python/requirements.txt"
+  }
+}

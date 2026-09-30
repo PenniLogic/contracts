@@ -1,0 +1,229 @@
+# Committed lint ruleset for spec/openapi.yaml (Spectral 6, OpenAPI 3.1).
+# Every rule below fails the pipeline (scripts/lint_spec.py runs with --fail-severity warn).
+# The ADR-015 rules bind the shared money, time and idempotency components; see docs/development.md#lint.
+extends:
+  - [spectral:oas, recommended]
+formats:
+  - oas3_1
+functionsDir: ./spectral-functions
+functions:
+  - bindingFragment
+  - moneyBearingProperties
+  - noJsonNumber
+  - mutatingOperationIdempotency
+  - safeMethodNoIdempotencyKey
+  - operationSecurity
+  - moneyExampleScale
+  - problemDetailNoMoney
+rules:
+  # The shared components are a library consumed by contract expansion tickets and by every
+  # generated client; the document intentionally publishes them before any operation references them.
+  oas3-unused-component: off
+  # Everything Spectral recommends is an error here, not a warning.
+  info-contact: error
+  info-description: error
+  oas3-api-servers: error
+  oas3-server-trailing-slash: error
+  oas3-valid-schema-example: error
+  oas3-valid-media-example: error
+  oas3-schema: error
+  operation-description: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-operationId-valid-in-url: error
+  operation-parameters: error
+  operation-success-response: error
+  operation-tags: error
+  operation-tag-defined: error
+  path-declarations-must-exist: error
+  path-keys-no-trailing-slash: error
+  path-not-include-query: error
+  path-params: error
+  duplicated-entry-in-enum: error
+  no-eval-in-markdown: error
+  no-script-tags-in-markdown: error
+  typed-enum: error
+  array-items: error
+  oas3-examples-value-or-externalValue: error
+  oas3-operation-security-defined: error
+  oas3-parameter-description: error
+  openapi-tags: off
+
+  pl-info-version-semver:
+    description: info.version is the published contract version and must be a plain semantic version (the release tag is v<version>).
+    message: "info.version must match MAJOR.MINOR.PATCH (found {{value}})"
+    severity: error
+    given: $.info.version
+    then:
+      function: pattern
+      functionOptions:
+        match: "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+
+  pl-money-component-binding:
+    description: components.schemas.Money carries exactly the ADR-015 §1.1 shape (type, additionalProperties, required members, property types, patterns and lengths); descriptions and examples may be added.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.schemas
+    then:
+      - field: Money
+        function: defined
+      - field: Money
+        function: bindingFragment
+        functionOptions:
+          name: Money
+          fragment:
+            type: object
+            additionalProperties: false
+            required: [amount, currency]
+            properties:
+              amount:
+                type: string
+                pattern: '^(0(\.[0-9]+)?|-?[1-9][0-9]*(\.[0-9]+)?|-0\.[0-9]*[1-9][0-9]*)$'
+                maxLength: 21
+              currency:
+                type: string
+                pattern: '^[A-Z]{3}$'
+
+  pl-instant-component-binding:
+    description: components.schemas.Instant carries exactly the ADR-015 §3.1 shape.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.schemas
+    then:
+      - field: Instant
+        function: defined
+      - field: Instant
+        function: bindingFragment
+        functionOptions:
+          name: Instant
+          fragment:
+            type: string
+            format: date-time
+            pattern: '^(000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\.[0-9]{3}Z$'
+            minLength: 24
+            maxLength: 24
+
+  pl-timezone-component-binding:
+    description: components.schemas.TimeZone carries exactly the ADR-015 §3.1 shape.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.schemas
+    then:
+      - field: TimeZone
+        function: defined
+      - field: TimeZone
+        function: bindingFragment
+        functionOptions:
+          name: TimeZone
+          fragment:
+            type: string
+            pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'
+            maxLength: 64
+
+  pl-idempotency-key-parameter-binding:
+    description: components.parameters.IdempotencyKey carries exactly the ADR-015 §4.2 shape (required header, lowercase UUID v4 pattern).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.parameters
+    then:
+      - field: IdempotencyKey
+        function: defined
+      - field: IdempotencyKey
+        function: bindingFragment
+        functionOptions:
+          name: IdempotencyKey
+          fragment:
+            name: Idempotency-Key
+            in: header
+            required: true
+            schema:
+              type: string
+              pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+
+  pl-idempotent-replayed-header-binding:
+    description: components.headers.IdempotentReplayed carries exactly the ADR-015 §4.2 shape.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.headers
+    then:
+      - field: IdempotentReplayed
+        function: defined
+      - field: IdempotentReplayed
+        function: bindingFragment
+        functionOptions:
+          name: IdempotentReplayed
+          fragment:
+            schema:
+              type: boolean
+
+  pl-money-bearing-property-references-money:
+    description: A property whose name says money (amount, balance, price, fee, total, cost, minor units) must be `$ref: '#/components/schemas/Money'`; never a bare string or a JSON number (ADR-015 §1.1). A non-money property with such a name declares `x-not-money` with a reason.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $..properties
+    then:
+      function: moneyBearingProperties
+
+  pl-no-json-number:
+    description: JSON numbers never carry money or exact decimals; `type: number` and `format: float`/`double` are refused everywhere (ADR-015 §1.6; constitution). Counts and status codes use `type: integer` without a floating-point format.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given:
+      - $..type
+      - $..format
+    then:
+      function: noJsonNumber
+
+  pl-mutating-operation-idempotency:
+    description: Every POST, PUT, PATCH and DELETE operation references the IdempotencyKey parameter or declares a reasoned `x-idempotency` exemption (not-applicable, per-item, provider-event, auth); a Money-bearing operation is never exempt (ADR-015 §4.1).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.paths[*][post,put,patch,delete]
+    then:
+      function: mutatingOperationIdempotency
+
+  pl-safe-method-no-idempotency-key:
+    description: The Idempotency-Key header is ignored on safe methods and must not be declared on GET, HEAD, OPTIONS or TRACE, directly or at path level (ADR-015 §4.1).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.paths[*]
+    then:
+      function: safeMethodNoIdempotencyKey
+
+  pl-operation-security:
+    description: Every operation carries a security requirement, at operation level or through a root-level `security` (ADR-019 §16 root DPoP scheme, owned by contracts#1).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.paths[*][get,put,post,delete,options,head,patch,trace]
+    then:
+      function: operationSecurity
+
+  pl-money-example-registry-scale:
+    description: Every Money example carries a registry currency and exactly the registry exponent of fraction digits (ADR-015 §1.2, §1.4).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given:
+      - $..examples[*]
+      - $..example
+    then:
+      function: moneyExampleScale
+
+  pl-problem-detail-no-money:
+    description: ProblemDetail never carries a monetary value (ADR-015 §4.4, §5).
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $.components.schemas.ProblemDetail
+    then:
+      function: problemDetailNoMoney
