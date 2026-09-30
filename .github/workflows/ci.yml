@@ -24,7 +24,7 @@
     "ci": {
       "name": "CI",
       "runs-on": "ubuntu-24.04",
-      "timeout-minutes": 10,
+      "timeout-minutes": 30,
       "steps": [
         {
           "name": "Checkout",
@@ -42,8 +42,23 @@
           }
         },
         {
+          "name": "Node",
+          "uses": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+          "with": {
+            "node-version-file": ".nvmrc"
+          }
+        },
+        {
+          "name": "JDK",
+          "uses": "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
+          "with": {
+            "distribution": "temurin",
+            "java-version": "21"
+          }
+        },
+        {
           "name": "Run checks",
-          "run": "python scripts/check_repository.py"
+          "run": "python scripts/check_repository.py\nnpm ci --no-audit --no-fund\npython scripts/toolchain.py install\npython scripts/lint_spec.py\npython scripts/check_breaking_changes.py\npython scripts/generate_clients.py --verify\npython scripts/smoke.py python\npython scripts/smoke.py typescript\npython scripts/smoke.py kotlin\npython -m unittest discover -s scripts/tests -p \"test_*.py\""
         }
       ]
     }

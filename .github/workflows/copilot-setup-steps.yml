@@ -14,7 +14,7 @@
     "copilot-setup-steps": {
       "name": "Copilot setup",
       "runs-on": "ubuntu-24.04",
-      "timeout-minutes": 10,
+      "timeout-minutes": 30,
       "steps": [
         {
           "name": "Checkout",
@@ -32,8 +32,27 @@
           }
         },
         {
+          "name": "Node",
+          "uses": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+          "with": {
+            "node-version-file": ".nvmrc"
+          }
+        },
+        {
+          "name": "JDK",
+          "uses": "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
+          "with": {
+            "distribution": "temurin",
+            "java-version": "21"
+          }
+        },
+        {
           "name": "Verify repository",
           "run": "python scripts/check_repository.py"
+        },
+        {
+          "name": "Install dependencies",
+          "run": "npm ci --no-audit --no-fund\npython scripts/toolchain.py install"
         },
         {
           "name": "Install managed hook",
