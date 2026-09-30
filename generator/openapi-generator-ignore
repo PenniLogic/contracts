@@ -1,0 +1,10 @@
+# Files openapi-generator must not write into any client output (applied to every target).
+# Publishing helpers and third-party CI definitions never ship to consumers; generated test stubs
+# are replaced by the smoke consumers under smoke/.
+git_push.sh
+.travis.yml
+.gitlab-ci.yml
+.github/
+.github/**
+tox.ini
+test-requirements.txt

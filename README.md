@@ -3,7 +3,7 @@
 
 Versioned API contracts and shared schemas.
 
-**Status:** Repository foundation only. Contract generation and publishing are not implemented.
+**Status:** Repository foundation plus the OpenAPI lint, deterministic client-generation, breaking-change and tag-publication scaffold from PenniLogic/contracts#2; no product endpoints, registry publication credentials or published version tags are implemented.
 
 This repository belongs to the new public, Free-plan `PenniLogic` organization.
 `migration-source.json` records the pinned source snapshot and excluded history.
@@ -15,7 +15,19 @@ The old private repositories, unmerged branches and discussions remain in
 ```text
 python scripts/setup.py
 python scripts/check_repository.py
+npm ci --no-audit --no-fund
+python scripts/toolchain.py install
+python scripts/lint_spec.py
+python scripts/check_breaking_changes.py
+python scripts/generate_clients.py --verify
+python scripts/smoke.py python
+python scripts/smoke.py typescript
+python scripts/smoke.py kotlin
+python -m unittest discover -s scripts/tests -p "test_*.py"
 ```
+
+Repository-specific setup, commands and troubleshooting are maintained by hand in
+[docs/development.md](docs/development.md); that guide is not generated.
 
 See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 Product specifications and the preserved backlog are in

@@ -1,0 +1,21 @@
+{
+  "generatorName": "python",
+  "additionalProperties": {
+    "packageName": "pennilogic_contracts",
+    "projectName": "pennilogic-contracts",
+    "library": "urllib3",
+    "sortParamsByRequiredFlag": true,
+    "sortModelPropertiesByRequiredFlag": true,
+    "ensureUniqueParams": true
+  },
+  "typeMappings": {
+    "Money": "Money",
+    "DateTime": "Instant",
+    "date": "LocalDate"
+  },
+  "importMappings": {
+    "Money": "pennilogic_contracts.models.money.Money",
+    "Instant": "pennilogic_contracts.models.instant.Instant",
+    "LocalDate": "pennilogic_contracts.models.local_date.LocalDate"
+  }
+}

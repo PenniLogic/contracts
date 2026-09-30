@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "decision": "ADR-015 §3.1",
+  "description": "Instant wire vectors consumed unchanged by every language seam. A valid instant re-formats to exactly its input. Reasons: `shape` (not a JSON string), `grammar` (not the 24-character form), `calendar` (grammar passes but the date does not exist). All values are synthetic.",
+  "reason_order": ["shape", "grammar", "calendar"],
+  "valid": [
+    { "name": "reference", "wire": "2026-09-30T04:52:08.439Z", "epoch_millis": "1790743928439" },
+    { "name": "epoch", "wire": "1970-01-01T00:00:00.000Z", "epoch_millis": "0" },
+    { "name": "before epoch", "wire": "1969-12-31T23:59:59.999Z", "epoch_millis": "-1" },
+    { "name": "minimum year", "wire": "0001-01-01T00:00:00.000Z", "epoch_millis": "-62135596800000" },
+    { "name": "maximum year", "wire": "9999-12-31T23:59:59.999Z", "epoch_millis": "253402300799999" },
+    { "name": "leap day", "wire": "2024-02-29T12:00:00.000Z", "epoch_millis": "1709208000000" },
+    { "name": "century leap day", "wire": "2000-02-29T00:00:00.000Z", "epoch_millis": "951782400000" },
+    { "name": "end of day", "wire": "2026-12-31T23:59:59.999Z", "epoch_millis": "1798761599999" }
+  ],
+  "invalid": [
+    { "name": "JSON number", "wire": 1790743928439, "reason": "shape" },
+    { "name": "null", "wire": null, "reason": "shape" },
+    { "name": "object", "wire": { "instant": "2026-09-30T04:52:08.439Z" }, "reason": "shape" },
+    { "name": "positive offset", "wire": "2026-09-30T10:22:08.439+05:30", "reason": "grammar" },
+    { "name": "zero offset", "wire": "2026-09-30T04:52:08.439+00:00", "reason": "grammar" },
+    { "name": "missing fraction", "wire": "2026-09-30T04:52:08Z", "reason": "grammar" },
+    { "name": "short fraction", "wire": "2026-09-30T04:52:08.43Z", "reason": "grammar" },
+    { "name": "long fraction", "wire": "2026-09-30T04:52:08.4390Z", "reason": "grammar" },
+    { "name": "lower-case letters", "wire": "2026-09-30t04:52:08.439z", "reason": "grammar" },
+    { "name": "space separator", "wire": "2026-09-30 04:52:08.439Z", "reason": "grammar" },
+    { "name": "year 0000", "wire": "0000-01-01T00:00:00.000Z", "reason": "grammar" },
+    { "name": "five-digit year", "wire": "10000-01-01T00:00:00.000Z", "reason": "grammar" },
+    { "name": "month 13", "wire": "2026-13-01T00:00:00.000Z", "reason": "grammar" },
+    { "name": "day 32", "wire": "2026-01-32T00:00:00.000Z", "reason": "grammar" },
+    { "name": "hour 24", "wire": "2026-09-30T24:00:00.000Z", "reason": "grammar" },
+    { "name": "leap second", "wire": "2026-06-30T23:59:60.000Z", "reason": "grammar" },
+    { "name": "empty", "wire": "", "reason": "grammar" },
+    { "name": "trailing space", "wire": "2026-09-30T04:52:08.439Z ", "reason": "grammar" },
+    { "name": "trailing newline", "wire": "2026-09-30T04:52:08.439Z\n", "reason": "grammar" },
+    { "name": "30 February", "wire": "2026-02-30T00:00:00.000Z", "reason": "calendar" },
+    { "name": "31 April", "wire": "2026-04-31T00:00:00.000Z", "reason": "calendar" },
+    { "name": "29 February non-leap", "wire": "2023-02-29T00:00:00.000Z", "reason": "calendar" },
+    { "name": "29 February 1900", "wire": "1900-02-29T00:00:00.000Z", "reason": "calendar" }
+  ]
+}

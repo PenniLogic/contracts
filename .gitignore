@@ -12,3 +12,7 @@ node_modules/
 coverage/
 .idea/
 .DS_Store
+.toolchain/
+.kotlin/
+.mypy_cache/
+*.tsbuildinfo

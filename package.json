@@ -1,0 +1,16 @@
+{
+  "name": "pennilogic-contracts-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned Node tooling for the PenniLogic contracts repository: OpenAPI 3.1 lint (Spectral) and the TypeScript smoke consumer type-check. Not a published package.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "npm": ">=11"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "6.16.3",
+    "@types/node": "24.19.0",
+    "typescript": "7.0.2"
+  }
+}

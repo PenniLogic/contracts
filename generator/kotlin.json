@@ -1,0 +1,23 @@
+{
+  "generatorName": "kotlin",
+  "additionalProperties": {
+    "library": "jvm-ktor",
+    "serializationLibrary": "kotlinx_serialization",
+    "packageName": "com.pennilogic.contracts",
+    "groupId": "com.pennilogic",
+    "artifactId": "pennilogic-contracts-kotlin",
+    "dateLibrary": "java8",
+    "omitGradleWrapper": true,
+    "enumPropertyNaming": "UPPERCASE",
+    "sortParamsByRequiredFlag": true,
+    "sortModelPropertiesByRequiredFlag": true,
+    "ensureUniqueParams": true,
+    "generateOneOfAnyOfWrappers": true
+  },
+  "typeMappings": {
+    "Money": "Money"
+  },
+  "importMappings": {
+    "Money": "com.pennilogic.contracts.money.Money"
+  }
+}

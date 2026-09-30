@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "decision": "ADR-015 §1.4",
+  "description": "Accepted ISO 4217 codes and their minor-unit exponents. Every codec validates the currency member against this file and derives the amount scale from `exponent`; no consumer hardcodes a divisor. Presence here is codec acceptance, not ledger admission (ADR-017 §1.4 admits INR only). Adding a code is an additive change.",
+  "currencies": [
+    { "code": "INR", "exponent": 2, "minor_unit_name": "paise" },
+    { "code": "JPY", "exponent": 0, "minor_unit_name": "yen" },
+    { "code": "KWD", "exponent": 3, "minor_unit_name": "fils" }
+  ]
+}
