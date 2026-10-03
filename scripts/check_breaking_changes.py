@@ -96,6 +96,43 @@ def operation_findings(changes: object) -> tuple[list[Finding], list[str]]:
     return findings, warnings
 
 
+def _only_optional_property_additions(diff: object) -> bool:
+    """Recognise only additive property diffs, including dereferenced allOf inheritance.
+
+    Every other composition/response change remains conservatively breaking. In particular
+    required, removed, narrowed, conditional and unknown changes are never waived here.
+    """
+    if not isinstance(diff, dict) or not diff or set(diff) - {"properties", "items", "allOf"}:
+        return False
+    properties = diff.get("properties")
+    if properties is not None:
+        if not isinstance(properties, dict) or set(properties) - {"added", "modified"}:
+            return False
+        if any(not _only_optional_property_additions(child) for child in (properties.get("modified") or {}).values()):
+            return False
+    if "items" in diff and not _only_optional_property_additions(diff["items"]):
+        return False
+    composition = diff.get("allOf")
+    if composition is not None:
+        if not isinstance(composition, dict) or set(composition) != {"modified"}:
+            return False
+        for change in composition["modified"]:
+            if not isinstance(change, dict) or change.get("base") != change.get("revision") or \
+                    not _only_optional_property_additions(change.get("diff")):
+                return False
+    return True
+
+
+def _only_additive_response_schema(change: object) -> bool:
+    if not isinstance(change, dict) or set(change) != {"content"}:
+        return False
+    content = change["content"]
+    if not isinstance(content, dict) or set(content) != {"modified"} or not content["modified"]:
+        return False
+    return all(isinstance(media, dict) and set(media) == {"schema"} and
+               _only_optional_property_additions(media["schema"]) for media in content["modified"].values())
+
+
 def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
     for key in EXACT_KEYS:
         if key in diff:
@@ -137,7 +174,11 @@ def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
     for combinator in ("oneOf", "anyOf", "allOf"):
         change = diff.get(combinator)
         if isinstance(change, dict) and (change.get("deleted") or change.get("modified")):
+            if combinator == "allOf" and _only_optional_property_additions({"allOf": change}):
+                continue
             findings.append(Finding(f"component-schema-{combinator.lower()}-changed", pointer, f"{combinator} members changed at {pointer}", "component-guard"))
+        if combinator == "allOf" and isinstance(change, dict) and change.get("added"):
+            findings.append(Finding("component-schema-allof-added", pointer, f"allOf constraints added at {pointer}", "component-guard"))
 
 
 def component_findings(diff: object) -> list[Finding]:
@@ -165,6 +206,8 @@ def component_findings(diff: object) -> list[Finding]:
                     findings.append(Finding(f"component-{kind}-required-added", pointer, f"{pointer} became required", "component-guard"))
                 if isinstance(change.get("schema"), dict):
                     _schema_findings(f"{pointer}/schema", change["schema"], findings)
+            elif kind == "responses" and _only_additive_response_schema(change):
+                continue
             else:
                 findings.append(Finding(f"component-{kind}-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
     return findings

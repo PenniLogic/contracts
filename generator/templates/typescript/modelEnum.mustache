@@ -1,0 +1,23 @@
+{{>modelEnumInterfaces}}
+
+export function instanceOf{{classname}}(value: unknown): value is {{classname}} {
+    return Object.values({{classname}}).some((member) => member === value);
+}
+
+export function {{classname}}FromJSON(json: unknown): {{classname}} {
+    return {{classname}}FromJSONTyped(json, false);
+}
+
+export function {{classname}}FromJSONTyped(json: unknown, ignoreDiscriminator: boolean): {{classname}} {
+    if (!instanceOf{{classname}}(json)) throw new TypeError("enum value rejected");
+    return json;
+}
+
+export function {{classname}}ToJSON(value?: {{classname}} | null): {{classname}} | null | undefined {
+    if (value == null) return value;
+    return {{classname}}FromJSON(value);
+}
+
+export function {{classname}}ToJSONTyped(value?: {{classname}} | null, ignoreDiscriminator: boolean = false): {{classname}} | null | undefined {
+    return {{classname}}ToJSON(value);
+}

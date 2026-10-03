@@ -53,7 +53,7 @@ class TreeHashTest(unittest.TestCase):
         self.assertEqual(len(digest), 64)
 
     def test_spec_version_regex(self) -> None:
-        self.assertEqual(pl_contracts.spec_version(spec_text()), "0.1.0")
+        self.assertEqual(pl_contracts.spec_version(spec_text()), "0.2.0")
         self.assertEqual(pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: '2.10.3'\npaths: {}\n"), "2.10.3")
         with self.assertRaises(pl_contracts.PipelineError):
             pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: 1.0\n")
@@ -125,7 +125,7 @@ class SeamWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.spec = SpecDir()
-        text = replace_once(spec_text(), "  parameters:\n    IdempotencyKey:", MONEY_BEARING_MODEL + "  parameters:\n    IdempotencyKey:")
+        text = replace_once(spec_text(), "  schemas:\n", "  schemas:\n" + MONEY_BEARING_MODEL)
         cls.spec_path = cls.spec.write(text)
         cls.output = Path(tempfile.mkdtemp(prefix="pl-gen-"))
         cls.tools = toolchain.ensure_installed()
@@ -297,7 +297,52 @@ class TemplateOverrideDriftTest(unittest.TestCase):
 
     def test_no_other_template_is_overridden(self) -> None:
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
-        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache", "python/model_generic.mustache"])
+        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "python/model_enum.mustache", "python/model_generic.mustache", "typescript/modelEnum.mustache"])
+
+    def test_python_enum_override_is_stock_plus_strict_wire_seam(self) -> None:
+        stock = self.stock("python/model_enum.mustache")
+        override = (ROOT / "generator" / "templates" / "python" / "model_enum.mustache").read_text(encoding="utf-8")
+        expected = self.replace_once(stock, "from typing_extensions import Self\n",
+                                     "from typing import Any\nfrom pydantic import GetCoreSchemaHandler\n"
+                                     "from pydantic_core import CoreSchema, core_schema\nfrom typing_extensions import Self\n")
+        anchor = "    @classmethod\n    def from_json(cls, json_str: str) -> Self:\n"
+        seam = (
+            "    @classmethod\n    def from_wire(cls, value: object) -> Self:\n"
+            "        if isinstance(value, cls):\n            return value\n"
+            "        if type(value) is {{vendorExtensions.x-py-enum-type}} and any(member.value == value for member in cls):\n            return cls(value)\n"
+            '        raise ValueError("enum value rejected")\n\n'
+            "    @classmethod\n    def __get_pydantic_core_schema__(cls, _source: Any, _handler: GetCoreSchemaHandler) -> CoreSchema:\n"
+            "        # Strict generated models accept the exact wire spelling, never coercion or input-echoing enum errors.\n"
+            "        return core_schema.no_info_plain_validator_function(\n            cls.from_wire,\n"
+            "            json_schema_input_schema=core_schema.literal_schema([member.value for member in cls]),\n"
+            "            serialization=core_schema.plain_serializer_function_ser_schema(lambda member: member.value),\n        )\n\n"
+        )
+        expected = self.replace_once(expected, anchor, seam + anchor)
+        expected = self.replace_once(expected, "        return cls(json.loads(json_str))\n",
+                                     "        return cls.from_wire(json.loads(json_str))\n")
+        self.assertEqual(override, expected.rstrip() + "\n")
+
+    def test_typescript_enum_override_replaces_only_converter_functions(self) -> None:
+        stock = self.stock("typescript-fetch/modelEnum.mustache")
+        override = (ROOT / "generator" / "templates" / "typescript" / "modelEnum.mustache").read_text(encoding="utf-8")
+        self.assertEqual(stock.split("\n\n", 1)[0], "{{>modelEnumInterfaces}}")
+        expected = (
+            "{{>modelEnumInterfaces}}\n\n"
+            "export function instanceOf{{classname}}(value: unknown): value is {{classname}} {\n"
+            "    return Object.values({{classname}}).some((member) => member === value);\n}\n\n"
+            "export function {{classname}}FromJSON(json: unknown): {{classname}} {\n"
+            "    return {{classname}}FromJSONTyped(json, false);\n}\n\n"
+            "export function {{classname}}FromJSONTyped(json: unknown, ignoreDiscriminator: boolean): {{classname}} {\n"
+            '    if (!instanceOf{{classname}}(json)) throw new TypeError("enum value rejected");\n    return json;\n}\n\n'
+            "export function {{classname}}ToJSON(value?: {{classname}} | null): {{classname}} | null | undefined {\n"
+            "    if (value == null) return value;\n    return {{classname}}FromJSON(value);\n}\n\n"
+            "export function {{classname}}ToJSONTyped(value?: {{classname}} | null, ignoreDiscriminator: boolean = false): {{classname}} | null | undefined {\n"
+            "    return {{classname}}ToJSON(value);\n}\n"
+        )
+        self.assertEqual(override, expected)
+        stock_functions = [line.split("(")[0] for line in stock.splitlines() if line.startswith("export function ")]
+        self.assertEqual(stock_functions, [line.split("(")[0] for line in override.splitlines() if line.startswith("export function ")])
 
 class DeterminismTest(unittest.TestCase):
     def test_verify_passes_on_the_committed_golden(self) -> None:

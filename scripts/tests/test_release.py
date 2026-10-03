@@ -127,6 +127,10 @@ class DryRunTest(unittest.TestCase):
         for language, client in manifest["clients"].items():
             self.assertEqual(client["archive_sha256"], sums[client["archive"]], language)
             self.assertEqual(client["generator"]["version"], release.versions()["openapi_generator"]["version"])
+            self.assertEqual(client["provider_sources_sha256"], manifest["provider_sources_sha256"])
+        for name in release.PROVIDER_SOURCE_NAMES:
+            self.assertEqual(manifest["provider_sources_sha256"][name], sums[name])
+            self.assertTrue((target / name).is_file())
         self.assertTrue((target / f"openapi-v{version}.yaml").is_file())
         self.assertTrue((target / "RELEASE_NOTES.md").is_file())
         # A second dry run reproduces every digest.

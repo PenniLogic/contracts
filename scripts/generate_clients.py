@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
-    BUILD, GENERATOR_DIR, LANGUAGES, REGISTRY, ROOT, RUNTIME_DIR, SPEC, PipelineError, combined_digest, fail, java_executable,
+    BUILD, GENERATOR_DIR, LANGUAGES, PROVIDER_SOURCE_NAMES, REGISTRY, ROOT, RUNTIME_DIR, SPEC, PipelineError, combined_digest, fail, java_executable,
     remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions,
 )
 from toolchain import ensure_installed  # noqa: E402
@@ -31,7 +31,7 @@ from toolchain import ensure_installed  # noqa: E402
 MANIFEST_NAME = "contracts-manifest.json"
 GOLDEN = GENERATOR_DIR / "golden.json"
 IGNORE_OVERRIDE = GENERATOR_DIR / "openapi-generator-ignore"
-TEMPLATE_DIRS = {"python": GENERATOR_DIR / "templates" / "python", "kotlin": GENERATOR_DIR / "templates" / "kotlin"}
+TEMPLATE_DIRS = {language: GENERATOR_DIR / "templates" / language for language in LANGUAGES}
 TEXT_SUFFIXES = {".kt", ".kts", ".ts", ".py", ".md", ".json", ".txt", ".properties", ".gradle", ".toml", ".cfg", ".ini", ".yaml", ".yml", ".mustache"}
 
 
@@ -122,6 +122,159 @@ def copy_runtime(language: str, output: Path) -> str:
     return tree_hash(source)[0]
 
 
+def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
+    """Publish a typed policy table from the canonical catalogue, never hand-maintained client copies."""
+    header = "Generated from spec/error-catalogue.v1.json by scripts/generate_clients.py; do not edit."
+    entries = catalogue["codes"]
+    if language == "python":
+        rows = "".join(
+            f'    ProblemCode.{entry["code"].upper()}: ErrorPolicy('
+            f'{entry["status"]}, {json.dumps(entry["title"])}, {json.dumps(entry["detail"])}, '
+            f'ClientState.{entry["state"].upper()}, {entry["retryable"]}, '
+            f'RetryClass.{entry["retry_class"].upper()}, IdempotencyTreatment.{entry["idempotency"].upper()}),\n'
+            for entry in entries
+        )
+        return "pennilogic_contracts/error_catalogue.py", (
+            f'"""{header}"""\n\nfrom __future__ import annotations\n\n'
+            "from dataclasses import dataclass\nfrom types import MappingProxyType\n"
+            "from typing import Final, Mapping\nfrom uuid import uuid4\n"
+            "from pennilogic_contracts.models.problem_code import ProblemCode\n"
+            "from pennilogic_contracts.models.problem_field import ProblemField\n"
+            "from pennilogic_contracts.models.client_state import ClientState\n"
+            "from pennilogic_contracts.models.retry_class import RetryClass\n"
+            "from pennilogic_contracts.models.idempotency_treatment import IdempotencyTreatment\n\n\n"
+            "@dataclass(frozen=True)\nclass ErrorPolicy:\n"
+            "    status: int\n    title: str\n    detail: str\n    state: ClientState\n"
+            "    retryable: bool\n    retry_class: RetryClass\n    idempotency: IdempotencyTreatment\n\n\n"
+            f"ERROR_POLICIES: Final[Mapping[ProblemCode, ErrorPolicy]] = MappingProxyType({{\n{rows}}})\n\n\n"
+            "def error_policy(code: ProblemCode) -> ErrorPolicy:\n"
+            "    if not isinstance(code, ProblemCode):\n        raise TypeError('problem code rejected')\n"
+            "    return ERROR_POLICIES[code]\n\n\n"
+            "def error_status(code: ProblemCode, field: ProblemField | None = None) -> int:\n"
+            "    if code == ProblemCode.VALIDATION_REJECTED and field == ProblemField.DUPLICATE_OVERRIDE:\n        return 400\n"
+            "    return error_policy(code).status\n\n\n"
+            "def new_correlation_id() -> str:\n    return 'cor_' + str(uuid4())\n"
+        )
+    if language == "kotlin":
+        rows = "".join(
+            f'        ProblemCode.{entry["code"].upper()} to ErrorPolicy('
+            f'{entry["status"]}, {json.dumps(entry["title"])}, {json.dumps(entry["detail"])}, '
+            f'ClientState.{entry["state"].upper()}, {str(entry["retryable"]).lower()}, '
+            f'RetryClass.{entry["retry_class"].upper()}, IdempotencyTreatment.{entry["idempotency"].upper()}),\n'
+            for entry in entries
+        )
+        return "src/main/kotlin/com/pennilogic/contracts/errors/ErrorCatalogue.kt", (
+            f"// {header}\npackage com.pennilogic.contracts.errors\n\n"
+            "import com.pennilogic.contracts.models.ProblemCode\nimport com.pennilogic.contracts.models.ClientState\n"
+            "import com.pennilogic.contracts.models.ProblemField\n"
+            "import com.pennilogic.contracts.models.RetryClass\nimport com.pennilogic.contracts.models.IdempotencyTreatment\n"
+            "import java.util.UUID\n\n"
+            "data class ErrorPolicy(val status: Int, val title: String, val detail: String, "
+            "val state: ClientState, val retryable: Boolean, val retryClass: RetryClass, "
+            "val idempotency: IdempotencyTreatment)\n\n"
+            f"object ErrorCatalogue {{\n    private val policies = mapOf(\n{rows}    )\n\n"
+            "    fun policy(code: ProblemCode): ErrorPolicy = policies.getValue(code)\n"
+            "    fun status(code: ProblemCode, field: ProblemField? = null): Int =\n"
+            "        if (code == ProblemCode.VALIDATION_REJECTED && field == ProblemField.DUPLICATE_OVERRIDE) 400 else policy(code).status\n"
+            '    fun newCorrelationId(): String = "cor_${UUID.randomUUID()}"\n}\n'
+        )
+    if language == "typescript":
+        def symbol(value: str) -> str:
+            return "".join(word.capitalize() for word in value.split("_"))
+
+        rows = "".join(
+            f'    [ProblemCode.{symbol(entry["code"])}]: Object.freeze({{ status: {entry["status"]}, '
+            f'title: {json.dumps(entry["title"])}, detail: {json.dumps(entry["detail"])}, '
+            f'state: ClientState.{symbol(entry["state"])}, retryable: {str(entry["retryable"]).lower()}, '
+            f'retryClass: RetryClass.{symbol(entry["retry_class"])}, '
+            f'idempotency: IdempotencyTreatment.{symbol(entry["idempotency"])} }}),\n'
+            for entry in entries
+        )
+        return "src/errorCatalogue.ts", (
+            f"// {header}\nimport {{ ProblemCode }} from './models/ProblemCode.js';\n"
+            "import { ProblemField } from './models/ProblemField.js';\n"
+            "import { ClientState } from './models/ClientState.js';\n"
+            "import { RetryClass } from './models/RetryClass.js';\n"
+            "import { IdempotencyTreatment } from './models/IdempotencyTreatment.js';\n\n"
+            "export interface ErrorPolicy {\n    readonly status: number;\n    readonly title: string;\n"
+            "    readonly detail: string;\n    readonly state: ClientState;\n    readonly retryable: boolean;\n"
+            "    readonly retryClass: RetryClass;\n    readonly idempotency: IdempotencyTreatment;\n}\n\n"
+            f"export const ERROR_POLICIES: Readonly<Record<ProblemCode, ErrorPolicy>> = Object.freeze({{\n{rows}}});\n\n"
+            "export function errorPolicy(code: ProblemCode): ErrorPolicy {\n"
+            "    if (!Object.prototype.hasOwnProperty.call(ERROR_POLICIES, code)) throw new TypeError('problem code rejected');\n"
+            "    return ERROR_POLICIES[code];\n}\n\n"
+            "export function errorStatus(code: ProblemCode, field?: ProblemField): number {\n"
+            "    return code === ProblemCode.ValidationRejected && field === ProblemField.DuplicateOverride ? 400 : errorPolicy(code).status;\n}\n\n"
+            "export function newCorrelationId(): string {\n    return 'cor_' + globalThis.crypto.randomUUID();\n}\n"
+        )
+    raise PipelineError(f"unknown language {language}")
+
+
+def render_import_policy(language: str, policy: dict) -> tuple[str, str]:
+    header = "Generated from spec/import-group.v1.json by scripts/generate_clients.py; do not edit."
+    sources = policy["source_precedence"]
+    windows = policy["source_pair_windows"]
+    if language == "python":
+        ordered = ", ".join(f"DedupSource.from_wire({json.dumps(source)})" for source in sources)
+        rows = "".join(
+            f'    (DedupSource.from_wire({json.dumps(row["sources"][0])}), DedupSource.from_wire({json.dumps(row["sources"][1])})): '
+            f'DedupWindow.from_wire({json.dumps(row["window"])}),\n' for row in windows
+        )
+        return "pennilogic_contracts/import_policy.py", (
+            f'"""{header}"""\n\nfrom __future__ import annotations\n'
+            "from types import MappingProxyType\nfrom typing import Final, Mapping\n"
+            "from pennilogic_contracts.models.dedup_source import DedupSource\n"
+            "from pennilogic_contracts.models.dedup_window import DedupWindow\n\n"
+            f'IMPORT_GROUP_VERSION: Final = {json.dumps(policy["group_version"])}\n'
+            f"MAX_IMPORT_ROWS: Final = {policy['preview']['maximum_rows']}\n"
+            f"MAX_IMPORT_COLUMNS: Final = {policy['preview']['maximum_columns']}\n"
+            f"SOURCE_PRECEDENCE: Final = ({ordered})\n"
+            f"_WINDOWS: Final[Mapping[tuple[DedupSource, DedupSource], DedupWindow]] = MappingProxyType({{\n{rows}}})\n\n"
+            "def source_window(left: DedupSource, right: DedupSource) -> DedupWindow:\n"
+            "    if not isinstance(left, DedupSource) or not isinstance(right, DedupSource):\n        raise TypeError('source pair rejected')\n"
+            "    result = _WINDOWS.get((left, right), _WINDOWS.get((right, left)))\n"
+            "    if result is None:\n        raise ValueError('source pair unbound')\n    return result\n"
+        )
+    if language == "typescript":
+        ordered = ", ".join(f"DedupSourceFromJSON({json.dumps(source)})" for source in sources)
+        rows = "".join(
+            f'    [DedupSourceFromJSON({json.dumps(row["sources"][0])}), DedupSourceFromJSON({json.dumps(row["sources"][1])}), '
+            f'DedupWindowFromJSON({json.dumps(row["window"])})],\n' for row in windows
+        )
+        return "src/importPolicy.ts", (
+            f"// {header}\nimport {{ DedupSource, DedupSourceFromJSON }} from './models/DedupSource.js';\n"
+            "import { DedupWindow, DedupWindowFromJSON } from './models/DedupWindow.js';\n\n"
+            f'export const IMPORT_GROUP_VERSION = {json.dumps(policy["group_version"])};\n'
+            f"export const MAX_IMPORT_ROWS = {policy['preview']['maximum_rows']};\n"
+            f"export const MAX_IMPORT_COLUMNS = {policy['preview']['maximum_columns']};\n"
+            f"export const SOURCE_PRECEDENCE: readonly DedupSource[] = Object.freeze([{ordered}]);\n"
+            f"const WINDOWS: ReadonlyArray<readonly [DedupSource, DedupSource, DedupWindow]> = [\n{rows}];\n\n"
+            "export function sourceWindow(left: DedupSource, right: DedupSource): DedupWindow {\n"
+            "    const result = WINDOWS.find(([a, b]) => (a === left && b === right) || (a === right && b === left));\n"
+            "    if (result === undefined) throw new TypeError('source pair unbound');\n    return result[2];\n}\n"
+        )
+    if language == "kotlin":
+        ordered = ", ".join(f'DedupSource.entries.single {{ it.value == {json.dumps(source)} }}' for source in sources)
+        rows = "".join(
+            f'        (DedupSource.entries.single {{ it.value == {json.dumps(row["sources"][0])} }} to '
+            f'DedupSource.entries.single {{ it.value == {json.dumps(row["sources"][1])} }}) to '
+            f'DedupWindow.entries.single {{ it.value == {json.dumps(row["window"])} }},\n' for row in windows
+        )
+        return "src/main/kotlin/com/pennilogic/contracts/imports/ImportPolicy.kt", (
+            f"// {header}\npackage com.pennilogic.contracts.imports\n\n"
+            "import com.pennilogic.contracts.models.DedupSource\nimport com.pennilogic.contracts.models.DedupWindow\n\n"
+            "object ImportPolicy {\n"
+            f'    const val VERSION = {json.dumps(policy["group_version"])}\n'
+            f"    const val MAX_ROWS = {policy['preview']['maximum_rows']}\n"
+            f"    const val MAX_COLUMNS = {policy['preview']['maximum_columns']}\n"
+            f"    val sourcePrecedence: List<DedupSource> = listOf({ordered})\n"
+            f"    private val windows = mapOf(\n{rows}    )\n\n"
+            "    fun sourceWindow(left: DedupSource, right: DedupSource): DedupWindow =\n"
+            '        windows[left to right] ?: windows[right to left] ?: error("source pair unbound")\n}\n'
+        )
+    raise PipelineError(f"unknown language {language}")
+
+
 def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dict:
     """Generate one target into `output` and return its manifest."""
     if language not in LANGUAGES:
@@ -153,6 +306,22 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
     registry_target = output / relative
     registry_target.parent.mkdir(parents=True, exist_ok=True)
     registry_target.write_bytes(content.encode("utf-8"))
+    provider_hashes = {}
+    for name in PROVIDER_SOURCE_NAMES:
+        source = spec.parent / name
+        if not source.is_file():
+            raise PipelineError(f"{source.name} is missing beside the specification")
+        data = normalized_text(source)
+        (output / name).write_bytes(data)
+        provider_hashes[name] = sha256_bytes(data)
+    relative, content = render_error_catalogue(language, json.loads((spec.parent / "error-catalogue.v1.json").read_text(encoding="utf-8")))
+    catalogue_target = output / relative
+    catalogue_target.parent.mkdir(parents=True, exist_ok=True)
+    catalogue_target.write_bytes(content.encode("utf-8"))
+    relative, content = render_import_policy(language, json.loads((spec.parent / "import-group.v1.json").read_text(encoding="utf-8")))
+    policy_target = output / relative
+    policy_target.parent.mkdir(parents=True, exist_ok=True)
+    policy_target.write_bytes(content.encode("utf-8"))
     digest, entries = tree_hash(output, exclude=(MANIFEST_NAME,))
     manifest = {
         "schema_version": 1,
@@ -160,6 +329,7 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
         "spec_version": version,
         "spec_sha256": spec_digest(spec),
         "currency_registry_sha256": sha256_bytes(normalized_text(REGISTRY)),
+        "provider_sources_sha256": provider_hashes,
         "generator": {
             "name": "openapi-generator-cli",
             "version": pins["openapi_generator"]["version"],

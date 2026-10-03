@@ -85,10 +85,16 @@ class PlantedRemovalTest(unittest.TestCase):
 
     def test_acknowledgement_lets_a_named_break_pass(self) -> None:
         removed = replace_once(spec_text(), "        correlation_id:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n", "        correlation_id_renamed:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n")
+        detected = self.check(removed, "--format", "json")
+        self.assertEqual(detected.returncode, 1)
+        report = json.loads(detected.stdout[detected.stdout.index("{"):])
+        self.assertIn(("component-schema-property-removed", "components/schemas/ProblemDetail/properties/correlation_id"),
+                      {(finding["id"], finding["location"]) for finding in report["findings"]})
         (self.spec.path / "ack.json").write_text(json.dumps({
             "baseline": str(self.base),
-            "acknowledged": [{"id": "component-schema-property-removed", "location": "components/schemas/ProblemDetail/properties/correlation_id",
-                              "reason": "expand-and-contract: correlation_id_renamed was added in the previous tag and every consumer migrated"}],
+            "acknowledged": [{"id": finding["id"], "location": finding["location"],
+                              "reason": "Synthetic expand-and-contract fixture: every affected reference was explicitly migrated"}
+                             for finding in report["findings"]],
         }), encoding="utf-8")
         completed = self.check(removed)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -135,6 +141,35 @@ class VersionBumpRuleTest(unittest.TestCase):
         problems = cbc.evaluate([finding], ack, "v1.0.0", "1.1.0", ROOT / "spec" / "breaking-change-acknowledgement.json")
         self.assertTrue(any("MAJOR bump" in p for p in problems))
         self.assertEqual(cbc.evaluate([finding], {**ack, "target_version": "2.0.0"}, "v1.0.0", "2.0.0", ROOT / "spec" / "x.json"), [])
+
+
+class CompositionRegressionTest(unittest.TestCase):
+    def test_only_proven_optional_additions_are_nonbreaking_through_allof_and_responses(self) -> None:
+        addition = {"properties": {"added": ["hint"]}}
+        composition = {"allOf": {"modified": [{"base": {"index": 0, "component": "ProblemDetail"},
+                                              "revision": {"index": 0, "component": "ProblemDetail"}, "diff": addition}]}}
+        diff = {"components": {
+            "schemas": {"modified": {"Provider": composition}},
+            "responses": {"modified": {"Problem": {"content": {"modified": {"application/problem+json": {"schema": composition}}}}}},
+        }}
+        self.assertEqual(cbc.component_findings(diff), [])
+        for defect in (
+            {"required": {"added": ["hint"]}},
+            {"properties": {"deleted": ["hint"]}},
+            {"properties": {"modified": {"hint": {"maxLength": {"from": 20, "to": 10}}}}},
+            {"unknownConstraint": {"from": False, "to": True}},
+        ):
+            with self.subTest(defect=defect):
+                narrowed = {"allOf": {"modified": [{"base": {"index": 0}, "revision": {"index": 0}, "diff": defect}]}}
+                findings = cbc.component_findings({"components": {"schemas": {"modified": {"Provider": narrowed}}}})
+                self.assertEqual([finding.id for finding in findings], ["component-schema-allof-changed"])
+
+    def test_new_allof_constraint_and_changed_response_metadata_remain_breaking(self) -> None:
+        findings = cbc.component_findings({"components": {
+            "schemas": {"modified": {"Provider": {"allOf": {"added": [{"required": ["code"]}]}}}},
+            "responses": {"modified": {"Problem": {"headers": {"deleted": ["Retry-After"]}}}},
+        }})
+        self.assertEqual({finding.id for finding in findings}, {"component-schema-allof-added", "component-responses-changed"})
 
 
 if __name__ == "__main__":
