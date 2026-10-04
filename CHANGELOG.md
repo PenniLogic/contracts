@@ -10,6 +10,14 @@ to all 19 new object providers without narrowing legacy DTOs or the accepted
 global JSON configuration. Add schema and actual three-target transport matrices;
 the earlier source FAIL remains immutable and fresh review is still required.
 
+The same remediation also restores accepted ADR-016 allocation-mismatch
+`shortfall`/`excess` direction on problems and nested validation issues, with no
+monetary diagnostic or arithmetic. Optional-inheritance breaking-change proof now
+rejects unknown/ambiguous/malformed change-record metadata while retaining the
+actual pinned optional-addition positive and all existing constraint negatives.
+The intermediate local `1af164a` commit/evidence remain history, not a published
+or reviewed provider pin.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

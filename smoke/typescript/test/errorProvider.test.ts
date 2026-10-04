@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import { ProblemCode, ProblemCodeFromJSON, ClientState, IdempotencyTreatment, AiRefusalFromJSON, AiRefusalToJSON } from '../../../build/generated/typescript/src/index.js';
 import { ERROR_POLICIES, errorPolicy, newCorrelationId } from '../../../build/generated/typescript/src/errorCatalogue.js';
 import { ServiceProblemDetailFromJSON, ServiceProblemDetailToJSON } from '../../../build/generated/typescript/src/models/ServiceProblemDetail.js';
+import { AllocationMismatchDirection, ValidationIssueFromJSON } from '../../../build/generated/typescript/src/index.js';
+import { JSONApiResponse } from '../../../build/generated/typescript/src/runtime.js';
 import { ROOT, loadFixture } from './fixtures.js';
 
 interface ErrorFixture {
@@ -25,6 +27,44 @@ const examples = new Map<string, Record<string, unknown>>(fixture.examples.map((
         detail: entry.detail, correlation_id: fixture.correlation_id, ...example,
     }];
 }));
+
+test('accepted allocation mismatch direction is required and both safe spellings round-trip', () => {
+    const data = loadFixture<{ problem: Record<string, unknown>; directions: string[] }>('allocation-refusal.v1.json');
+    assert.throws(() => ServiceProblemDetailFromJSON(data.problem));
+    for (const direction of data.directions) {
+        const model = ServiceProblemDetailFromJSON({ ...data.problem, direction });
+        assert.equal(ServiceProblemDetailToJSON(model).direction, direction);
+    }
+});
+
+test('allocation direction is typed and conditional across actual ordinary nested transport and write', async () => {
+    const data = loadFixture<{ problem: Record<string, unknown>; directions: string[]; invalid_directions: unknown[] }>('allocation-refusal.v1.json');
+    for (const direction of data.directions) {
+        const issue = { field: 'allocation', reason: 'allocation_sum_mismatch', direction };
+        const wire = { ...data.problem, direction, validation_errors: [issue] };
+        const model = await new JSONApiResponse(new Response(JSON.stringify(wire)), ServiceProblemDetailFromJSON).value();
+        assert.ok(Object.values(AllocationMismatchDirection).includes(model.direction!));
+        assert.equal(ValidationIssueFromJSON(issue).direction, direction);
+        assert.deepEqual(ServiceProblemDetailToJSON(model), wire);
+        const missing = { ...wire, validation_errors: [{ field: 'allocation', reason: 'allocation_sum_mismatch' }] };
+        await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(missing)), ServiceProblemDetailFromJSON).value());
+    }
+    for (const direction of data.invalid_directions) {
+        const wire = { ...data.problem, direction };
+        await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(wire)), ServiceProblemDetailFromJSON).value(), (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.doesNotMatch(error.message, /PRIVATE_SYNTHETIC_CANARY|12\.34/);
+            return true;
+        });
+    }
+    assert.throws(() => ServiceProblemDetailFromJSON({ ...data.problem, direction: 'shortfall', reason: 'shape' }));
+    assert.throws(() => ServiceProblemDetailFromJSON({ ...data.problem, direction: 'shortfall', amount: '12.34' }));
+    const good = ServiceProblemDetailFromJSON({ ...data.problem, direction: 'shortfall' });
+    assert.throws(() => Reflect.apply(ServiceProblemDetailToJSON, undefined, [{ ...good, direction: 'PRIVATE_SYNTHETIC_CANARY' }]));
+    const missing = { ...good };
+    delete missing.direction;
+    assert.throws(() => ServiceProblemDetailToJSON(missing));
+});
 
 // This must remain a compile failure: the generated code is an enum, not a string alias.
 // @ts-expect-error raw strings cannot stand in for ProblemCode

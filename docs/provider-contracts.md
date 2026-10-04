@@ -82,6 +82,14 @@ registered tokens, not arbitrary JSON pointers; unknown input names map to `requ
 `ValidationReason` contains the accepted money/category/ledger reasons and safe
 mapping reasons. Row errors use that same provider, not another code vocabulary.
 
+Accepted ADR-016 section 3.2 additionally binds `allocation_sum_mismatch` to a
+required field and typed `direction`, exactly `shortfall` or `excess`, never an
+amount or a computed share. The shared problem and each nested `ValidationIssue`
+require that direction only for this reason and reject it for unrelated reasons.
+All three ordinary construction/read/write/nested transport seams enforce it;
+this is a missing accepted provider representation, not a future endpoint or new
+allocation algorithm.
+
 `correlation_id` is `cor_` plus an independently random public UUIDv4; it is not an
 internal record ID, idempotency key or raw-derived digest. The generated catalogue
 offers the platform's CSPRNG correlation factory. The service must attach this

@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 import json
 import unittest
-from typing import Any
+from typing import Any, Callable
+from pennilogic_contracts import ApiClient
+from pennilogic_contracts.models.validation_issue import ValidationIssue
+from pennilogic_contracts.models.allocation_mismatch_direction import AllocationMismatchDirection
 
 from fixtures import ROOT, load
 from pennilogic_contracts.error_catalogue import ERROR_POLICIES, error_policy, new_correlation_id
@@ -33,6 +36,45 @@ def examples() -> dict[str, dict[str, Any]]:
 
 
 class ErrorProviderTest(unittest.TestCase):
+    def test_allocation_mismatch_requires_the_accepted_safe_direction(self) -> None:
+        data = load("allocation-refusal.v1.json")
+        with self.assertRaises(ValueError):
+            ServiceProblemDetail.from_dict(data["problem"])
+        for direction in data["directions"]:
+            problem = ServiceProblemDetail.from_dict({**data["problem"], "direction": direction})
+            self.assertEqual(problem.to_dict()["direction"], direction)
+
+    def test_allocation_direction_is_typed_safe_conditional_and_nested_on_actual_generated_paths(self) -> None:
+        data = load("allocation-refusal.v1.json")
+        serialize: Callable[[object], object] = ApiClient().sanitize_for_serialization
+        for direction in data["directions"]:
+            issue = {"field": "allocation", "reason": "allocation_sum_mismatch", "direction": direction}
+            wire = {**data["problem"], "direction": direction, "validation_errors": [issue]}
+            problem = ServiceProblemDetail.from_dict(wire)
+            self.assertIsInstance(problem.direction, AllocationMismatchDirection)
+            self.assertIsInstance(ValidationIssue.from_dict(issue).direction, AllocationMismatchDirection)
+            self.assertEqual(serialize(problem), wire)
+            self.assertEqual(ApiClient().deserialize(json.dumps(wire), "ServiceProblemDetail", "application/problem+json").to_dict(), wire)
+            broken = copy.deepcopy(wire)
+            broken["validation_errors"][0].pop("direction")
+            with self.assertRaises(ValueError):
+                ApiClient().deserialize(json.dumps(broken), "ServiceProblemDetail", "application/problem+json")
+        for direction in data["invalid_directions"]:
+            wire = {**data["problem"], "direction": direction}
+            with self.assertRaises(ValueError) as caught:
+                ApiClient().deserialize(json.dumps(wire), "ServiceProblemDetail", "application/problem+json")
+            self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(caught.exception))
+            self.assertNotIn("12.34", str(caught.exception))
+        with self.assertRaises(ValueError):
+            ServiceProblemDetail.from_dict({**data["problem"], "reason": "shape", "direction": "shortfall"})
+        with self.assertRaises(ValueError):
+            ServiceProblemDetail.from_dict({**data["problem"], "direction": "shortfall", "amount": "12.34"})
+        good = ServiceProblemDetail.from_dict({**data["problem"], "direction": "shortfall"})
+        for changed in (good.model_copy(update={"direction": "PRIVATE_SYNTHETIC_CANARY"}),
+                        good.model_copy(update={"direction": None})):
+            with self.assertRaises(ValueError):
+                serialize(changed)
+
     def test_generated_codes_and_catalogue_have_one_typed_state_and_key_policy(self) -> None:
         self.assertEqual({code.value for code in ProblemCode}, {entry["code"] for entry in CATALOGUE["codes"]})
         self.assertEqual(set(ERROR_POLICIES), set(ProblemCode))

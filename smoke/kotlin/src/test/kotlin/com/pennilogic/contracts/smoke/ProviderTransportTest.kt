@@ -249,4 +249,32 @@ class ProviderTransportTest {
         assertSafe(assertFails { json.decodeFromJsonElement<ImportPreview>(invalid) })
         assertSafe(assertFails { codecs().getValue("ImportPreview").transport(invalid) })
     }
+
+    @Test fun acceptedAllocationDirectionIsConditionalTypedAndSafeOnActualNestedReadAndWrite() = runBlocking<Unit> {
+        val fixture = Fixtures.load("allocation-refusal.v1.json")
+        val base = fixture.getValue("problem").jsonObject
+        assertFails { Probe(engine(base)).get().wrap<ServiceProblemDetail>().body() }
+        fixture.getValue("directions").jsonArray.forEach { direction ->
+            val issue = buildJsonObject { put("field", "allocation"); put("reason", "allocation_sum_mismatch"); put("direction", direction) }
+            val wire = JsonObject(base + mapOf("direction" to direction, "validation_errors" to JsonArray(listOf(issue))))
+            val problem = Probe(engine(wire)).get().wrap<ServiceProblemDetail>().body()
+            val typed: AllocationMismatchDirection = assertNotNull(problem.direction)
+            assertEquals(direction.jsonPrimitive.content, typed.value)
+            assertEquals(wire, json.encodeToJsonElement(problem))
+            var sent: String? = null
+            Probe(engine(wire) { sent = it }).post(problem)
+            assertEquals(wire, json.parseToJsonElement(assertNotNull(sent)))
+            val missing = JsonObject(wire + ("validation_errors" to JsonArray(listOf(JsonObject(issue - "direction")))))
+            assertSafe(assertFails { Probe(engine(missing)).get().wrap<ServiceProblemDetail>().body() })
+            assertFails { problem.copy(direction = null) }
+        }
+        fixture.getValue("invalid_directions").jsonArray.forEach { direction ->
+            val wire = JsonObject(base + ("direction" to direction))
+            assertSafe(assertFails { Probe(engine(wire)).get().wrap<ServiceProblemDetail>().body() })
+        }
+        val amount = JsonObject(base + mapOf("direction" to JsonPrimitive("shortfall"), "amount" to JsonPrimitive("12.34")))
+        assertSafe(assertFails { Probe(engine(amount)).get().wrap<ServiceProblemDetail>().body() })
+        val unrelated = JsonObject(base + mapOf("reason" to JsonPrimitive("shape"), "direction" to JsonPrimitive("shortfall")))
+        assertFails { json.decodeFromJsonElement<ServiceProblemDetail>(unrelated) }
+    }
 }

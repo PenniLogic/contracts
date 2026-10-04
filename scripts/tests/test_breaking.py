@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import copy
 import subprocess
 import unittest
 
 from support import ROOT, SPEC, SpecDir, replace_once, run_script, spec_text, with_probe_paths
+import toolchain
 
 import check_breaking_changes as cbc
 
@@ -144,6 +146,85 @@ class VersionBumpRuleTest(unittest.TestCase):
 
 
 class CompositionRegressionTest(unittest.TestCase):
+    def test_malformed_or_ambiguous_record_and_diff_data_never_proves_optional_inheritance(self) -> None:
+        valid = {"base": {"index": 0, "component": "ProblemDetail"},
+                 "revision": {"index": 0, "component": "ProblemDetail"},
+                 "diff": {"properties": {"added": ["hint"]}}}
+        defects = [
+            {**valid, "metadata": {}}, {**valid, "unknownConstraint": True},
+            {**valid, "base": {}, "revision": {}},
+            {**valid, "base": {"index": True}, "revision": {"index": True}},
+            {**valid, "base": {"index": "0"}, "revision": {"index": "0"}},
+            {**valid, "base": {"index": -1}, "revision": {"index": -1}},
+            {**valid, "base": {"index": 0, "extra": True}, "revision": {"index": 0, "extra": True}},
+            {**valid, "base": {"index": 0, "component": ""}, "revision": {"index": 0, "component": ""}},
+            {**valid, "revision": {"index": 1, "component": "ProblemDetail"}},
+            {**valid, "diff": None}, {**valid, "diff": []},
+            {**valid, "diff": {"properties": {"added": ["hint"]}, "metadata": {}}},
+            {**valid, "diff": {"properties": {"added": []}}},
+            {**valid, "diff": {"properties": {"added": "hint"}}},
+            {**valid, "diff": {"properties": {"added": ["hint", "hint"]}}},
+            {**valid, "diff": {"properties": {"modified": []}}},
+        ]
+        for record in defects:
+            with self.subTest(record=record):
+                composition = {"allOf": {"modified": [record]}}
+                self.assertFalse(cbc._only_optional_property_additions(composition))
+                self.assertTrue(cbc.component_findings({"components": {"schemas": {"modified": {"Provider": composition}}}}))
+        for records in ([], {}, None, [valid, valid]):
+            composition = {"allOf": {"modified": records}}
+            self.assertFalse(cbc._only_optional_property_additions(composition))
+            self.assertTrue(cbc.component_findings({"components": {"schemas": {"modified": {"Provider": composition}}}}))
+        for change in ({"added": None}, {"deleted": "ambiguous"}, {}, {"metadata": True}):
+            self.assertTrue(cbc.component_findings({"components": {"schemas": {"modified": {"Provider": {"allOf": change}}}}}))
+        self.assertFalse(cbc._only_additive_response_schema({"content": {"modified": "ambiguous"}}))
+        self.assertTrue(cbc._only_optional_property_additions({"allOf": {"modified": [valid]}}))
+
+    def test_real_pinned_oasdiff_pair_matrix_preserves_proofs_and_refuses_constraints(self) -> None:
+        specs = SpecDir()
+        self.addCleanup(specs.cleanup)
+        base_text = spec_text()
+        base = specs.write(base_text, "base.yaml")
+        tools = toolchain.ensure_installed()
+        added = replace_once(base_text, "      examples:\n        - type: about:blank\n",
+                             "        diagnostic_hint:\n          type: string\n      examples:\n        - type: about:blank\n")
+        matrix = [
+            ("optional inherited addition", added, False),
+            ("required inherited detail", replace_once(base_text, "      required: [type, title, status]\n",
+                                                     "      required: [type, title, status, detail]\n"), True),
+            ("narrowed inherited title", replace_once(base_text, "          maxLength: 200\n          description: Short human-readable summary",
+                                                     "          maxLength: 100\n          description: Short human-readable summary"), True),
+            ("removed inherited correlation", replace_once(base_text, "        correlation_id:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n",
+                                                          "        correlation_renamed:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n"), True),
+            ("new allOf constraint", replace_once(base_text, "        - $ref: '#/components/schemas/ProblemDetail'\n",
+                                                 "        - $ref: '#/components/schemas/ProblemDetail'\n        - required: [instance]\n"), True),
+            ("response metadata", replace_once(base_text, "      description: Published safe problem detail; the HTTP status equals the catalogue status for its typed code.\n",
+                                              "      description: Changed response metadata requiring review.\n"), True),
+        ]
+        for name, text, should_break in matrix:
+            with self.subTest(pair=name):
+                revision = specs.write(text, "revision.yaml")
+                findings, _ = cbc.compare(base, revision, tools["oasdiff"])
+                self.assertEqual(bool(findings), should_break, name)
+        revision = specs.write(added, "addition.yaml")
+        real_diff = cbc.oasdiff_json(tools["oasdiff"], "diff", base, revision)
+        self.assertEqual(cbc.component_findings(real_diff), [])
+        for key in ("metadata", "unknownConstraint"):
+            mutated = copy.deepcopy(real_diff)
+            record = mutated["components"]["schemas"]["modified"]["ServiceProblemDetail"]["allOf"]["modified"][0]
+            record[key] = {"from": False, "to": True}
+            self.assertTrue(cbc.component_findings(mutated))
+
+    def test_unknown_record_metadata_is_not_an_optional_addition_proof(self) -> None:
+        for key in ("unknownConstraint", "metadata"):
+            record = {"base": {"index": 0, "component": "ProblemDetail"},
+                      "revision": {"index": 0, "component": "ProblemDetail"},
+                      "diff": {"properties": {"added": ["hint"]}}, key: {"from": False, "to": True}}
+            composition = {"allOf": {"modified": [record]}}
+            with self.subTest(member=key):
+                self.assertFalse(cbc._only_optional_property_additions(composition))
+                self.assertTrue(cbc.component_findings({"components": {"schemas": {"modified": {"Provider": composition}}}}))
+
     def test_only_proven_optional_additions_are_nonbreaking_through_allof_and_responses(self) -> None:
         addition = {"properties": {"added": ["hint"]}}
         composition = {"allOf": {"modified": [{"base": {"index": 0, "component": "ProblemDetail"},

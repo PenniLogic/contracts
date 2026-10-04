@@ -11,17 +11,18 @@ from pennilogic_contracts.provider_model import ProviderModel
 
 from pennilogic_contracts.error_catalogue import error_policy, error_status
 from pennilogic_contracts.models.allowance import Allowance
+from pennilogic_contracts.models.allocation_mismatch_direction import AllocationMismatchDirection
 from pennilogic_contracts.models.entitlement_denial import EntitlementDenial
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.problem_code import ProblemCode
 from pennilogic_contracts.models.problem_field import ProblemField
-from pennilogic_contracts.models.validation_issue import ValidationIssue
+from pennilogic_contracts.models.validation_issue import ValidationIssue, validate_direction
 from pennilogic_contracts.models.validation_reason import ValidationReason
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 _REQUIRED = frozenset(("type", "title", "status", "detail", "code", "correlation_id"))
 _OPTIONAL = frozenset(("instance", "field", "reason", "validation_errors", "idempotency_key",
-                       "retry_after_seconds", "allowance", "entitlement"))
+                       "retry_after_seconds", "allowance", "entitlement", "direction"))
 _VALIDATION = frozenset((ProblemCode.VALIDATION_REJECTED, ProblemCode.IMPORT_MAPPING_REQUIRED,
                          ProblemCode.IDEMPOTENCY_KEY_INVALID))
 _DELAY = frozenset((ProblemCode.DEPENDENCY_UNAVAILABLE, ProblemCode.IDEMPOTENCY_IN_PROGRESS,
@@ -61,6 +62,10 @@ def validate_problem_wire(value: object) -> None:
         if "field" not in wire or "reason" not in wire:
             raise ProblemWireError("validation")
         field, reason = ProblemField.from_wire(wire["field"]), ValidationReason.from_wire(wire["reason"])
+        if code == ProblemCode.VALIDATION_REJECTED:
+            validate_direction(reason, wire.get("direction"), "direction" in wire)
+        elif "direction" in wire:
+            raise ProblemWireError("validation")
         if code == ProblemCode.IDEMPOTENCY_KEY_INVALID and (
                 field != ProblemField.IDEMPOTENCY_KEY or reason not in (ValidationReason.REQUIRED, ValidationReason.MALFORMED)):
             raise ProblemWireError("validation")
@@ -76,12 +81,13 @@ def validate_problem_wire(value: object) -> None:
                 raise ProblemWireError("validation")
             seen: set[tuple[ProblemField, ValidationReason]] = set()
             for item in issues:
-                issue = _object(item, frozenset(("field", "reason")))
+                issue = _object(item, frozenset(("field", "reason")), frozenset(("direction",)))
                 pair = ProblemField.from_wire(issue["field"]), ValidationReason.from_wire(issue["reason"])
+                validate_direction(pair[1], issue.get("direction"), "direction" in issue)
                 if pair in seen:
                     raise ProblemWireError("validation")
                 seen.add(pair)
-    elif any(member in wire for member in ("field", "reason", "validation_errors")):
+    elif any(member in wire for member in ("field", "reason", "validation_errors", "direction")):
         raise ProblemWireError("validation")
     if code == ProblemCode.IDEMPOTENCY_PAYLOAD_MISMATCH:
         key = wire.get("idempotency_key")
@@ -129,6 +135,7 @@ class ServiceProblemDetail(ProviderModel):
     instance: StrictStr | None = None
     var_field: ProblemField | None = Field(default=None, alias="field")
     reason: ValidationReason | None = None
+    direction: AllocationMismatchDirection | None = None
     validation_errors: list[ValidationIssue] | None = None
     idempotency_key: StrictStr | None = None
     retry_after_seconds: StrictInt | None = None

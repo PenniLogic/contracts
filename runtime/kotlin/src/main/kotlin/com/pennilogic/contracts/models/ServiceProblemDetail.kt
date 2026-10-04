@@ -23,6 +23,7 @@ data class ServiceProblemDetail(
     val instance: String? = null,
     val field: ProblemField? = null,
     val reason: ValidationReason? = null,
+    val direction: AllocationMismatchDirection? = null,
     @SerialName("validation_errors") val validationErrors: Set<ValidationIssue>? = null,
     @SerialName("idempotency_key") val idempotencyKey: String? = null,
     @SerialName("retry_after_seconds") val retryAfterSeconds: Int? = null,
@@ -38,6 +39,8 @@ data class ServiceProblemDetail(
         val validation = code in setOf(ProblemCode.VALIDATION_REJECTED, ProblemCode.IMPORT_MAPPING_REQUIRED, ProblemCode.IDEMPOTENCY_KEY_INVALID)
         require(if (validation) field != null && reason != null else field == null && reason == null && validationErrors == null) { "problem rejected: validation" }
         require(validationErrors == null || validationErrors.size in 1..20) { "problem rejected: validation" }
+        require((code == ProblemCode.VALIDATION_REJECTED && reason == ValidationReason.ALLOCATION_SUM_MISMATCH) ==
+            (direction != null)) { "validation direction rejected" }
         require(code != ProblemCode.IDEMPOTENCY_KEY_INVALID || (field == ProblemField.IDEMPOTENCY_KEY &&
             reason in setOf(ValidationReason.REQUIRED, ValidationReason.MALFORMED))) { "problem rejected: validation" }
         require(code != ProblemCode.IMPORT_MAPPING_REQUIRED || (field == ProblemField.COLUMN_MAPPING &&
@@ -67,7 +70,7 @@ object ServiceProblemContract {
     internal val publicCorrelation = Regex("cor_$UUID")
     internal val publicInstance = Regex("urn:pennilogic:problem-instance:$UUID")
     private val required = setOf("type", "title", "status", "detail", "code", "correlation_id")
-    private val optional = setOf("instance", "field", "reason", "validation_errors", "idempotency_key", "retry_after_seconds", "allowance", "entitlement")
+    private val optional = setOf("instance", "field", "reason", "direction", "validation_errors", "idempotency_key", "retry_after_seconds", "allowance", "entitlement")
 
     private fun shape(value: JsonElement?, required: Set<String>, optional: Set<String> = emptySet()): JsonObject {
         require(value is JsonObject && value.keys.containsAll(required) &&
@@ -108,6 +111,10 @@ object ServiceProblemContract {
         if ("instance" in wire) require(publicInstance.matches(string("instance"))) { "problem rejected: instance" }
         if ("field" in wire) require(ProblemField.entries.any { it.value == string("field") }) { "problem rejected: validation" }
         if ("reason" in wire) require(ValidationReason.entries.any { it.value == string("reason") }) { "problem rejected: validation" }
+        val reason = ValidationReason.entries.firstOrNull { JsonPrimitive(it.value) == wire["reason"] }
+        if (code == ProblemCode.VALIDATION_REJECTED) {
+            ValidationIssueContract.validateDirection(reason, wire["direction"], "direction" in wire)
+        } else require("direction" !in wire) { "validation direction rejected" }
         if ("idempotency_key" in wire) require(uuid.matches(string("idempotency_key"))) { "problem rejected: key" }
         if ("retry_after_seconds" in wire) {
             val delay = wire["retry_after_seconds"]
@@ -116,7 +123,8 @@ object ServiceProblemContract {
         wire["validation_errors"]?.let { issues ->
             require(issues is JsonArray && issues.size in 1..20 && issues.distinct().size == issues.size) { "problem rejected: validation" }
             issues.forEach { item ->
-                val issue = shape(item, setOf("field", "reason"))
+                val issue = shape(item, setOf("field", "reason"), setOf("direction"))
+                ValidationIssueContract.validateWire(issue)
                 require(ProblemField.entries.any { JsonPrimitive(it.value) == issue["field"] } &&
                     ValidationReason.entries.any { JsonPrimitive(it.value) == issue["reason"] }) { "problem rejected: validation" }
             }

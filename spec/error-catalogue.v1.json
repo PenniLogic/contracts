@@ -8,6 +8,17 @@
   "key_lifetime": "P30D",
   "retry_rule": "Retry means identical intended effect, persisted key and payload bytes. A refusal records no effect or idempotency receipt. Edited input is a new intended effect, never an automatic retry. A mismatch must never be escaped by minting a key. Horizon-exceeded money writes reconcile before an explicit new intended effect. This catalogue does not implement retries, auth flows or service idempotency.",
   "message_rule": "ServiceProblemDetail type/title/status/detail are exact per-code constants. These protocol diagnostics are not UI copy. Fields are registered tokens; unknown input names map to request. Never copy provider text, inputs, amounts, balances, resource identifiers, account existence signals or stack traces. Structured Python validation diagnostics must exclude input.",
+  "validation_reason_bindings": [
+    {
+      "reason": "allocation_sum_mismatch",
+      "code": "validation_rejected",
+      "required_members": ["field", "direction"],
+      "direction_schema": "AllocationMismatchDirection",
+      "direction_values": ["shortfall", "excess"],
+      "monetary_member": false,
+      "decision": "ADR-016 section 3.2 and allocation.sum_mismatch_refusal/rejection_reasons.members"
+    }
+  ],
   "codes": [
     {
       "code": "dependency_unavailable",

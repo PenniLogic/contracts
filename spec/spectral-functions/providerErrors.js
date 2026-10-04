@@ -52,15 +52,34 @@ module.exports = function providerErrors(document, _options, context) {
   for (const [member, reference] of Object.entries({
     code: "ProblemCode", correlation_id: "PublicCorrelationId", field: "ProblemField",
     reason: "ValidationReason", instance: "PublicProblemInstance",
+    direction: "AllocationMismatchDirection",
   })) {
     if (!properties[member] || properties[member].$ref !== `#/components/schemas/${reference}`) {
       add(`ServiceProblemDetail.${member} must reference ${reference}`);
     }
   }
-  const allowed = new Set([...required, "instance", "field", "reason", "validation_errors",
+  const allowed = new Set([...required, "instance", "field", "reason", "direction", "validation_errors",
     "idempotency_key", "retry_after_seconds", "allowance", "entitlement"]);
   if (Object.keys(properties).some((key) => !allowed.has(key))) {
     add("ServiceProblemDetail may carry only the published safe members; content and internal identifiers are forbidden");
+  }
+  const directionValues = ["shortfall", "excess"];
+  const directionBinding = catalogue.validation_reason_bindings?.find((entry) => entry.reason === "allocation_sum_mismatch");
+  const directionBranch = (problem.allOf || []).find((branch) =>
+    branch.if?.properties?.code?.const === "validation_rejected" &&
+    branch.if?.properties?.reason?.const === "allocation_sum_mismatch");
+  const issueBranch = (schemas.ValidationIssue?.allOf || []).find((branch) =>
+    branch.if?.properties?.reason?.const === "allocation_sum_mismatch");
+  if (JSON.stringify(schemas.AllocationMismatchDirection?.enum) !== JSON.stringify(directionValues) ||
+      directionBinding?.code !== "validation_rejected" || directionBinding?.monetary_member !== false ||
+      JSON.stringify(directionBinding?.required_members) !== '["field","direction"]' ||
+      JSON.stringify(directionBinding?.direction_values) !== JSON.stringify(directionValues) ||
+      schemas.ValidationIssue?.properties?.direction?.$ref !== "#/components/schemas/AllocationMismatchDirection" ||
+      JSON.stringify(directionBranch?.then?.required) !== '["field","direction"]' ||
+      JSON.stringify(directionBranch?.else?.not?.required) !== '["direction"]' ||
+      JSON.stringify(issueBranch?.then?.required) !== '["direction"]' ||
+      JSON.stringify(issueBranch?.else?.not?.required) !== '["direction"]') {
+    add("ADR-016 allocation_sum_mismatch requires field and typed shortfall/excess direction, with no monetary member");
   }
   const keySchema = document.components.parameters.IdempotencyKey.schema;
   if (!schemas.IdempotencyKeyValue || schemas.IdempotencyKeyValue.type !== keySchema.type ||

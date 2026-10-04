@@ -209,6 +209,15 @@ removed/required/narrowed/conditional/unknown changes and response metadata chan
 Adding an `allOf` constraint also fails. The composition and partial/stale/blanket acknowledgement
 regressions prevent this source-provider inheritance fix from becoming a bypass.
 
+The optional-inheritance proof is fail-closed at every record boundary: modified
+records have exactly base/revision/diff, matching well-formed member identities,
+no ambiguous duplicate indices, and a non-empty recursively proven optional
+property addition. Unknown record/diff keys or malformed metadata never qualify.
+Direct malformed-record cases and real pinned-oasdiff paired documents cover both
+the positive inheritance seam and retained removal/required/narrowing/response
+metadata failures. An absent published baseline is still explicitly not a release
+compatibility result.
+
 ## Smoke consumers and conformance vectors
 
 The three consumers under `smoke/` are the only consumers in this repository; product repositories

@@ -9,7 +9,8 @@ import { AllowanceUnit } from './AllowanceUnit.js';
 import { AllowanceWindow } from './AllowanceWindow.js';
 import { AllowanceFromJSON, AllowanceToJSON, type Allowance } from './Allowance.js';
 import { EntitlementDenialFromJSON, EntitlementDenialToJSON, type EntitlementDenial } from './EntitlementDenial.js';
-import { ValidationIssueFromJSON, ValidationIssueToJSON, type ValidationIssue } from './ValidationIssue.js';
+import { ValidationIssueFromJSON, ValidationIssueToJSON, validateDirection, type ValidationIssue } from './ValidationIssue.js';
+import { AllocationMismatchDirection, AllocationMismatchDirectionFromJSON } from './AllocationMismatchDirection.js';
 
 export interface ServiceProblemDetail {
     readonly type: string;
@@ -21,6 +22,7 @@ export interface ServiceProblemDetail {
     readonly instance?: string;
     readonly field?: ProblemField;
     readonly reason?: ValidationReason;
+    readonly direction?: AllocationMismatchDirection;
     readonly validationErrors?: Set<ValidationIssue>;
     readonly idempotencyKey?: string;
     readonly retryAfterSeconds?: number;
@@ -34,7 +36,7 @@ export class ProblemWireError extends TypeError {
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const REQUIRED = ['type', 'title', 'status', 'detail', 'code', 'correlation_id'];
-const OPTIONAL = ['instance', 'field', 'reason', 'validation_errors', 'idempotency_key', 'retry_after_seconds', 'allowance', 'entitlement'];
+const OPTIONAL = ['instance', 'field', 'reason', 'direction', 'validation_errors', 'idempotency_key', 'retry_after_seconds', 'allowance', 'entitlement'];
 const VALIDATION = new Set([ProblemCode.ValidationRejected, ProblemCode.ImportMappingRequired, ProblemCode.IdempotencyKeyInvalid]);
 const DELAY = new Set([ProblemCode.DependencyUnavailable, ProblemCode.IdempotencyInProgress, ProblemCode.RateLimited, ProblemCode.RequestFailed]);
 const MODEL_FIELDS: Readonly<Record<string, ProviderField>> = {
@@ -47,6 +49,7 @@ const MODEL_FIELDS: Readonly<Record<string, ProviderField>> = {
     instance: { name: 'instance', required: false, kind: 'string' },
     field: { name: 'field', required: false, kind: 'string' },
     reason: { name: 'reason', required: false, kind: 'string' },
+    direction: { name: 'direction', required: false, kind: 'string' },
     validation_errors: { name: 'validationErrors', required: false, kind: 'array', uniqueItems: true },
     idempotency_key: { name: 'idempotencyKey', required: false, kind: 'string' },
     retry_after_seconds: { name: 'retryAfterSeconds', required: false, kind: 'integer' },
@@ -78,6 +81,8 @@ export function validateProblemWire(value: unknown): void {
     if (Object.hasOwn(wire, 'instance') && !exactUuid(wire.instance, 'urn:pennilogic:problem-instance:')) throw new ProblemWireError('instance');
     if (VALIDATION.has(code)) {
         const field = ProblemFieldFromJSON(wire.field), reason = ValidationReasonFromJSON(wire.reason);
+        if (code === ProblemCode.ValidationRejected) validateDirection(reason, wire.direction, Object.hasOwn(wire, 'direction'));
+        else if (Object.hasOwn(wire, 'direction')) throw new ProblemWireError('validation');
         if (code === ProblemCode.IdempotencyKeyInvalid &&
             (field !== ProblemField.IdempotencyKey || ![ValidationReason.Required, ValidationReason.Malformed].includes(reason))) throw new ProblemWireError('validation');
         if (code === ProblemCode.ImportMappingRequired &&
@@ -88,13 +93,14 @@ export function validateProblemWire(value: unknown): void {
             if (!Array.isArray(wire.validation_errors) || wire.validation_errors.length < 1 || wire.validation_errors.length > 20) throw new ProblemWireError('validation');
             const seen = new Set<string>();
             for (const value of wire.validation_errors) {
-                const issue = object(value, ['field', 'reason']);
+                const issue = object(value, ['field', 'reason'], ['direction']);
                 const pair = `${ProblemFieldFromJSON(issue.field)}|${ValidationReasonFromJSON(issue.reason)}`;
+                validateDirection(ValidationReasonFromJSON(issue.reason), issue.direction, Object.hasOwn(issue, 'direction'));
                 if (seen.has(pair)) throw new ProblemWireError('validation');
                 seen.add(pair);
             }
         }
-    } else if (['field', 'reason', 'validation_errors'].some((key) => Object.hasOwn(wire, key))) throw new ProblemWireError('validation');
+    } else if (['field', 'reason', 'direction', 'validation_errors'].some((key) => Object.hasOwn(wire, key))) throw new ProblemWireError('validation');
     if (code === ProblemCode.IdempotencyPayloadMismatch) {
         if (!exactUuid(wire.idempotency_key, '')) throw new ProblemWireError('key');
     } else if (Object.hasOwn(wire, 'idempotency_key')) throw new ProblemWireError('key');
@@ -133,6 +139,7 @@ export function ServiceProblemDetailFromJSON(value: unknown): ServiceProblemDeta
         ...(typeof wire.instance === 'string' ? { instance: wire.instance } : {}),
         ...(Object.hasOwn(wire, 'field') ? { field: ProblemFieldFromJSON(wire.field) } : {}),
         ...(Object.hasOwn(wire, 'reason') ? { reason: ValidationReasonFromJSON(wire.reason) } : {}),
+        ...(Object.hasOwn(wire, 'direction') ? { direction: AllocationMismatchDirectionFromJSON(wire.direction) } : {}),
         ...(Array.isArray(wire.validation_errors) ? { validationErrors: new Set(wire.validation_errors.map(ValidationIssueFromJSON)) } : {}),
         ...(typeof wire.idempotency_key === 'string' ? { idempotencyKey: wire.idempotency_key } : {}),
         ...(typeof wire.retry_after_seconds === 'number' ? { retryAfterSeconds: wire.retry_after_seconds } : {}),
@@ -150,6 +157,7 @@ export function ServiceProblemDetailToJSON(value: ServiceProblemDetail): Record<
     if (value.instance !== undefined) wire.instance = value.instance;
     if (value.field !== undefined) wire.field = value.field;
     if (value.reason !== undefined) wire.reason = value.reason;
+    if (value.direction !== undefined) wire.direction = value.direction;
     if (value.validationErrors !== undefined) wire.validation_errors = [...value.validationErrors].map(ValidationIssueToJSON);
     if (value.idempotencyKey !== undefined) wire.idempotency_key = value.idempotencyKey;
     if (value.retryAfterSeconds !== undefined) wire.retry_after_seconds = value.retryAfterSeconds;
@@ -180,6 +188,7 @@ export function instanceOfServiceProblemDetail(value: unknown): value is Service
     if (fields.instance !== undefined && typeof fields.instance !== 'string') return false;
     if (fields.field !== undefined && !Object.values(ProblemField).some((member) => member === fields.field)) return false;
     if (fields.reason !== undefined && !Object.values(ValidationReason).some((member) => member === fields.reason)) return false;
+    if (fields.direction !== undefined && !Object.values(AllocationMismatchDirection).some((member) => member === fields.direction)) return false;
     if (fields.idempotencyKey !== undefined && typeof fields.idempotencyKey !== 'string') return false;
     if (fields.retryAfterSeconds !== undefined && typeof fields.retryAfterSeconds !== 'number') return false;
     if (fields.validationErrors !== undefined) {

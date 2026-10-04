@@ -8,6 +8,15 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class ErrorProviderTest {
+    @Test fun acceptedAllocationMismatchDirectionIsRequiredAndSafeSpellingsRoundTrip() {
+        val fixture = Fixtures.load("allocation-refusal.v1.json")
+        val problem = fixture.getValue("problem").jsonObject
+        assertFails { PennilogicJson.json.decodeFromJsonElement<ServiceProblemDetail>(problem) }
+        fixture.getValue("directions").jsonArray.forEach { direction ->
+            val model = PennilogicJson.json.decodeFromJsonElement<ServiceProblemDetail>(JsonObject(problem + ("direction" to direction)))
+            assertEquals(direction, PennilogicJson.json.encodeToJsonElement(model).jsonObject["direction"])
+        }
+    }
     private val fixture = Fixtures.load("error-provider.v1.json")
     private val entries = PennilogicJson.json.parseToJsonElement(
         File(Fixtures.root, "spec/error-catalogue.v1.json").readText()).jsonObject["codes"]!!.jsonArray

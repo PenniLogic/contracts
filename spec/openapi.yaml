@@ -270,6 +270,10 @@ components:
       minLength: 36
       maxLength: 36
       description: The presented ADR-015 request key, never another request's key. Binding-equal to the unchanged IdempotencyKey parameter schema.
+    AllocationMismatchDirection:
+      type: string
+      enum: [shortfall, excess]
+      description: Accepted ADR-016 section 3.2 allocation_sum_mismatch diagnostic direction; never an amount, balance, raw value or computed share.
     ValidationIssue:
       type: object
       x-pennilogic-strict-provider: true
@@ -280,6 +284,16 @@ components:
           $ref: '#/components/schemas/ProblemField'
         reason:
           $ref: '#/components/schemas/ValidationReason'
+        direction:
+          $ref: '#/components/schemas/AllocationMismatchDirection'
+      allOf:
+        - if:
+            properties: {reason: {const: allocation_sum_mismatch}}
+            required: [reason]
+          then:
+            required: [direction]
+          else:
+            not: {required: [direction]}
     AllowanceUnit:
       type: string
       enum: [requests, tokens]
@@ -361,6 +375,8 @@ components:
           $ref: '#/components/schemas/ProblemField'
         reason:
           $ref: '#/components/schemas/ValidationReason'
+        direction:
+          $ref: '#/components/schemas/AllocationMismatchDirection'
         validation_errors:
           type: array
           minItems: 1
@@ -381,6 +397,13 @@ components:
           $ref: '#/components/schemas/EntitlementDenial'
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'
+        - if:
+            properties: {code: {const: validation_rejected}, reason: {const: allocation_sum_mismatch}}
+            required: [code, reason]
+          then:
+            required: [field, direction]
+          else:
+            not: {required: [direction]}
         - if:
             properties: {code: {enum: [validation_rejected, import_mapping_required, idempotency_key_invalid]}}
             required: [code]
