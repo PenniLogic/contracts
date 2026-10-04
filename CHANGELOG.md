@@ -2,6 +2,14 @@
 
 ## 0.2.0 - local provider preparation, not released
 
+Source corrections after the frozen `fd7ef0a` draft: wire strict ingress/egress
+for successful AI refusal, recursively reject quoted integer/boolean primitives
+before Kotlin model conversion, and register the service-problem guard on actual
+ordinary/nested/generated Kotlin transport serialization. Apply closure guards
+to all 19 new object providers without narrowing legacy DTOs or the accepted
+global JSON configuration. Add schema and actual three-target transport matrices;
+the earlier source FAIL remains immutable and fresh review is still required.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

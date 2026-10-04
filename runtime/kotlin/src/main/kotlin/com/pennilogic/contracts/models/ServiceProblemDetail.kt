@@ -3,13 +3,16 @@ package com.pennilogic.contracts.models
 
 import com.pennilogic.contracts.errors.ErrorCatalogue
 import com.pennilogic.contracts.serialization.PennilogicJson
+import com.pennilogic.contracts.serialization.StrictProviderSerializer
 import com.pennilogic.contracts.time.InstantCodec
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
 
-@Serializable
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+@kotlinx.serialization.KeepGeneratedSerializer
+@Serializable(with = ServiceProblemDetailSerializer::class)
 data class ServiceProblemDetail(
     val type: String,
     val title: String,
@@ -51,6 +54,11 @@ data class ServiceProblemDetail(
             ((allowance.limit != 0 && allowance.window != AllowanceWindow.LIFETIME) || allowance.resetsAt == null))) { "problem rejected: allowance" }
         require((code == ProblemCode.ENTITLEMENT_DENIED) == (entitlement != null)) { "problem rejected: entitlement" }
     }
+}
+
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+object ServiceProblemDetailSerializer : StrictProviderSerializer<ServiceProblemDetail>(ServiceProblemDetail.generatedSerializer()) {
+    override fun validateContent(value: JsonElement) = ServiceProblemContract.validateWire(value)
 }
 
 object ServiceProblemContract {

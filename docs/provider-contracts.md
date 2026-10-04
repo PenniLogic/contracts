@@ -94,12 +94,35 @@ allowances have no reset; an absent reset permits no automatic quota retry. Own-
 token usage is not a quota exhaustion. Services do not compute reset boundaries
 on a client.
 
-Strict `ServiceProblemDetail` seams reject unsafe inbound/outbound values in all
-three languages. Python diagnostic strings hide inputs; structured diagnostic
-logging must still use `errors(include_input=False)` / `json(include_input=False)`.
-Ordinary generated DTOs are transport types, not full JSON Schema validators.
-Use the published import conformance entry points below and producer schema
-validation, not a generated `instanceOf` helper as evidence of conformance.
+All 19 new closed object providers select `x-pennilogic-strict-provider`, including
+the successful refusal and the nested allowance, validation, mapping, row and link
+types. This is generator wiring, not a new wire policy. Ordinary generated conversion
+and serialization enforce closure and primitive kinds; callers do not have to opt
+into a separate helper. Legacy `ProblemDetail`, ordinary additive DTOs and the shared
+Kotlin `ignoreUnknownKeys` configuration keep their accepted behaviour.
+
+Python provider models inherit a closed, frozen Pydantic seam with no additional-
+property collector. Constructors and ordinary `from_dict`/`model_validate` paths
+reject extras before conversion; ordinary model dumps and the generated client
+serializer revalidate outbound state, including nested models. TypeScript provider
+converters guard the original wire object and native model before projecting fields,
+so an unknown member is rejected rather than dropped. Declared absent optional
+members still serialize normally.
+
+Kotlin provider types register their own serializer with `KeepGeneratedSerializer`
+on the pinned compiler/runtime. The strict wrapper checks the original JSON tree
+against the retained generated descriptor before any tree decoding: every integer
+and boolean leaf is checked by kind, not by six field names or leniency flags.
+It also checks closed members, enum spellings, patterns and bounds, and validates
+construction and serialization. `ServiceProblemDetail` invokes its existing wire
+guard through the registered serializer on ordinary, nested and actual generated
+`ApiClient` converter paths. Refusal failures use static diagnostics rather than
+stock enum diagnostics that can echo a rejected message.
+
+These seams are not a replacement for full producer JSON Schema validation or
+server authorisation/atomicity. Python diagnostic strings hide inputs; structured
+diagnostic logging must still use `errors(include_input=False)` /
+`json(include_input=False)`. A generated `instanceOf` helper is not conformance proof.
 
 ## Import, dedup and override provider
 
@@ -199,8 +222,15 @@ Their preview/request/result/dedup entry points enforce closed wire boundaries;
 pure verification checks counts, mapping, version/reference/decision binding,
 source precedence/windows, visible links and immutable replay receipts. They
 contain no backend matching, parser, authorisation, retry or ledger implementation.
-Synthetic fixtures are shared unchanged by all three smoke consumers. The tests
-also distinguish schema constraints from semantic-only checks.
+Synthetic fixtures are shared unchanged by all three smoke consumers. The
+`provider-transport.v1.json` inventory covers every closed provider with ordinary
+conversion/read/write tests, all integer/boolean leaves, missing/unknown members,
+refusal correlation/constant failures and private-diagnostic checks. Kotlin tests
+use the actual generated client with `MockEngine`; Python and TypeScript use the
+generated transport's normal model conversion and serialization. No real endpoint
+or network/provider call occurs. The tests also distinguish schema constraints
+from semantic-only checks. Source failures on an earlier head and native CI success
+are retained history, not approval of a correction head.
 
 After independent current-head Core/QA and affected contract/money/privacy/security
 review, native CI, dependency/integration conditions and owner approval, the

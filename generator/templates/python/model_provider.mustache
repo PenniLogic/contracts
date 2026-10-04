@@ -1,0 +1,28 @@
+from __future__ import annotations
+import re
+{{#vendorExtensions.x-py-other-imports}}
+{{{.}}}
+{{/vendorExtensions.x-py-other-imports}}
+{{#vendorExtensions.x-py-model-imports}}
+{{{.}}}
+{{/vendorExtensions.x-py-model-imports}}
+from pennilogic_contracts.models.instant import Instant
+from pennilogic_contracts.models.local_date import LocalDate
+from pennilogic_contracts.provider_model import ProviderModel, ProviderWireError
+
+
+class {{classname}}(ProviderModel):
+    """{{{classname}}}: strict generated provider, not a permissive legacy DTO."""
+{{#vars}}
+    {{name}}: {{{vendorExtensions.x-py-typing}}}
+{{/vars}}
+{{#vars}}
+    {{#vendorExtensions.x-regex}}
+
+    @field_validator('{{{name}}}', mode="before")
+    def {{{name}}}_validate_regular_expression(cls, value: Any) -> Any:
+        if isinstance(value, str) and re.fullmatch(r"{{{.}}}", value{{#vendorExtensions.x-modifiers}}, re.{{{.}}}{{/vendorExtensions.x-modifiers}}) is None:
+            raise ProviderWireError()
+        return value
+    {{/vendorExtensions.x-regex}}
+{{/vars}}

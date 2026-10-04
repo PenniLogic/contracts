@@ -124,7 +124,7 @@ vectors of `money-wire-fixtures.v1.json` prove it per language. The wire seams a
 
 ### Generator templates
 
-Five templates are overridden, each the pinned generator's stock template plus documented edits:
+Eight templates/partials are overridden; stock portions remain bound to the pinned generator:
 
 - `generator/templates/python/model_generic.mustache`: the `Instant` and `LocalDate` imports (a
   type-mapped, non-model type gets no generated import), `Any -> Any` annotations on the generated
@@ -139,6 +139,14 @@ Five templates are overridden, each the pinned generator's stock template plus d
   strict Pydantic models, enum-value serialization, and static no-input-echo rejection.
 - `generator/templates/typescript/modelEnum.mustache`: typed guards and enum converters that
   reject unknown/coerced wire values instead of casting them into a known enum.
+- `generator/templates/kotlin/data_class.mustache`: provider-only registered strict serializers,
+  retained generated descriptors, constructor checks and field constraints. Legacy model emission
+  is unchanged; the global JSON configuration is not made strict.
+- `generator/templates/python/model_provider.mustache`: provider-only Pydantic fields and safe
+  regex validators; `model_generic.mustache` selects this partial for marked closed models only.
+  The reusable provider base closes original ingress and normal nested/outbound serialization.
+- `generator/templates/typescript/modelGeneric.mustache`: provider-only original-wire/native-model
+  guards around the unchanged generator conversion bodies.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other
@@ -167,6 +175,10 @@ check enum typing, decode shared synthetic fixtures through the provider conform
 and reject unsafe errors, invalid mappings/counts/decisions, changed replay receipts and
 unknown confidence. JSON Schema checks and semantic-only checks are reported separately.
 Neither proves a running service's ownership, atomic commit, metrics or no-duplicate effects.
+The provider-transport inventory additionally binds all 19 new closed model paths and tests
+ordinary conversion, native construction/serialization, nested models and actual generated
+transport. Missing strict wiring fails lint. Runtime-only generator metadata is ignored by the
+inline-equivalence fingerprint, so removing it does not let an equivalent local schema pass.
 
 ### Golden hashes
 

@@ -3,7 +3,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { HTTP_METHODS } = require("./_shared");
-const DESCRIPTIVE = new Set(["description", "title", "summary", "example", "examples", "externalDocs", "deprecated"]);
+const DESCRIPTIVE = new Set(["description", "title", "summary", "example", "examples", "externalDocs", "deprecated",
+  "x-pennilogic-strict-provider", "x-pennilogic-provider-validator"]);
 const SHARED = ["ImportPreview", "ImportCommitRequest", "ImportCommitResult", "ImportColumnMapping", "ImportRowError", "ConfidenceBand", "DedupOutcome"];
 
 function canonical(value, key = "") {
@@ -82,6 +83,9 @@ module.exports = function providerImports(document, _options, context) {
   const banned = new Set(policy.privacy.absent_fields);
   for (const name of owned) {
     if (!schemas[name]) { add("Every published import-group component must exist"); continue; }
+    if (schemas[name].type === "object" && schemas[name]["x-pennilogic-strict-provider"] !== true) {
+      add("Every new closed import provider must select strict generated conversion and serialization", ["components", "schemas", name]);
+    }
     walk(schemas[name], ["components", "schemas", name], (value, location) => {
       if (value.type === "object" && value.additionalProperties !== false) {
         add("Import group objects must be closed; arbitrary metadata is not a raw-content escape hatch", location);
@@ -93,6 +97,14 @@ module.exports = function providerImports(document, _options, context) {
         add("Import group strings are only typed vocabulary or bounded public references, never free raw text", location);
       }
     });
+  }
+  for (const [name, method] of Object.entries({
+    DedupOutcome: "verifyDedup", ImportColumnMapping: "verifyMapping", ImportPreview: "verifyPreview",
+    ImportCommitResult: "verifyCommitResult",
+  })) {
+    if (schemas[name]?.["x-pennilogic-provider-validator"] !== `com.pennilogic.contracts.imports.ImportContract.${method}`) {
+      add("Import root serializers retain their published semantic verification, not only wire-kind checks", ["components", "schemas", name]);
+    }
   }
   const fingerprints = new Map(SHARED.filter((name) => schemas[name]).map((name) => [JSON.stringify(canonical(schemas[name])), name]));
   walk(document, [], (value, location) => {

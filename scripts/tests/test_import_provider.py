@@ -128,8 +128,10 @@ class ImportLintNegativeTest(unittest.TestCase):
         self.assertIn("same normative DedupRecordId", self.reject(text))
 
     def test_raw_content_and_open_maps_are_rejected_at_source(self) -> None:
-        text = replace_once(spec_text(), "    ImportPreview:\n      type: object\n      additionalProperties: false\n",
-                            "    ImportPreview:\n      type: object\n      additionalProperties: true\n")
+        anchor = ("    ImportPreview:\n      type: object\n      x-pennilogic-strict-provider: true\n"
+                  "      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyPreview\n"
+                  "      additionalProperties: false\n")
+        text = replace_once(spec_text(), anchor, anchor.replace("additionalProperties: false", "additionalProperties: true"))
         self.assertIn("objects must be closed", self.reject(text))
         text = replace_once(spec_text(), "        column_index:\n          $ref: '#/components/schemas/ImportColumnIndex'\n        problem:\n",
                             "        raw_row:\n          type: string\n        column_index:\n          $ref: '#/components/schemas/ImportColumnIndex'\n        problem:\n")

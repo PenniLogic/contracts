@@ -16,6 +16,14 @@ module.exports = function providerErrors(document, _options, context) {
   const schemas = document.components && document.components.schemas || {};
   const problems = [];
   const add = (message, location = ["components", "schemas"]) => problems.push({ message, path: location });
+  for (const name of ["ValidationIssue", "Allowance", "EntitlementDenial", "ServiceProblemDetail", "AiRefusal"]) {
+    if (schemas[name]?.["x-pennilogic-strict-provider"] !== true) {
+      add("Every new closed error/content provider must select strict generated conversion and serialization", ["components", "schemas", name]);
+    }
+  }
+  if (schemas.ProblemDetail?.["x-pennilogic-strict-provider"] !== undefined || schemas.Money?.["x-pennilogic-strict-provider"] !== undefined) {
+    add("The accepted legacy scaffold keeps its existing DTO and money serializer bindings");
+  }
   const codes = catalogue.codes;
   if (!Array.isArray(codes) || !codes.length) {
     add("error-catalogue.v1.json must publish a non-empty code catalogue");

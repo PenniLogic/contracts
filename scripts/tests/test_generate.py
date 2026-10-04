@@ -263,6 +263,10 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             expected, config,
             config + "        # PenniLogic: ADR-015 s2.2 strict models; diagnostics never echo the offending value (s1.5, s5).\n        strict=True,\n        hide_input_in_errors=True,\n",
         )
+        expected = ("{{#vendorExtensions.x-pennilogic-strict-provider}}\n{{>model_provider}}\n"
+                    "{{/vendorExtensions.x-pennilogic-strict-provider}}\n"
+                    "{{^vendorExtensions.x-pennilogic-strict-provider}}\n" + expected +
+                    "{{/vendorExtensions.x-pennilogic-strict-provider}}\n")
         self.assertEqual(override, expected, "generator/templates/python/model_generic.mustache drifted from the pinned generator's template; re-apply the documented edits on the new stock template")
 
     def test_kotlin_api_client_override_is_stock_plus_known_edits(self) -> None:
@@ -297,8 +301,69 @@ class TemplateOverrideDriftTest(unittest.TestCase):
 
     def test_no_other_template_is_overridden(self) -> None:
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
-        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
-                                    "python/model_enum.mustache", "python/model_generic.mustache", "typescript/modelEnum.mustache"])
+        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
+                                    "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
+                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache"])
+
+    def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
+        stock = self.stock("kotlin-client/data_class.mustache")
+        override = (ROOT / "generator" / "templates" / "kotlin" / "data_class.mustache").read_text(encoding="utf-8")
+        serializable = "{{#multiplatform}}@Serializable{{/multiplatform}}{{#kotlinx_serialization}}{{#serializableModel}}@KSerializable{{/serializableModel}}{{^serializableModel}}@Serializable{{/serializableModel}}{{/kotlinx_serialization}}{{#moshi}}{{#moshiCodeGen}}@JsonClass(generateAdapter = true){{/moshiCodeGen}}{{/moshi}}{{#jackson}}{{#discriminator}}{{>typeInfoAnnotation}}{{/discriminator}}{{/jackson}}\n"
+        expected = self.replace_once(
+            stock, serializable,
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)\n@kotlinx.serialization.KeepGeneratedSerializer\n"
+            "@Serializable(with = {{classname}}ProviderSerializer::class)\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n{{^vendorExtensions.x-pennilogic-strict-provider}}\n" +
+            serializable + "{{/vendorExtensions.x-pennilogic-strict-provider}}\n",
+        )
+        expected = self.replace_once(
+            expected, "{{/vendorExtensions.x-has-data-class-body}}\n{{#generateRoomModels}}\n",
+            "{{/vendorExtensions.x-has-data-class-body}}\n"
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "    init { {{classname}}ProviderSerializer.validateValue(this) }\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n{{#generateRoomModels}}\n",
+        )
+        marker = "{{#vendorExtensions.x-pennilogic-strict-provider}}\n\n@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)\n"
+        self.assertEqual(override.split(marker, 1)[0], expected)
+        added = override.split(marker, 1)[1]
+        self.assertIn("StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer())", added)
+        self.assertIn("{{#isEnumRef}}", added)
+        self.assertIn('Regex("{{{pattern}}}").matches(member.content)', added)
+        for constraint in ("minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems"):
+            self.assertIn("{{#" + constraint + "}}", added)
+        self.assertIn("override fun verify(value: {{classname}})", added)
+        self.assertNotIn("ignoreUnknownKeys", added)
+
+    def test_typescript_generic_override_keeps_stock_conversion_inside_provider_guards(self) -> None:
+        stock = self.stock("typescript-fetch/modelGeneric.mustache")
+        override = (ROOT / "generator" / "templates" / "typescript" / "modelGeneric.mustache").read_text(encoding="utf-8")
+        expected = (
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "import { providerObject, providerPattern, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n" + stock
+        )
+        field_block = override.split("{{>modelGenericInterfaces}}\n", 1)[1].split("\n\n/**", 1)[0]
+        self.assertTrue(field_block.startswith("{{#vendorExtensions.x-pennilogic-strict-provider}}"))
+        self.assertTrue(field_block.rstrip().endswith("{{/vendorExtensions.x-pennilogic-strict-provider}}"))
+        expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n", "{{>modelGenericInterfaces}}\n" + field_block)
+        from_json = "export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boolean): {{classname}} {\n"
+        expected = self.replace_once(expected, from_json, from_json +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     "    providerObject(json, providerFields, true);\n"
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        to_json = "export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classname}}, {{#readOnlyVars}}'{{name}}'{{^-last}}|{{/-last}}{{/readOnlyVars}}>{{/hasReadOnly}}{{^hasReadOnly}}{{classname}}{{/hasReadOnly}} | null, ignoreDiscriminator: boolean = false): any {\n"
+        expected = self.replace_once(expected, to_json, to_json +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     "    if (value === null) throw new ProviderWireError();\n"
+                                     "    if (value !== undefined) providerObject(value, providerFields, false);\n"
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        self.assertEqual(override, expected)
+        self.assertIn("{{#isInteger}}kind: 'integer'", field_block)
+        self.assertIn("{{#isBoolean}}kind: 'boolean'", field_block)
+        self.assertIn('providerPattern("{{{pattern}}}")', field_block)
+        self.assertIn("{{#uniqueItems}}uniqueItems: true", field_block)
 
     def test_python_enum_override_is_stock_plus_strict_wire_seam(self) -> None:
         stock = self.stock("python/model_enum.mustache")

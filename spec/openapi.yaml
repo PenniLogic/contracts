@@ -272,6 +272,7 @@ components:
       description: The presented ADR-015 request key, never another request's key. Binding-equal to the unchanged IdempotencyKey parameter schema.
     ValidationIssue:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [field, reason]
       properties:
@@ -287,6 +288,7 @@ components:
       enum: [minute, hour, day, month, rolling_7_days, lifetime]
     Allowance:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [limit, unit, window]
       description: Server-stated allowance, never usage, a price, a balance or a hidden-resource count. Omit resets_at when no reset is known or the limit is zero; never invent a reset. Own-key token usage is not a quota exhaustion.
@@ -314,6 +316,7 @@ components:
             not: {required: [resets_at]}
     EntitlementDenial:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [upgrade_available]
       description: Whether an upgrade path is available, explicitly stated by the server. No plan name, account state, resource name or price.
@@ -322,6 +325,7 @@ components:
           type: boolean
     ServiceProblemDetail:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [type, title, status, detail, code, correlation_id]
       description: |
@@ -578,6 +582,7 @@ components:
       enum: [This request cannot be answered.]
     AiRefusal:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [code, message, correlation_id]
       description: Successful content response, not ServiceProblemDetail or a provider outage. No provider name, raw refusal text, prompt or account content crosses this shape.
@@ -649,6 +654,7 @@ components:
       enum: [source_order, user_confirmed, same_source_existing, operation_screen]
     DedupPrecedence:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [rule, user_confirmed_preserved]
       properties:
@@ -689,6 +695,7 @@ components:
       enum: [suppressed_by_link, restored]
     DuplicateLink:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [link_id, suppressed_record_id, status, decided_by, can_unmerge]
       description: Both records remain. If both were posted, suppression uses a reversal, never a ledger edit/delete; reversal of the link restores posting through a new fact (ADR-018 sections 7.3/7.4). Every system link is visible with its public ID, status and unmerge affordance.
@@ -721,6 +728,7 @@ components:
       description: Mutable descriptive fields only. No ledger fact, amount, currency, account, occurred_at, source_event_id or dedupe key may be enriched.
     DedupEnrichment:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [field, source, source_record_id]
       description: Public provenance of enrichment, without the field's contents. Category enrichment retains ADR-016 assignment precedence; it is not a category UPDATE.
@@ -733,6 +741,8 @@ components:
           $ref: '#/components/schemas/DedupRecordId'
     DedupOutcome:
       type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyDedup
       additionalProperties: false
       required: [group_version, outcome]
       description: |
@@ -833,6 +843,7 @@ components:
       maximum: 256
     ImportColumnBinding:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [column_index, target]
       properties:
@@ -842,6 +853,8 @@ components:
           $ref: '#/components/schemas/ImportColumnTarget'
     ImportColumnMapping:
       type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyMapping
       additionalProperties: false
       required: [column_count, detected_columns, user_overrides, unmapped_columns]
       description: |
@@ -889,6 +902,7 @@ components:
       description: Content dispositions, not a second error-code vocabulary. invalid carries ImportRowError.problem with T-CON-12 ProblemCode and safe catalogue text.
     ImportRowError:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [source_row, problem]
       properties:
@@ -905,6 +919,7 @@ components:
                 code: {enum: [validation_rejected, import_mapping_required]}
     ImportPreviewRow:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [source_row, action, reason]
       properties:
@@ -966,6 +981,7 @@ components:
             not: {required: [row_error]}
     ImportPreviewCounts:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [row_count, create_count, skip_count, reject_count, review_count]
       description: Exact count of rows and each action; row_count equals the sum of the four action counts and the length of rows. The same values feed import.preview.rows metrics.
@@ -977,6 +993,8 @@ components:
         review_count: {$ref: '#/components/schemas/ImportRowCount'}
     ImportPreview:
       type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyPreview
       additionalProperties: false
       required: [group_version, preview_ref, created_at, expires_at, correlation_id, mapping, rows, counts]
       description: |
@@ -1008,6 +1026,7 @@ components:
           $ref: '#/components/schemas/ImportPreviewCounts'
     ImportCommitRequest:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [group_version, preview_ref]
       description: |
@@ -1028,6 +1047,7 @@ components:
       enum: [created, skipped, rejected]
     ImportCommitRow:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [source_row, action, reason]
       properties:
@@ -1077,6 +1097,7 @@ components:
             not: {required: [dedup_outcome]}
     ImportCommitCounts:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [row_count, created_count, skipped_count, rejected_count]
       description: Exact row/action counts from the first commit, reused unchanged on replay and recorded by import.commit.rows metrics. A replay increments no imported-row metric.
@@ -1087,6 +1108,8 @@ components:
         rejected_count: {$ref: '#/components/schemas/ImportRowCount'}
     ImportCommitResult:
       type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyCommitResult
       additionalProperties: false
       required: [group_version, preview_ref, completed_at, correlation_id, rows, counts]
       description: First immutable receipt of this owner's preview. Replay returns this exact body/status, including IDs, counts, completion and public correlation; the replay marker belongs in a header, not a changed body. Contains no raw file, row strings or full account identifiers.

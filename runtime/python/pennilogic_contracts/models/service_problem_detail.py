@@ -6,7 +6,8 @@ import json
 import re
 from typing import Any, Mapping, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
+from pydantic import ConfigDict, Field, StrictInt, StrictStr, model_validator
+from pennilogic_contracts.provider_model import ProviderModel
 
 from pennilogic_contracts.error_catalogue import error_policy, error_status
 from pennilogic_contracts.models.allowance import Allowance
@@ -115,7 +116,7 @@ def validate_problem_wire(value: object) -> None:
         raise ProblemWireError("entitlement")
 
 
-class ServiceProblemDetail(BaseModel):
+class ServiceProblemDetail(ProviderModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True, hide_input_in_errors=True,
                               validate_by_alias=True, validate_by_name=False)
 

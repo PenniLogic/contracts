@@ -1,0 +1,260 @@
+{{#vendorExtensions.x-pennilogic-strict-provider}}
+import { providerObject, providerPattern, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';
+{{/vendorExtensions.x-pennilogic-strict-provider}}
+import { mapValues{{#isDateLibraryDate}}{{#vendorExtensions.x-hasDateVars}}, parseDate, parseDateTime, serializeDate, serializeDateTime{{/vendorExtensions.x-hasDateVars}}{{/isDateLibraryDate}} } from '../runtime{{importFileExtension}}';
+{{#hasImports}}
+{{#tsImports}}
+import type { {{{classname}}} } from './{{filename}}{{importFileExtension}}';
+import {
+    {{classname}}FromJSON,
+    {{classname}}FromJSONTyped,
+    {{classname}}ToJSON,
+    {{classname}}ToJSONTyped,
+} from './{{filename}}{{importFileExtension}}';
+{{/tsImports}}
+
+{{/hasImports}}
+{{#discriminator}}
+{{#discriminator.mappedModels}}
+import { type {{modelName}}, {{modelName}}FromJSONTyped, {{modelName}}ToJSON, {{modelName}}ToJSONTyped } from './{{modelName}}{{importFileExtension}}';
+{{/discriminator.mappedModels}}
+{{/discriminator}}
+{{>modelGenericInterfaces}}
+{{#vendorExtensions.x-pennilogic-strict-provider}}
+
+const providerFields: Readonly<Record<string, ProviderField>> = {
+    {{#vars}}
+    '{{baseName}}': {
+        name: '{{name}}', required: {{#required}}true{{/required}}{{^required}}false{{/required}},
+        {{#isString}}kind: 'string',{{/isString}}
+        {{#isInteger}}kind: 'integer',{{/isInteger}}
+        {{#isBoolean}}kind: 'boolean',{{/isBoolean}}
+        {{#isArray}}kind: 'array',{{/isArray}}
+        {{#isModel}}kind: 'object',{{/isModel}}
+        {{#pattern}}pattern: providerPattern("{{{pattern}}}"),{{/pattern}}
+        {{#minLength}}minLength: {{minLength}},{{/minLength}}
+        {{#maxLength}}maxLength: {{maxLength}},{{/maxLength}}
+        {{#minimum}}minimum: {{minimum}},{{/minimum}}
+        {{#maximum}}maximum: {{maximum}},{{/maximum}}
+        {{#minItems}}minItems: {{minItems}},{{/minItems}}
+        {{#maxItems}}maxItems: {{maxItems}},{{/maxItems}}
+        {{#uniqueItems}}uniqueItems: true,{{/uniqueItems}}
+        {{#items}}
+        {{#isString}}itemKind: 'string',{{/isString}}
+        {{#isInteger}}itemKind: 'integer',{{/isInteger}}
+        {{#isBoolean}}itemKind: 'boolean',{{/isBoolean}}
+        {{/items}}
+    },
+    {{/vars}}
+};
+{{/vendorExtensions.x-pennilogic-strict-provider}}
+
+
+/**
+ * Check if a given object implements the {{classname}} interface.
+ */
+export function instanceOf{{classname}}(value: object): value is {{classname}} {
+    {{#vars}}
+    {{#required}}
+    {{#hasSanitizedName}}
+    if ((!('{{name}}' in (value as Record<string, any>)) && !('{{baseName}}' in (value as Record<string, any>))) || ((value as Record<string, any>)['{{name}}'] === undefined && (value as Record<string, any>)['{{baseName}}'] === undefined)) return false;
+    {{/hasSanitizedName}}
+    {{^hasSanitizedName}}
+    if (!('{{name}}' in value) || value['{{name}}'] === undefined) return false;
+    {{/hasSanitizedName}}
+    {{#isEnum}}
+    {{^isContainer}}
+    {{#allowableValues}}
+    {{#values}}
+    {{#-first}}
+    {{#-last}}
+    {{#hasSanitizedName}}
+    {{#isString}}if ((value as Record<string, any>)['{{name}}'] !== '{{.}}' && (value as Record<string, any>)['{{baseName}}'] !== '{{.}}') return false;{{/isString}}
+    {{^isString}}if ((value as Record<string, any>)['{{name}}'] !== {{.}} && (value as Record<string, any>)['{{baseName}}'] !== {{.}}) return false;{{/isString}}
+    {{/hasSanitizedName}}
+    {{^hasSanitizedName}}
+    {{#isString}}if (value['{{name}}'] !== '{{.}}') return false;{{/isString}}
+    {{^isString}}if (value['{{name}}'] !== {{.}}) return false;{{/isString}}
+    {{/hasSanitizedName}}
+    {{/-last}}
+    {{/-first}}
+    {{/values}}
+    {{/allowableValues}}
+    {{/isContainer}}
+    {{/isEnum}}
+    {{/required}}
+    {{/vars}}
+    return true;
+}
+
+export function {{classname}}FromJSON(json: any): {{classname}} {
+    return {{classname}}FromJSONTyped(json, false);
+}
+
+export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boolean): {{classname}} {
+    {{#vendorExtensions.x-pennilogic-strict-provider}}
+    providerObject(json, providerFields, true);
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{#hasVars}}
+    if (json == null) {
+        return json;
+    }
+{{#discriminator}}
+    if (!ignoreDiscriminator) {
+{{#discriminator.mappedModels}}
+        if (json['{{discriminator.propertyBaseName}}'] === '{{mappingName}}') {
+            return {{modelName}}FromJSONTyped(json, ignoreDiscriminator);
+        }
+{{/discriminator.mappedModels}}
+    {{#hasSelfReferencingDiscriminatorMapping}}
+        if (json['{{discriminator.propertyBaseName}}'] === '{{selfReferencingDiscriminatorMapping.mappingName}}') {
+            return {{selfReferencingDiscriminatorMapping.modelName}}FromJSONTyped(json, true);
+        }
+    {{/hasSelfReferencingDiscriminatorMapping}}
+
+    }
+{{/discriminator}}
+    return {
+        {{#parent}}...{{{.}}}FromJSONTyped(json, true),{{/parent}}
+        {{#additionalPropertiesType}}
+            ...json,
+        {{/additionalPropertiesType}}
+        {{#vars}}
+        {{#isPrimitiveType}}
+        {{#isArray}}
+        {{#uniqueItems}}
+        {{! For optional nullable fields, return null (not undefined) when API returns null. See #5670 }}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}{{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}new Set(json['{{baseName}}']),
+        {{/uniqueItems}}
+        {{^uniqueItems}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}{{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}json['{{baseName}}'],
+        {{/uniqueItems}}
+        {{/isArray}}
+        {{^isArray}}
+        {{#isDateType}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? json['{{baseName}}'] : {{/isNullable}}{{/required}}parseDate(json['{{baseName}}'])),
+        {{/isDateType}}
+        {{#isDateTimeType}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? json['{{baseName}}'] : {{/isNullable}}{{/required}}parseDateTime(json['{{baseName}}'])),
+        {{/isDateTimeType}}
+        {{^isDateType}}
+        {{^isDateTimeType}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}json['{{baseName}}'],
+        {{/isDateTimeType}}
+        {{/isDateType}}
+        {{/isArray}}
+        {{/isPrimitiveType}}
+        {{^isPrimitiveType}}
+        {{#isArray}}
+        {{#uniqueItems}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}new Set((json['{{baseName}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}FromJSON))),
+        {{/uniqueItems}}
+        {{^uniqueItems}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}(json['{{baseName}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}FromJSON)),
+        {{/uniqueItems}}
+        {{/isArray}}
+        {{#isMap}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}mapValues(json['{{baseName}}'], {{#items}}{{datatype}}{{/items}}FromJSON)),
+        {{/isMap}}
+        {{^isArray}}
+        {{^isMap}}
+        {{^isFreeFormObject}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}{{datatype}}FromJSON(json['{{baseName}}']),
+        {{/isFreeFormObject}}
+        {{#isFreeFormObject}}
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}json['{{baseName}}'],
+        {{/isFreeFormObject}}
+        {{/isMap}}
+        {{/isArray}}
+        {{/isPrimitiveType}}
+        {{/vars}}
+    };
+    {{/hasVars}}
+    {{^hasVars}}
+    return json;
+    {{/hasVars}}
+}
+
+export function {{classname}}ToJSON(json: any): {{classname}} {
+    return {{classname}}ToJSONTyped(json, false);
+}
+
+export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classname}}, {{#readOnlyVars}}'{{name}}'{{^-last}}|{{/-last}}{{/readOnlyVars}}>{{/hasReadOnly}}{{^hasReadOnly}}{{classname}}{{/hasReadOnly}} | null, ignoreDiscriminator: boolean = false): any {
+    {{#vendorExtensions.x-pennilogic-strict-provider}}
+    if (value === null) throw new ProviderWireError();
+    if (value !== undefined) providerObject(value, providerFields, false);
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{#hasVars}}
+    if (value == null) {
+        return value;
+    }
+    {{#discriminator}}
+
+    if (!ignoreDiscriminator) {
+        switch (value['{{discriminator.propertyName}}']) {
+        {{#discriminator.mappedModels}}
+            case '{{mappingName}}':
+                return {{modelName}}ToJSONTyped(value as {{modelName}}, ignoreDiscriminator);
+        {{/discriminator.mappedModels}}
+            default:
+                return value;
+        }
+    }
+    {{/discriminator}}
+
+    return {
+        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}
+        {{#additionalPropertiesType}}
+            ...value,
+        {{/additionalPropertiesType}}
+        {{#vars}}
+        {{^isReadOnly}}
+        {{#isPrimitiveType}}
+        {{#isDateType}}
+        '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDate(value['{{name}}']),
+        {{/isDateType}}
+        {{#isDateTimeType}}
+        '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDateTime(value['{{name}}']),
+        {{/isDateTimeType}}
+        {{#isArray}}
+        '{{baseName}}': {{#uniqueItems}}{{^required}}value['{{name}}'] == null ? undefined : {{/required}}{{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}value['{{name}}']{{/uniqueItems}},
+        {{/isArray}}
+        {{^isDateType}}
+        {{^isDateTimeType}}
+        {{^isArray}}
+        '{{baseName}}': value['{{name}}'],
+        {{/isArray}}
+        {{/isDateTimeType}}
+        {{/isDateType}}
+        {{/isPrimitiveType}}
+        {{^isPrimitiveType}}
+        {{#isArray}}
+        {{#uniqueItems}}
+        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}Array.from(value['{{name}}'] as Set<any>).map({{#items}}{{datatype}}{{/items}}ToJSON)),
+        {{/uniqueItems}}
+        {{^uniqueItems}}
+        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}(value['{{name}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}ToJSON)),
+        {{/uniqueItems}}
+        {{/isArray}}
+        {{#isMap}}
+        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}mapValues(value['{{name}}'], {{#items}}{{datatype}}{{/items}}ToJSON)),
+        {{/isMap}}
+        {{^isArray}}
+        {{^isMap}}
+        {{^isFreeFormObject}}
+        '{{baseName}}': {{datatype}}ToJSON(value['{{name}}']),
+        {{/isFreeFormObject}}
+        {{#isFreeFormObject}}
+        '{{baseName}}': value['{{name}}'],
+        {{/isFreeFormObject}}
+        {{/isMap}}
+        {{/isArray}}
+        {{/isPrimitiveType}}
+        {{/isReadOnly}}
+        {{/vars}}
+    };
+    {{/hasVars}}
+    {{^hasVars}}
+    return value;
+    {{/hasVars}}
+}

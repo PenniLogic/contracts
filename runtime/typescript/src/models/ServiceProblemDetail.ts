@@ -1,5 +1,6 @@
 // Strict T-CON-12 seam; the scaffold ProblemDetail remains unchanged.
 import { errorPolicy, errorStatus } from '../errorCatalogue.js';
+import { providerObject, type ProviderField } from '../providerGuard.js';
 import { Instant } from './Instant.js';
 import { ProblemCode, ProblemCodeFromJSON } from './ProblemCode.js';
 import { ProblemField, ProblemFieldFromJSON } from './ProblemField.js';
@@ -36,6 +37,22 @@ const REQUIRED = ['type', 'title', 'status', 'detail', 'code', 'correlation_id']
 const OPTIONAL = ['instance', 'field', 'reason', 'validation_errors', 'idempotency_key', 'retry_after_seconds', 'allowance', 'entitlement'];
 const VALIDATION = new Set([ProblemCode.ValidationRejected, ProblemCode.ImportMappingRequired, ProblemCode.IdempotencyKeyInvalid]);
 const DELAY = new Set([ProblemCode.DependencyUnavailable, ProblemCode.IdempotencyInProgress, ProblemCode.RateLimited, ProblemCode.RequestFailed]);
+const MODEL_FIELDS: Readonly<Record<string, ProviderField>> = {
+    type: { name: 'type', required: true, kind: 'string' },
+    title: { name: 'title', required: true, kind: 'string' },
+    status: { name: 'status', required: true, kind: 'integer' },
+    detail: { name: 'detail', required: true, kind: 'string' },
+    code: { name: 'code', required: true, kind: 'string' },
+    correlation_id: { name: 'correlationId', required: true, kind: 'string' },
+    instance: { name: 'instance', required: false, kind: 'string' },
+    field: { name: 'field', required: false, kind: 'string' },
+    reason: { name: 'reason', required: false, kind: 'string' },
+    validation_errors: { name: 'validationErrors', required: false, kind: 'array', uniqueItems: true },
+    idempotency_key: { name: 'idempotencyKey', required: false, kind: 'string' },
+    retry_after_seconds: { name: 'retryAfterSeconds', required: false, kind: 'integer' },
+    allowance: { name: 'allowance', required: false, kind: 'object' },
+    entitlement: { name: 'entitlement', required: false, kind: 'object' },
+};
 
 function object(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new ProblemWireError('shape');
@@ -125,6 +142,7 @@ export function ServiceProblemDetailFromJSON(value: unknown): ServiceProblemDeta
 }
 
 export function ServiceProblemDetailToJSON(value: ServiceProblemDetail): Record<string, unknown> {
+    providerObject(value, MODEL_FIELDS, false);
     const wire: Record<string, unknown> = {
         type: value.type, title: value.title, status: value.status, detail: value.detail,
         code: value.code, correlation_id: value.correlationId,
