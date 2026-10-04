@@ -79,7 +79,7 @@ class ProviderTransportTest {
         entry.getValue("path").jsonArray.forEach { key ->
             value = if (key.jsonPrimitive.isString) value.jsonObject.getValue(key.jsonPrimitive.content) else value.jsonArray[key.jsonPrimitive.int]
         }
-        return value
+        return entry["set"]?.jsonObject?.let { JsonObject(value.jsonObject + it) } ?: value
     }
     private fun quotedPrimitives(value: JsonElement): List<JsonElement> = when (value) {
         is JsonObject -> value.flatMap { (key, child) -> quotedPrimitives(child).map { JsonObject(value + (key to it)) } }
@@ -87,6 +87,29 @@ class ProviderTransportTest {
             JsonArray(value.toMutableList().apply { this[index] = it })
         } }
         is JsonPrimitive -> if (!value.isString && value != JsonNull) listOf(JsonPrimitive(value.content)) else emptyList()
+    }
+
+    private fun nullArrayEntries(value: JsonElement): List<JsonElement> = when (value) {
+        is JsonObject -> value.flatMap { (key, child) -> nullArrayEntries(child).map { JsonObject(value + (key to it)) } }
+        is JsonArray -> listOf(JsonArray(value + JsonNull)) + value.indices.flatMap { index ->
+            nullArrayEntries(value[index]).map { JsonArray(value.toMutableList().apply { this[index] = it }) }
+        }
+        else -> emptyList()
+    }
+
+    @Test fun everyNestedProviderModelAndPrimitiveArrayRejectsNullBeforeActualTransport() = runBlocking<Unit> {
+        val transforms = codecs()
+        var cases = 0
+        val inventory = Fixtures.load("provider-transport.v1.json")
+        (inventory.getValue("models").jsonArray + inventory.getValue("array_controls").jsonArray).forEach { entry ->
+            val transform = transforms.getValue(entry.jsonObject.getValue("schema").jsonPrimitive.content)
+            nullArrayEntries(sample(entry.jsonObject)).forEach { wire ->
+                assertSafe(assertFails { transform.decode(wire) })
+                assertSafe(assertFails { transform.transport(wire) })
+                cases += 1
+            }
+        }
+        assertEquals(11, cases)
     }
 
     @Test fun refusalIsStrictInOrdinaryDecodeAndActualGeneratedTransport() = runBlocking {

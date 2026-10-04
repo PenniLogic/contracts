@@ -15,13 +15,14 @@ def fixture(name: str) -> dict:
     return json.loads((ROOT / "spec" / "fixtures" / name).read_text(encoding="utf-8"))
 
 
-def samples() -> list[tuple[str, dict]]:
+def samples(*, arrays: bool = False) -> list[tuple[str, dict]]:
     result = []
-    for entry in fixture("provider-transport.v1.json")["models"]:
+    inventory = fixture("provider-transport.v1.json")
+    for entry in inventory["models"] + (inventory["array_controls"] if arrays else []):
         value = fixture(entry["fixture"])
         for key in entry["path"]:
             value = value[key]
-        result.append((entry["schema"], value))
+        result.append((entry["schema"], {**value, **entry.get("set", {})}))
     return result
 
 
@@ -38,6 +39,19 @@ def quoted_primitives(value):
                 yield result
     elif type(value) in (int, bool):
         yield json.dumps(value)
+
+def null_array_entries(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            for replacement in null_array_entries(child):
+                yield {**value, key: replacement}
+    elif isinstance(value, list):
+        yield [*value, None]
+        for index, child in enumerate(value):
+            for replacement in null_array_entries(child):
+                result = copy.deepcopy(value)
+                result[index] = replacement
+                yield result
 
 
 class ProviderTransportSchemaTest(unittest.TestCase):
@@ -83,6 +97,25 @@ class ProviderTransportSchemaTest(unittest.TestCase):
             for key in negative.get("remove", []):
                 invalid.pop(key)
             cases.append({"name": negative["name"], "schema": "AiRefusal", "wire": invalid})
+        self.assertFalse(any(result["valid"] for result in schema_results(cases)))
+
+    def test_every_nested_provider_array_rejects_null_items_in_the_committed_schema(self) -> None:
+        schemas = schema_document()["components"]["schemas"]
+        declared = {
+            (name, key) for name, schema in schemas.items() if schema.get("x-pennilogic-strict-provider")
+            for key, field in schema["properties"].items() if field.get("type") == "array"
+        }
+        represented = {
+            (name, key) for name, wire in samples(arrays=True) for key, value in wire.items()
+            if isinstance(value, list)
+        }
+        self.assertEqual(represented, declared)
+        self.assertEqual(len(declared), 7)
+        cases = [
+            {"name": name + " null array entry", "schema": name, "wire": invalid}
+            for name, wire in samples(arrays=True) for invalid in null_array_entries(wire)
+        ]
+        self.assertEqual(len(cases), 11)
         self.assertFalse(any(result["valid"] for result in schema_results(cases)))
 
     def test_generated_models_wire_guards_on_every_closed_provider(self) -> None:

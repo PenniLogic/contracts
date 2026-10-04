@@ -18,6 +18,15 @@ actual pinned optional-addition positive and all existing constraint negatives.
 The intermediate local `1af164a` commit/evidence remain history, not a published
 or reviewed provider pin.
 
+The next correction after frozen `2baace9` rejects sparse/undefined/null items in
+all marked TypeScript provider arrays before projection or request JSON emission.
+Optional referenced properties omit undefined before invoking strict child writers,
+without weakening required references or permitting explicit null. Python closed
+DTO compositions reuse the unchanged Money JSON seam on ordinary, nested, generic
+and generated-client writes. Three-target scratch-generated composition and actual
+mock request regressions retain earlier negative reviews and native CI as history,
+not source approval, publication or adoption.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

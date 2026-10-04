@@ -22,6 +22,15 @@
     {"schema": "ImportCommitCounts", "fixture": "import-provider.v1.json", "path": ["result", "counts"]},
     {"schema": "ImportCommitResult", "fixture": "import-provider.v1.json", "path": ["result"]}
   ],
+  "array_controls": [
+    {
+      "schema": "ServiceProblemDetail", "fixture": "allocation-refusal.v1.json", "path": ["problem"],
+      "set": {
+        "direction": "shortfall",
+        "validation_errors": [{"field": "allocation", "reason": "allocation_sum_mismatch", "direction": "shortfall"}]
+      }
+    }
+  ],
   "refusal_negatives": [
     {"name": "extra private provider content", "set": {"provider_detail": "PRIVATE_SYNTHETIC_CANARY"}},
     {"name": "extra private member name", "set": {"PRIVATE_SYNTHETIC_CANARY": "synthetic"}},

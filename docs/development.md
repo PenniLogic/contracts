@@ -124,7 +124,7 @@ vectors of `money-wire-fixtures.v1.json` prove it per language. The wire seams a
 
 ### Generator templates
 
-Eight templates/partials are overridden; stock portions remain bound to the pinned generator:
+Nine templates/partials are overridden; stock portions remain bound to the pinned generator:
 
 - `generator/templates/python/model_generic.mustache`: the `Instant` and `LocalDate` imports (a
   type-mapped, non-model type gets no generated import), `Any -> Any` annotations on the generated
@@ -145,8 +145,14 @@ Eight templates/partials are overridden; stock portions remain bound to the pinn
 - `generator/templates/python/model_provider.mustache`: provider-only Pydantic fields and safe
   regex validators; `model_generic.mustache` selects this partial for marked closed models only.
   The reusable provider base closes original ingress and normal nested/outbound serialization.
+  Its payload serializer reuses the unchanged `Money.to_wire` Pydantic JSON seam, alongside the
+  time and enum seams, rather than letting an untyped payload serializer lose the Money codec.
 - `generator/templates/typescript/modelGeneric.mustache`: provider-only original-wire/native-model
-  guards around the unchanged generator conversion bodies.
+  guards around the generator conversion bodies. Optional referenced properties are omitted
+  before invoking a required child writer; required references and explicit null remain guarded.
+- `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
+  for marked models, including model-valued array items. Array indices must be present and their
+  values non-null/non-undefined before conversion; property omission is not array-item omission.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other
@@ -179,6 +185,15 @@ The provider-transport inventory additionally binds all 19 new closed model path
 ordinary conversion, native construction/serialization, nested models and actual generated
 transport. Missing strict wiring fails lint. Runtime-only generator metadata is ignored by the
 inline-equivalence fingerprint, so removing it does not let an equivalent local schema pass.
+The array controls enumerate all seven declared provider array fields, including optional nested
+validation issues. Actual TypeScript `BaseAPI` mock requests prove that undefined/sparse model
+arrays fail before JSON emission, with normal optional-property omission retained.
+`scripts/tests/test_provider_composition.py` extends the existing scratch-generation tests with
+closed synthetic DTOs that reference Money, every accepted primitive seam, optional strict
+problems, import preview and successful refusal. It runs strict mypy/TypeScript compilation,
+ordinary/native/nested/generic serialization and actual generated transports in all three targets.
+It uses the existing pinned venv/compiler/Gradle smoke dependencies; no product DTO, endpoint,
+framework, dependency or pipeline command is added.
 
 ### Golden hashes
 

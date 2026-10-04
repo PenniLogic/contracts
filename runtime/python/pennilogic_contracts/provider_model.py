@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, ModelWrapValidatorHandler, Validatio
 
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.local_date import LocalDate
+from pennilogic_contracts.models.money import Money
 
 
 class ProviderWireError(ValueError):
@@ -23,7 +24,7 @@ def _wire_value(value: Any) -> Any:
         return value._provider_payload()
     if isinstance(value, Enum):
         return value.value
-    if isinstance(value, (Instant, LocalDate)):
+    if isinstance(value, (Money, Instant, LocalDate)):
         return value.to_wire()
     if isinstance(value, list):
         return [_wire_value(item) for item in value]

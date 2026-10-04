@@ -115,7 +115,14 @@ reject extras before conversion; ordinary model dumps and the generated client
 serializer revalidate outbound state, including nested models. TypeScript provider
 converters guard the original wire object and native model before projecting fields,
 so an unknown member is rejected rather than dropped. Declared absent optional
-members still serialize normally.
+members still serialize normally: an optional referenced property is omitted before
+calling its required child writer, while a required reference or explicit null still
+fails. Every marked array checks its own indices and item kinds before projection;
+sparse slots and undefined/null items never become emitted JSON nulls. Recursive
+item metadata covers nested model and primitive arrays, including unique-item sets.
+Python's ordinary and generic provider payload writers reuse the original
+`Money.to_wire` JSON seam, just as they reuse the time and enum seams. The Money
+wrapper, currency registry, exponent/range rules and float refusal are unchanged.
 
 Kotlin provider types register their own serializer with `KeepGeneratedSerializer`
 on the pinned compiler/runtime. The strict wrapper checks the original JSON tree
@@ -239,6 +246,12 @@ generated transport's normal model conversion and serialization. No real endpoin
 or network/provider call occurs. The tests also distinguish schema constraints
 from semantic-only checks. Source failures on an earlier head and native CI success
 are retained history, not approval of a correction head.
+Scratch-generation regression tests additionally compile closed synthetic DTOs
+composing required Money and primitive references, optional strict problems and
+nested import/refusal content. Ordinary/native/nested/generic reads and writes,
+all three actual generated transports, optional-property omission and dense array
+requirements are exercised. Those test-only definitions are not new product
+components or endpoints and do not claim provider or consumer adoption.
 
 After independent current-head Core/QA and affected contract/money/privacy/security
 review, native CI, dependency/integration conditions and owner approval, the

@@ -304,7 +304,8 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
                                     "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
                                     "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
-                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache"])
+                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache",
+                                    "typescript/providerField.mustache"])
 
     def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
         stock = self.stock("kotlin-client/data_class.mustache")
@@ -359,11 +360,20 @@ class TemplateOverrideDriftTest(unittest.TestCase):
                                      "    if (value === null) throw new ProviderWireError();\n"
                                      "    if (value !== undefined) providerObject(value, providerFields, false);\n"
                                      "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        expected = self.replace_once(
+            expected, "        '{{baseName}}': {{datatype}}ToJSON(value['{{name}}']),\n",
+            "        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}"
+            "{{datatype}}ToJSON(value['{{name}}']),\n",
+        )
         self.assertEqual(override, expected)
-        self.assertIn("{{#isInteger}}kind: 'integer'", field_block)
-        self.assertIn("{{#isBoolean}}kind: 'boolean'", field_block)
-        self.assertIn('providerPattern("{{{pattern}}}")', field_block)
-        self.assertIn("{{#uniqueItems}}uniqueItems: true", field_block)
+        self.assertIn("{{>providerField}}", field_block)
+        partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")
+        self.assertIn("{{#isInteger}}kind: 'integer'", partial)
+        self.assertIn("{{#isBoolean}}kind: 'boolean'", partial)
+        self.assertIn("{{#isModel}}kind: 'object'", partial)
+        self.assertIn('providerPattern("{{{pattern}}}")', partial)
+        self.assertIn("{{#uniqueItems}}uniqueItems: true", partial)
+        self.assertIn("{{#items}}\nitems: {\n    name: '', required: true,\n    {{>providerField}}", partial)
 
     def test_python_enum_override_is_stock_plus_strict_wire_seam(self) -> None:
         stock = self.stock("python/model_enum.mustache")

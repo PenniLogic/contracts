@@ -26,24 +26,7 @@ const providerFields: Readonly<Record<string, ProviderField>> = {
     {{#vars}}
     '{{baseName}}': {
         name: '{{name}}', required: {{#required}}true{{/required}}{{^required}}false{{/required}},
-        {{#isString}}kind: 'string',{{/isString}}
-        {{#isInteger}}kind: 'integer',{{/isInteger}}
-        {{#isBoolean}}kind: 'boolean',{{/isBoolean}}
-        {{#isArray}}kind: 'array',{{/isArray}}
-        {{#isModel}}kind: 'object',{{/isModel}}
-        {{#pattern}}pattern: providerPattern("{{{pattern}}}"),{{/pattern}}
-        {{#minLength}}minLength: {{minLength}},{{/minLength}}
-        {{#maxLength}}maxLength: {{maxLength}},{{/maxLength}}
-        {{#minimum}}minimum: {{minimum}},{{/minimum}}
-        {{#maximum}}maximum: {{maximum}},{{/maximum}}
-        {{#minItems}}minItems: {{minItems}},{{/minItems}}
-        {{#maxItems}}maxItems: {{maxItems}},{{/maxItems}}
-        {{#uniqueItems}}uniqueItems: true,{{/uniqueItems}}
-        {{#items}}
-        {{#isString}}itemKind: 'string',{{/isString}}
-        {{#isInteger}}itemKind: 'integer',{{/isInteger}}
-        {{#isBoolean}}itemKind: 'boolean',{{/isBoolean}}
-        {{/items}}
+        {{>providerField}}
     },
     {{/vars}}
 };
@@ -242,7 +225,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{^isArray}}
         {{^isMap}}
         {{^isFreeFormObject}}
-        '{{baseName}}': {{datatype}}ToJSON(value['{{name}}']),
+        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{datatype}}ToJSON(value['{{name}}']),
         {{/isFreeFormObject}}
         {{#isFreeFormObject}}
         '{{baseName}}': value['{{name}}'],

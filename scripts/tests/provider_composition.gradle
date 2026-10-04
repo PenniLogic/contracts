@@ -1,0 +1,11 @@
+gradle.projectsEvaluated {
+    def project = gradle.rootProject
+    def output = new File(System.getProperty("pennilogic.composition.output"))
+    project.layout.buildDirectory.set(new File(output, "kotlin-build"))
+    project.kotlin.sourceSets.getByName("main").kotlin.setSrcDirs([
+        new File(output, "kotlin/src/main/kotlin")
+    ])
+    project.kotlin.sourceSets.getByName("test").kotlin.setSrcDirs([
+        new File(output, "kotlin-probe")
+    ])
+}

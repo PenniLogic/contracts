@@ -20,12 +20,13 @@ def transport_write(value: object) -> object:
     return serialize(value)
 
 
-def specimens() -> Iterator[tuple[str, dict[str, Any]]]:
-    for entry in load("provider-transport.v1.json")["models"]:
+def specimens(*, arrays: bool = False) -> Iterator[tuple[str, dict[str, Any]]]:
+    inventory = load("provider-transport.v1.json")
+    for entry in inventory["models"] + (inventory["array_controls"] if arrays else []):
         value = load(entry["fixture"])
         for key in entry["path"]:
             value = value[key]
-        yield entry["schema"], value
+        yield entry["schema"], {**value, **entry.get("set", {})}
 
 
 def quoted_primitives(value: Any) -> Iterator[Any]:
@@ -42,8 +43,33 @@ def quoted_primitives(value: Any) -> Iterator[Any]:
     elif type(value) in (int, bool):
         yield json.dumps(value)
 
+def null_array_entries(value: Any) -> Iterator[Any]:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            for mutated in null_array_entries(child):
+                yield {**value, key: mutated}
+    elif isinstance(value, list):
+        yield [*value, None]
+        for index, child in enumerate(value):
+            for mutated in null_array_entries(child):
+                result = copy.deepcopy(value)
+                result[index] = mutated
+                yield result
+
 
 class ProviderTransportTest(unittest.TestCase):
+    def test_every_nested_model_and_primitive_array_rejects_null_before_transport(self) -> None:
+        cases = 0
+        for name, wire in specimens(arrays=True):
+            model = getattr(generated_models, name)
+            for invalid in null_array_entries(wire):
+                for read in (model.from_dict, model.model_validate,
+                             lambda data: ApiClient().deserialize(json.dumps(data), name, "application/json")):
+                    with self.assertRaises(ValueError):
+                        read(invalid)
+                cases += 1
+        self.assertEqual(cases, 11)
+
     def test_successful_refusal_rejects_unknown_content_in_ordinary_conversion_and_transport(self) -> None:
         valid = load("error-provider.v1.json")["refusal"]
         invalid = {**valid, "provider_detail": "PRIVATE_SYNTHETIC_CANARY"}

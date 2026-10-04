@@ -17,7 +17,7 @@ export interface ProviderField {
     readonly minItems?: number;
     readonly maxItems?: number;
     readonly uniqueItems?: boolean;
-    readonly itemKind?: 'string' | 'integer' | 'boolean';
+    readonly items?: ProviderField;
 }
 
 export function providerObject(value: unknown, fields: Readonly<Record<string, ProviderField>>, wire: boolean): Record<string, unknown> {
@@ -45,6 +45,7 @@ export function providerPattern(literal: string): RegExp {
 }
 
 function validateField(value: unknown, field: ProviderField, wire: boolean): void {
+    if (value === null || value === undefined) throw new ProviderWireError();
     const scalar = !wire && (value instanceof Instant || value instanceof LocalDate) ? value.toWire() : value;
     if (field.kind === 'string' && typeof scalar !== 'string') throw new ProviderWireError();
     if (field.kind === 'boolean' && typeof value !== 'boolean') throw new ProviderWireError();
@@ -63,9 +64,11 @@ function validateField(value: unknown, field: ProviderField, wire: boolean): voi
             Array.isArray(value) ? value : (() => { throw new ProviderWireError(); })();
         if ((field.minItems !== undefined && items.length < field.minItems) ||
             (field.maxItems !== undefined && items.length > field.maxItems)) throw new ProviderWireError();
-        if (field.itemKind !== undefined) for (const item of items) validateField(item, {
-            name: '', required: true, kind: field.itemKind,
-        }, wire);
+        const itemField = field.items ?? { name: '', required: true };
+        for (let index = 0; index < items.length; index += 1) {
+            if (!Object.hasOwn(items, index)) throw new ProviderWireError();
+            validateField(items[index], itemField, wire);
+        }
         if (field.uniqueItems && new Set(items.map((item) => JSON.stringify(item))).size !== items.length) throw new ProviderWireError();
     }
 }

@@ -1,0 +1,19 @@
+{{#isString}}kind: 'string',{{/isString}}
+{{#isInteger}}kind: 'integer',{{/isInteger}}
+{{#isBoolean}}kind: 'boolean',{{/isBoolean}}
+{{#isArray}}kind: 'array',{{/isArray}}
+{{#isModel}}kind: 'object',{{/isModel}}
+{{#pattern}}pattern: providerPattern("{{{pattern}}}"),{{/pattern}}
+{{#minLength}}minLength: {{minLength}},{{/minLength}}
+{{#maxLength}}maxLength: {{maxLength}},{{/maxLength}}
+{{#minimum}}minimum: {{minimum}},{{/minimum}}
+{{#maximum}}maximum: {{maximum}},{{/maximum}}
+{{#minItems}}minItems: {{minItems}},{{/minItems}}
+{{#maxItems}}maxItems: {{maxItems}},{{/maxItems}}
+{{#uniqueItems}}uniqueItems: true,{{/uniqueItems}}
+{{#items}}
+items: {
+    name: '', required: true,
+    {{>providerField}}
+},
+{{/items}}
