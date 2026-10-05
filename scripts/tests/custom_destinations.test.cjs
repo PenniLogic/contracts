@@ -106,6 +106,7 @@ test("source reference, state mapping, registration closure and header reference
     (doc) => { doc.components.schemas.CustomDestinationRegistrationRequest.properties.providerKey = { type: "string" }; },
     (doc) => { doc.components.schemas.CustomDestinationRegistrationRequest.properties.credentialHeader = { type: "string" }; },
     (doc) => { delete doc.components.schemas.CustomDestinationModel.additionalProperties; },
+    (doc) => { delete doc.components.schemas.CustomDestinationRegistrationRequest["x-pennilogic-strict-provider"]; },
   ];
   for (const mutate of mutations) {
     const doc = structuredClone(base);
@@ -117,6 +118,7 @@ test("source reference, state mapping, registration closure and header reference
 test("valid enrollment, lifecycle and owner-only response schemas accept synthetic wire fixtures", () => {
   assert.deepEqual(model("CustomDestinationRegistrationRequest", fixture.registration), []);
   assert.deepEqual(model("CustomDestinationLifecycleRequest", fixture.lifecycle), []);
+  assert.deepEqual(model("CustomDestinationValidationResult", fixture.validation), []);
   assert.deepEqual(model("CustomDestination", fixture.destination), []);
   assert.deepEqual(model("CustomDestinationList", { destinations: [fixture.destination] }), []);
   for (const credentialHeader of consequence.enums.CredentialHeader) {
@@ -140,6 +142,12 @@ test("closed schemas reject every planted registration and lifecycle payload bef
   delete response.models[0].host;
   response.destinationClass = "code_managed_provider";
   assert.ok(model("CustomDestination", response).length > 0);
+  for (const codepoint of fixture.ecmascript_whitespace) {
+    const character = String.fromCodePoint(codepoint);
+    for (const add of [{ host: `models${character}.example` }, { pathPrefix: `/v1${character}/model` }]) {
+      assert.ok(model("CustomDestinationRegistrationRequest", { ...fixture.registration, ...add }).length > 0, String(codepoint));
+    }
+  }
 });
 
 test("six operations stay namespaced, nonmonetary and owner-bound; mutations retain idempotency", () => {
@@ -192,7 +200,9 @@ test("recursive lint finds a planted address through requestBody refs, arrays, c
 test("real Spectral CLI fails nested address fixtures actionably and passes the repaired control", () => {
   const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
   try {
-    fs.copyFileSync(path.join(ROOT, "spec", "currency-registry.v1.json"), path.join(directory, "currency-registry.v1.json"));
+    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json"]) {
+      fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
+    }
     const file = path.join(directory, "probe.json");
     const doc = probe();
     for (const field of ["base_url", "endpoint", "host"]) {

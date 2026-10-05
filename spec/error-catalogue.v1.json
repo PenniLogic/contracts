@@ -1,0 +1,265 @@
+{
+  "schema_version": 1,
+  "group_version": "1.1.0",
+  "owner": "T-CON-12 (PenniLogic/contracts#16)",
+  "taxonomy_version": "1.1.0",
+  "decisions": ["ADR-015 sections 1.5, 4.4, 4.6, 4.8 and 5", "ADR-016 section 14", "ADR-017 section 10", "ADR-018 sections 4.5 and 10", "ADR-019 section 16"],
+  "retry_horizon": "P14D",
+  "key_lifetime": "P30D",
+  "retry_rule": "Retry means identical intended effect, persisted key and payload bytes. A refusal records no effect or idempotency receipt. Edited input is a new intended effect, never an automatic retry. A mismatch must never be escaped by minting a key. Horizon-exceeded money writes reconcile before an explicit new intended effect. This catalogue does not implement retries, auth flows or service idempotency.",
+  "message_rule": "ServiceProblemDetail type/title/status/detail are exact per-code constants. These protocol diagnostics are not UI copy. Fields are registered tokens; unknown input names map to request. Never copy provider text, inputs, amounts, balances, resource identifiers, account existence signals or stack traces. Structured Python validation diagnostics must exclude input.",
+  "egress_binding": {
+    "authority": "Root owning-source decision for original contracts#27, composed with accepted contracts#16 provider source; not runtime acceptance.",
+    "consequence": "adr-022-ai-egress-consequences@1.1.0",
+    "policy_version": "2026-10-05.2",
+    "service_schema": "EgressDeniedProblemDetail",
+    "authentication_schema": "AuthenticationProblemDetail",
+    "member": "egress_denial_reason",
+    "schema": "EgressDenialReason",
+    "rule": "Require the canonical reason for an egress refusal. Authorization and indistinguishable unknown/foreign resource handling precede classification. No provider, host, address, raw exception, fallback, automatic retry or repinning is authorized.",
+    "reason_codes": {
+      "destination_denied": "egress_denied",
+      "destination_not_registered": "egress_denied",
+      "destination_suspended": "egress_denied",
+      "destination_revoked": "egress_denied",
+      "destination_busy": "dependency_unavailable",
+      "resolution_changed": "egress_denied",
+      "redirect_denied": "egress_denied",
+      "redirect_hop_limit": "egress_denied",
+      "tls_verification_failed": "egress_denied",
+      "unreachable": "dependency_unavailable",
+      "kill_switch_active": "egress_denied",
+      "registration_rate_limited": "rate_limited",
+      "step_up_required": "step_up_required",
+      "pending_activation": "egress_denied"
+    }
+  },
+  "authentication_codes": [
+    {
+      "code": "authentication_required",
+      "status": 401,
+      "title": "Authentication required",
+      "detail": "Authentication is required for this request.",
+      "classification": "authentication_owned",
+      "condition": "authentication_required",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "step_up_required",
+      "status": 403,
+      "title": "Confirmation required",
+      "detail": "Fresh authentication confirmation is required.",
+      "classification": "authentication_owned",
+      "condition": "step_up_required",
+      "flow": "authentication_required",
+      "state": null
+    }
+  ],
+  "authentication_rule": "Outside the eight-state service-error projection, using its already excluded authentication_required flow. Auth codes are in the same ProblemCode vocabulary, never ordinary ServiceProblemDetail. No automatic retry or weaker fallback. Fresh per-send DPoP and step-up-request@1 remain runtime obligations; an explicitly re-authorized identical intended request retains its key and bytes within existing bounds.",
+  "validation_reason_bindings": [
+    {
+      "reason": "allocation_sum_mismatch",
+      "code": "validation_rejected",
+      "required_members": ["field", "direction"],
+      "direction_schema": "AllocationMismatchDirection",
+      "direction_values": ["shortfall", "excess"],
+      "monetary_member": false,
+      "decision": "ADR-016 section 3.2 and allocation.sum_mismatch_refusal/rejection_reasons.members"
+    }
+  ],
+  "codes": [
+    {
+      "code": "dependency_unavailable",
+      "status": 503,
+      "title": "Capability unavailable",
+      "detail": "The requested capability is temporarily unavailable.",
+      "condition": "dependency_unavailable",
+      "state": "error",
+      "retryable": true,
+      "retry_class": "same_request",
+      "idempotency": "reuse_unchanged",
+      "precondition": "Repeat only the same request inside the retry horizon; honour any server delay. A supplementary region can compose to degraded, but the code still binds to error."
+    },
+    {
+      "code": "egress_denied",
+      "schema": "EgressDeniedProblemDetail",
+      "status": 403,
+      "title": "Destination not available",
+      "detail": "The destination cannot be used for this request.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "never",
+      "idempotency": "reuse_unchanged",
+      "precondition": "No automatic retry, fallback or repinning. Only explicit resubmission after the independent denial condition is resolved may reuse the unchanged key/body for the same intent inside existing bounds; edited input is new intent."
+    },
+    {
+      "code": "entitlement_denied",
+      "status": 403,
+      "title": "Access not available",
+      "detail": "This capability is not available.",
+      "condition": "entitlement_denied",
+      "state": "permission_denied",
+      "retryable": false,
+      "retry_class": "never",
+      "idempotency": "reuse_unchanged",
+      "precondition": "No automatic retry. If access is independently restored and the same intended effect is explicitly attempted within the horizon, retain its key and bytes."
+    },
+    {
+      "code": "grant_not_active",
+      "status": 403,
+      "title": "Access not available",
+      "detail": "Access is not available.",
+      "condition": "grant_not_active",
+      "state": "permission_denied",
+      "retryable": false,
+      "retry_class": "never",
+      "idempotency": "reuse_unchanged",
+      "precondition": "Absent, foreign, revoked and expired access is indistinguishable. Do not probe or retry a refusal."
+    },
+    {
+      "code": "idempotency_in_progress",
+      "status": 409,
+      "title": "Request pending",
+      "detail": "The original request is still pending.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": true,
+      "retry_class": "after_delay",
+      "idempotency": "reuse_unchanged",
+      "precondition": "Honour retry_after_seconds and Retry-After; same key and bytes only, inside P14D. This is not permission to execute twice."
+    },
+    {
+      "code": "idempotency_key_invalid",
+      "status": 400,
+      "title": "Request rejected",
+      "detail": "A valid request key is required.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "edited_request",
+      "idempotency": "repair_missing_or_malformed",
+      "precondition": "No effect. Restore a valid persisted key if one exists; otherwise durably allocate a random UUIDv4 before an explicit corrected first send. Never derive it from content."
+    },
+    {
+      "code": "idempotency_payload_mismatch",
+      "status": 422,
+      "title": "Request conflict",
+      "detail": "The request key cannot be used with this request.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "reconcile_first",
+      "idempotency": "never_replace_to_escape_mismatch",
+      "precondition": "Mark failed and reconcile; never retry changed bytes or mint a key for the same bytes in response to the mismatch. The problem names only the caller's presented key."
+    },
+    {
+      "code": "import_mapping_required",
+      "status": 422,
+      "title": "Mapping required",
+      "detail": "Review the column mapping before continuing.",
+      "condition": "validation_rejected",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "edited_request",
+      "idempotency": "new_after_edit",
+      "precondition": "Corrected mapping produces a new immutable preview and a new intended effect/key; never mutate or recommit the old preview."
+    },
+    {
+      "code": "import_preview_unavailable",
+      "status": 409,
+      "title": "Preview unavailable",
+      "detail": "Create a new preview before committing.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "new_preview",
+      "idempotency": "new_preview_new_key",
+      "precondition": "Missing, unknown, foreign and expired uncommitted previews receive this same safe shape. Reconcile before explicitly making and committing a new preview; never silently import again."
+    },
+    {
+      "code": "quota_exhausted",
+      "status": 429,
+      "title": "Allowance exhausted",
+      "detail": "The current allowance is exhausted.",
+      "condition": "quota_exhausted",
+      "state": "quota_exceeded",
+      "retryable": true,
+      "retry_class": "after_reset",
+      "idempotency": "reuse_unchanged",
+      "precondition": "No retry unless the server stated a reset and it has elapsed; an absent reset or zero allowance permits none. Same persisted key/bytes and P14D still apply. A plan change is not an automatic retry trigger."
+    },
+    {
+      "code": "rate_limited",
+      "status": 429,
+      "title": "Request limited",
+      "detail": "Wait before repeating this request.",
+      "condition": "rate_limited",
+      "state": "quota_exceeded",
+      "retryable": true,
+      "retry_class": "after_delay",
+      "idempotency": "reuse_unchanged",
+      "precondition": "Honour retry_after_seconds and Retry-After; repeat the identical request inside P14D. Do not substitute this shape for ADR-019's accepted-and-dropped recovery limiters."
+    },
+    {
+      "code": "request_failed",
+      "status": 503,
+      "title": "Request not completed",
+      "detail": "The request could not be completed.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": true,
+      "retry_class": "same_request",
+      "idempotency": "reuse_unchanged",
+      "precondition": "An unknown financial outcome is resolved by the same persisted key and payload, never a second intended effect; stop at P14D and reconcile."
+    },
+    {
+      "code": "request_malformed",
+      "status": 400,
+      "title": "Request rejected",
+      "detail": "The request could not be read.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "edited_request",
+      "idempotency": "new_after_edit",
+      "precondition": "No effect, including a known key with an unparsable body. Corrected bytes require an explicit edited request/new intended effect; no automatic retry."
+    },
+    {
+      "code": "role_capability_denied",
+      "status": 403,
+      "title": "Access not available",
+      "detail": "Access is not available.",
+      "condition": "role_capability_denied",
+      "state": "permission_denied",
+      "retryable": false,
+      "retry_class": "never",
+      "idempotency": "reuse_unchanged",
+      "precondition": "No probing or automatic retry; role changes do not authorise resubmission of an unknown financial outcome."
+    },
+    {
+      "code": "validation_rejected",
+      "status": 422,
+      "status_by_field": {"duplicate_override": 400},
+      "title": "Validation rejected",
+      "detail": "Review the indicated field.",
+      "condition": "validation_rejected",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "edited_request",
+      "idempotency": "new_after_body_edit_reuse_for_override",
+      "precondition": "No effect. Preserve the form; an explicit body edit is a new intended effect under a new key. Unknown/foreign Duplicate-Override is identical 400 validation_rejected, field duplicate_override, reason not_available. Correcting only that header retains the same persisted key/bytes under ADR-015 section 4.7; never automatically invent an override or mint a new key."
+    }
+  ],
+  "content_outcomes": [
+    {
+      "code": "ai_refusal",
+      "schema": "AiRefusal",
+      "message": "This request cannot be answered.",
+      "classification": "successful_content",
+      "taxonomy_state": null,
+      "retry": "Not an error or an automatic retry trigger; the advice boundary remains in force."
+    }
+  ]
+}

@@ -48,8 +48,13 @@ module.exports = function customDestinationContract(document, _options, context)
     report("registration credentialHeader must reference the shared CredentialHeader enum, not a free string or inline copy", ["components", "schemas", "CustomDestinationRegistrationRequest", "properties", "credentialHeader"]);
   }
   for (const [name, component] of Object.entries(schemas)) {
-    if (name.startsWith("CustomDestination") && component.type === "object" && component.additionalProperties !== false) {
-      report(`${name} must use additionalProperties: false; schema closure still needs generated-runtime conformance`, ["components", "schemas", name, "additionalProperties"]);
+    if (name.startsWith("CustomDestination") && component.type === "object") {
+      if (component.additionalProperties !== false) {
+        report(`${name} must use additionalProperties: false; schema closure still needs generated-runtime conformance`, ["components", "schemas", name, "additionalProperties"]);
+      }
+      if (component["x-pennilogic-strict-provider"] !== true) {
+        report(`${name} must select x-pennilogic-strict-provider for the shared generated read/write boundary`, ["components", "schemas", name, "x-pennilogic-strict-provider"]);
+      }
     }
   }
   if (!isDeepStrictEqual(schemas.CustomDestination?.["x-state-denials"], consequence.state_denials)) {

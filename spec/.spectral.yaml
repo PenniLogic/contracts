@@ -17,6 +17,8 @@ functions:
   - problemDetailNoMoney
   - customDestinationContract
   - noInferenceAddress
+  - providerErrors
+  - providerImports
 rules:
   # The shared components are a library consumed by contract expansion tickets and by every
   # generated client; the document intentionally publishes them before any operation references them.
@@ -247,3 +249,21 @@ rules:
     given: $
     then:
       function: noInferenceAddress
+
+  pl-error-provider:
+    description: T-CON-12 typed codes, safe diagnostic constants, retry classifications and accepted taxonomy mappings are complete; service errors reference the strict provider.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: providerErrors
+
+  pl-import-provider:
+    description: T-CON-10 import/confidence/dedup providers have one version, no inline substitutes or raw content, and the shared DuplicateOverride identifier binding.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: providerImports

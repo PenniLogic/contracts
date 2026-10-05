@@ -6,6 +6,9 @@ import { test } from 'node:test';
 import {
     Configuration, CredentialHeader, CustomDestinationFromJSON, CustomDestinationLifecycleRequestFromJSON,
     CustomDestinationRegistrationRequestFromJSON, CustomDestinationRegistrationRequestToJSON,
+    CustomDestinationListFromJSON, CustomDestinationListToJSON, CustomDestinationValidationResultFromJSON,
+    CustomDestinationValidationResultToJSON, CustomDestinationModelFromJSON, CustomDestinationModelToJSON,
+    CustomDestinationToJSON, CustomDestinationLifecycleRequestToJSON,
     CustomDestinationsApi, CustomDestinationState, DestinationClass, EgressDenialReason,
 } from '../../../build/generated/typescript/src/index.js';
 import { ROOT, loadFixture } from './fixtures.js';
@@ -14,6 +17,8 @@ interface CustomDestinationFixture {
     registration: Record<string, unknown>;
     lifecycle: { version: string };
     destination: Record<string, unknown>;
+    validation: Record<string, unknown>;
+    ecmascript_whitespace: number[];
     invalid_registration: { name: string; add: Record<string, unknown> }[];
     invalid_lifecycle: { name: string; wire: Record<string, unknown> }[];
 }
@@ -42,10 +47,8 @@ test('six generated transports send raw DPoP auth once, correct proof and step-u
                 url: address, method: init?.method ?? 'GET', headers: new Headers(init?.headers),
                 body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
             });
-            const response = address.includes('/validate') ? {
-                destinationId: fixture.destination.destinationId, version: '1', validated: true,
-                validatedAt: '2026-10-05T00:00:00.000Z',
-            } : init?.method === 'GET' ? { destinations: [fixture.destination] } : fixture.destination;
+            const response = address.includes('/validate') ? fixture.validation :
+                init?.method === 'GET' ? { destinations: [fixture.destination] } : fixture.destination;
             return new Response(JSON.stringify(response), {
                 status: address.endsWith('/custom-destinations') && init?.method === 'POST' ? 201 : 200,
                 headers: { 'Content-Type': 'application/json' },
@@ -126,4 +129,59 @@ test('T6 generated nested model decoder rejects address fields in a closed respo
             custom_model_id: '00000000-0000-4000-8000-000000000003', name: 'fixture-model', host: 'blocked.example',
         }],
     }));
+});
+
+test('all six closed generated models reject extras before conversion and round-trip wire values', () => {
+    const models = fixture.destination.models;
+    assert.ok(Array.isArray(models));
+    const cases: [unknown, (wire: unknown) => unknown][] = [
+        [fixture.registration, (wire) => CustomDestinationRegistrationRequestToJSON(CustomDestinationRegistrationRequestFromJSON(wire))],
+        [fixture.lifecycle, (wire) => CustomDestinationLifecycleRequestToJSON(CustomDestinationLifecycleRequestFromJSON(wire))],
+        [fixture.destination, (wire) => CustomDestinationToJSON(CustomDestinationFromJSON(wire))],
+        [fixture.validation, (wire) => CustomDestinationValidationResultToJSON(CustomDestinationValidationResultFromJSON(wire))],
+        [models[0], (wire) => CustomDestinationModelToJSON(CustomDestinationModelFromJSON(wire))],
+        [{ destinations: [fixture.destination] }, (wire) => CustomDestinationListToJSON(CustomDestinationListFromJSON(wire))],
+    ];
+    for (const [wire, roundtrip] of cases) {
+        assert.deepEqual(JSON.parse(JSON.stringify(roundtrip(wire))), wire);
+        assert.ok(wire !== null && typeof wire === 'object');
+        assert.throws(() => roundtrip({ ...wire, PRIVATE_SYNTHETIC_CANARY: true }), { message: 'provider value rejected' });
+    }
+});
+
+test('shared lexical whitespace rules match ECMAScript without broadening UUID source constraints', () => {
+    for (const codepoint of fixture.ecmascript_whitespace) {
+        const character = String.fromCodePoint(codepoint);
+        for (const add of [{ host: `models${character}.example` }, { pathPrefix: `/v1${character}/model` }]) {
+            assert.throws(() => CustomDestinationRegistrationRequestFromJSON({ ...fixture.registration, ...add }));
+        }
+    }
+    CustomDestinationRegistrationRequestFromJSON(fixture.registration);
+});
+
+test('actual destination response transport rejects nested extras and outgoing mutable state before emission', async () => {
+    const invalid = { ...fixture.destination, models: [{
+        custom_model_id: '00000000-0000-4000-8000-000000000003',
+        name: 'fixture-model', PRIVATE_SYNTHETIC_CANARY: true,
+    }] };
+    let calls = 0;
+    const api = new CustomDestinationsApi(new Configuration({
+        basePath: 'https://api.pennilogic.example/v1', apiKey: 'DPoP synthetic.access.signature',
+        fetchApi: async () => {
+            calls += 1;
+            return new Response(JSON.stringify({ destinations: [invalid] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }));
+    await assert.rejects(api.listCustomDestinations({ dPoP: 'header.list.signature' }),
+        { message: 'provider value rejected' });
+    assert.equal(calls, 1);
+    const request = CustomDestinationRegistrationRequestFromJSON(fixture.registration);
+    request.models.add('PRIVATE SYNTHETIC CANARY');
+    await assert.rejects(api.registerCustomDestination({
+        dPoP: 'header.register.signature', stepUpToken: 'synthetic-step-up',
+        idempotencyKey: '00000000-0000-4000-8000-000000000010', customDestinationRegistrationRequest: request,
+    }), { message: 'provider value rejected' });
+    assert.equal(calls, 1, 'invalid outbound state must not reach fetch');
 });

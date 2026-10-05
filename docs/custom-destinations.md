@@ -3,7 +3,8 @@
 This is the local, unreleased source implementation of
 [contracts#27 / T-CON-EGRESS-01](https://github.com/PenniLogic/contracts/issues/27).
 It does **not** complete that issue, publish a client version, implement a gateway or authorize
-AI exposure. The `0.2.0` source version is an additive candidate, not a tag or release.
+AI exposure. The `0.3.0` source version composes the accepted provider source at
+`5b41d4580c85be3cc1617074c0f3052b1f7b02cd`; it is not a tag or release.
 Global/custom AI remain OFF; approved providers, approved custom destinations and deployment
 inventory remain empty.
 
@@ -88,6 +89,7 @@ Pinned generator 7.25 has no HTTP-DPoP template. `DPoP` therefore uses an OpenAP
 not API-key or Bearer authentication. Supply the complete `DPoP <at+jwt>` value and leave
 the generated API-key prefix unset. Do not add a second Authorization parameter.
 All six calls require a `DPoP` proof argument; no proof/token default is embedded.
+Stock API-key setup labels or prefix examples are not DPoP protocol guidance.
 
 The generated parameter is not a signer. A fresh proof is required for **each physical send**,
 including retries and nonce-challenge resends, with actual method/target, `ath`, `cnf.jkt`,
@@ -140,20 +142,107 @@ Real Spectral CLI tests plant `base_url`, `endpoint` and `host` through requestB
 arrays/compositions and nested objects; all must fail with the rule name and precise path.
 The same overlay with the address removed must pass.
 
-## Generated-runtime gaps
+## Shared error composition
+
+The single owning `error-catalogue.v1.json` advances to group `1.1.0`; import group `1.0.0`,
+all 14 accepted service policies and the exact eight-state taxonomy projection remain intact.
+Root's additional source decision binds the canonical reasons as follows; these code/status
+choices are not claimed to have already appeared in ADR-022.
+
+| Canonical reasons | Shared code / HTTP | Classification |
+| --- | --- | --- |
+| `destination_busy`, `unreachable` | `dependency_unavailable` / 503 | Existing service policy and retry/key treatment |
+| `registration_rate_limited` | `rate_limited` / 429 | Existing service policy; mandatory delay and allowance |
+| `step_up_required` | `step_up_required` / 403 | Authentication-owned, NONE/null service state |
+| Other ten canonical reasons | `egress_denied` / 403 | `request_failed` / `error`; never automatic retry, fallback or repinning |
+
+The new denial uses only the fixed diagnostics "Destination not available" and
+"The destination cannot be used for this request." Explicit resubmission after independent
+resolution keeps the same intent/key/body within existing bounds; edited input is new intent.
+Authorization and indistinguishable unknown/foreign resource handling precede this classification.
+
+`EgressDeniedProblemDetail` requires the shared typed `egress_denial_reason`, not a
+`ValidationReason`. `AuthenticationProblemDetail` has the two authentication-owned global codes;
+`authentication_required` is 401 and `step_up_required` is 403. Both route to the already excluded
+authentication flow, not a new service state. Unrelated authentication needs no egress member.
+The egress-aware `OperationProblemDetail` union used by these six operations additionally requires
+that member for `egress_denied` and `step_up_required`. `ServiceProblemDetail.code` intersects the
+one global `ProblemCode` reference with the positive, catalogue-derived service subset: the old
+14 codes plus `egress_denied`, never the two authentication codes. Its new code still has fixed
+safe diagnostics, but no egress member; it cannot substitute for the reason-bearing operation
+refusal. Exactly one operation family must validate before conversion. Actual Kotlin, TypeScript
+and Python constructors/converters retain the public `ProblemCode` type, not a second enum.
+
+Every 401 uses `AuthenticationRequiredProblemDetail`, required `WWW-Authenticate` and no-store.
+A nonce challenge is exactly `DPoP error="use_dpop_nonce"` with fresh `DPoP-Nonce`; this is protocol
+metadata, not a new ProblemCode. A present `retry_after_seconds` requires equal decimal
+`Retry-After`. Body schemas do not verify HTTP framing: consumers must check status equality,
+problem media and required/conditional headers, without turning a delay into retry permission.
+
+Python's normal generated API raises `ApiException` with the strict generated model in `.data`.
+Validation errors now propagate instead of being masked by a `finally` block that copied an
+invalid raw body into an API exception. TypeScript still raises `ResponseError`; the caller
+explicitly decodes its response with the generated shared converter. Kotlin exposes its
+`HttpResponse` and `typedBody<AuthenticationRequiredProblemDetail>` / `typedBody<OperationProblemDetail>`.
+The transport tests exercise those real paths with synthetic responses, not a second decoder
+or a claim of automatic framing, authorization or retry enforcement.
+
+## Generated consumers and preserved failure history
+
+All six closed destination object models select the accepted marked-model serializer path.
+It checks nested unknown members, wire kinds, source patterns, bounds and duplicate array entries
+before projection or `Set` conversion, and checks construction and outbound serialization.
+The shared UUID bridge preserves hyphenated UUID wire strings; source constraints further require
+the declared lowercase v4 identifiers. The generated Python API has precise transport/return
+typing without relaxed mypy settings. Legacy DTO behaviour and Kotlin's global JSON configuration
+are unchanged.
+
+The finite compiler retains complete source compositions and constants for runtime validation.
+Its generation-only layout uses the marked closed object's declared fields and required list,
+without allowing the pinned generator to flatten union branches into mandatory fields or
+manufacture boolean/ref enums. The manifest binds both the layout input and retained constraints.
+An enum constraint next to a reference remains in runtime validation; the generation-only layout
+retains the referenced public type instead of manufacturing a competing field enum.
+TypeScript omits only declared undefined optional output members after native-field checks,
+then validates the actual emitted object; unknown names, including undefined names, still fail.
+This is not a raw duplicate-JSON-name parser or a step-up/JCS implementation.
 
 Deterministic generation and schema validation are not T6 proof. The source tests deliberately
 exercise the actual generated models/APIs, with passing positive controls before negatives.
-At this source boundary the following failures block adoption:
+The original source-only freeze `c296ebbc4330ab636b8f20b0de8bc3e96b7f7b39`
+(tree `e0bbedbad85be0823ad3024ac5b25abf4e498229`) remains unchanged in history.
+Its AA8-only failures, and the uncorrected ordinary composition with accepted `5b41d458`,
+are retained as failed evidence rather than rewritten as passes:
 
-| Shared interface | Actual gap and required integration |
+| Shared interface | Historical failure and current treatment |
 | --- | --- |
-| TypeScript generated `*FromJSON` | Selects known fields without enforcing closure, enums or wire constraints; nested addresses and invalid lifecycle values are accepted. Registration's `Set` conversion deduplicates before any step-up binding. Require the actual shared generator's strict request/nested model path, not a local parallel decoder. |
-| Kotlin generated model / `PennilogicJson` | Existing additive `ignoreUnknownKeys` semantics accept unknown request members; `Set` decoding collapses duplicates. Valid UUID-containing registration/response decoding needs the missing shared UUID serializer. Preserve accepted Money/Instant and additive-response behavior while the original generator owner integrates strict request handling. |
-| Python generated API/model | The API template has strict-mypy errors; canonical enum/UUID strings fail the generated `from_json` helper, while actual `model_validate_json` accepts unknown members and duplicate names. Fix the shared generation/conversion seam without weakening types or hiding T6 failures. |
-| Shared problem detail | Accepted `ProblemDetail` is open and its `reason` is an untyped string. Namespaced success schemas are closed, but error closure/typing remains unmet. Original contracts#16 must supply a real closed shared refusal shape referencing `EgressDenialReason` without changing the global problem-code vocabulary or leaking input. A namespaced parallel catalogue or an unaccepted draft is not this binding. |
-| Proof / step-up runtime | No per-send signer hook, JCS parser/runtime, issuer, freshness verifier or atomic single-use implementation is supplied. Finite source vectors and mock transport headers cannot authorize enrollment. |
-| Shared pipeline tests | Legacy probe helpers assume literal `paths: {}` and tests assume `0.1.0`. The original provider/pipeline owner must integrate these real additive paths/version; this source unit does not patch their helpers. |
+| TypeScript generated `*FromJSON` | AA8 dropped unknown fields and deduplicated before validation. Accepted marked-model machinery now guards this consumer; closed union output omission is repaired at the canonical template. |
+| Kotlin generated model / `PennilogicJson` | AA8 accepted unknown members/collapsed duplicates and lacked UUID serialization. Marked serializers now cover this group and the shared UUID serializer is registered without changing Money/Instant or additive defaults. |
+| Python generated API/model | The combined baseline retained 32 API typing errors plus enum/UUID/strict-wire failures. Canonical templates, typed UUID conversion and marked validation repair those paths; the raw-error masking failure is separately preserved. |
+| Shared problem detail | The open AA8 scaffold was insufficient. Accepted provider source plus Root's explicit group-1.1.0 decision now supplies the shared auth/service-egress families above, one global code enum and unchanged validation reasons. |
+| Shared pipeline tests | The old empty-path/version/text-fragment assumptions failed on the real composition. Named additive helpers now preserve genuine operations, security, responses and version, and breaking probes retain valid references. |
+| Proof / step-up runtime | Still not supplied: per-send signer, raw duplicate-name/IJSON parser, JCS implementation, issuer, freshness verifier or atomic single use. These are future runtime obligations, not gateway/admin/tool-group additions to issue27's source acceptance criteria. |
+
+The shared transport inventory retains all 19 accepted provider entries and adds these six
+destination and four error models. All 29 are covered; eleven declared arrays yield fifteen
+recursive null controls and 45 TypeScript malformed-array controls, without dropping old cases.
+The three native suites also reject null at each marked model root. Python rejects null before
+its ordinary deserializer can bypass the model, including actual 401/403 error responses;
+explicit Optional and legacy/no-content controls remain. Actual API argument-type failures
+hide input in normal diagnostics. These are not proof-signature or server-admission checks.
+
+**Compatibility HOLD:** the genuine accepted-`5b41d458` comparison still reports the new fixed
+`egress_denied` allOf branch on `ServiceProblemDetail`, its five nested import usages and the
+shared `ServiceProblem` response. The narrow classifier recognizes only complete scalar-enum
+additions and inert description changes within otherwise unchanged response schema structure.
+It does not waive this conditional/composition change. The original negative-partition finding
+and the positive-partition findings remain failed evidence, not acknowledgements or proof of
+full nonbreaking compatibility.
+
+AA8/5b source consumers remain pinned unchanged. Future adoption of `0.3.0` requires actual
+consumer regeneration and correct auth-versus-service routing; new codes must not be emitted
+under older consumer pins. No old shape is removed and no consumer migration is claimed.
+No contract-stage acknowledgement, published tag, release or deployment is authorized here.
 
 Namespaced tests use real generated TS fetch, Kotlin Ktor and Python urllib3 interception with
 no sockets. They verify raw authorization, six proof arguments, step-up/idempotency scopes and
@@ -166,8 +255,8 @@ Reproduce from the repository root with the existing managed dependencies:
 python scripts\lint_spec.py
 node --test scripts\tests\custom_destinations.test.cjs
 python scripts\generate_clients.py --verify
-git show aa8d90cb98cec9b6dd08c91b3a4d869e47362662:spec/openapi.yaml > build\accepted-aa8-openapi.yaml
-python scripts\check_breaking_changes.py --base build\accepted-aa8-openapi.yaml
+git show 5b41d4580c85be3cc1617074c0f3052b1f7b02cd:spec/openapi.yaml > build\accepted-provider-openapi.yaml
+python scripts\check_breaking_changes.py --base build\accepted-provider-openapi.yaml
 python scripts\smoke.py typescript
 python scripts\smoke.py kotlin
 python scripts\smoke.py python
@@ -181,8 +270,9 @@ replace the accepted comparison with a newly invented baseline or tag.
 These commands must report their real outcomes, including failures. Do not skip expected
 failures, relax type-checking, hand-edit generated clients, flip shared unknown-key defaults
 or create a competing decoder to obtain green output. Golden/index changes must come from
-the real generator. Root serializes auth, typed-refusal, common generator and metadata
-integration before any publication. Separate non-author Core/Contract/Security and QA review,
+the real generator. Root serializes review and integration of this combined owning source
+before any publication. Separate non-author Core/Contract/Security and QA review,
 current-head native CI, and hosted job **and** whole-workflow durations strictly below 600 seconds
-remain required; local source timing is not hosted evidence. H1/H2 and applicable T1-T20,
+remain required; local source timing is not hosted evidence. Future H1/H2 and applicable T1-T20,
 provider evidence, consent, server authorization and operational approvals remain unmet here.
+Gateway runtime, admin UI and the production tool group remain explicit issue27 non-goals.

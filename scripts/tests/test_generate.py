@@ -53,7 +53,7 @@ class TreeHashTest(unittest.TestCase):
         self.assertEqual(len(digest), 64)
 
     def test_spec_version_regex(self) -> None:
-        self.assertEqual(pl_contracts.spec_version(spec_text()), "0.1.0")
+        self.assertEqual(pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: 0.2.0\npaths: {}\n"), "0.2.0")
         self.assertEqual(pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: '2.10.3'\npaths: {}\n"), "2.10.3")
         with self.assertRaises(pl_contracts.PipelineError):
             pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: 1.0\n")
@@ -96,7 +96,6 @@ class GoldenAndManifestTest(unittest.TestCase):
         # verify() refuses the record before comparing it with a generation.
         with mock.patch.object(gc, "load_golden", return_value={"python": record}), \
                 mock.patch.object(gc, "generate", return_value={"tree_sha256": golden["python"]["tree_sha256"], "file_count": 1, "files": [], "spec_version": "0.1.0", "spec_sha256": "x"}), \
-                mock.patch.object(gc, "remove_tree"), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
             self.assertEqual(gc.verify(["python"], {"openapi_generator": "", "oasdiff": ""}, update_golden=False), 1)
@@ -125,7 +124,7 @@ class SeamWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.spec = SpecDir()
-        text = replace_once(spec_text(), "  parameters:\n    IdempotencyKey:", MONEY_BEARING_MODEL + "  parameters:\n    IdempotencyKey:")
+        text = replace_once(spec_text(), "  schemas:\n", "  schemas:\n" + MONEY_BEARING_MODEL)
         cls.spec_path = cls.spec.write(text)
         cls.output = Path(tempfile.mkdtemp(prefix="pl-gen-"))
         cls.tools = toolchain.ensure_installed()
@@ -240,6 +239,85 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
         return text.replace(old, new)
 
+    def test_python_api_override_adds_precise_types_typed_responses_and_private_diagnostics(self) -> None:
+        expected = self.stock("python/api.mustache")
+        response_type = "ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}]"
+        edits = [
+            ("    @validate_call\n", '    @validate_call(config={"hide_input_in_errors": True})\n', 10),
+            ("def __init__(self, api_client=None) -> None:",
+             "def __init__(self, api_client: Optional[ApiClient] = None) -> None:", 1),
+            ("return self.api_client.response_deserialize(",
+             f"return {response_type}.model_validate(self.api_client.response_deserialize(", 4),
+            ("            response_types_map=_response_types_map,\n        ).data",
+             "            response_types_map=_response_types_map,\n        ), from_attributes=True).data", 2),
+            ("            response_types_map=_response_types_map,\n        )\n",
+             "            response_types_map=_response_types_map,\n        ), from_attributes=True)\n", 2),
+            ("        {{paramName}},\n", "        {{paramName}}: {{{vendorExtensions.x-py-typing}}},\n", 1),
+            ("        _request_auth,\n", "        _request_auth: Optional[Dict[str, object]],\n", 1),
+            ("        _content_type,\n", "        _content_type: Optional[str],\n", 1),
+            ("        _headers,\n", "        _headers: Optional[Dict[str, object]],\n", 1),
+            ("        _host_index,\n", "        _host_index: int,\n", 1),
+            ("_path_params: Dict[str, str]", "_path_params: Dict[str, object]", 1),
+            ("_query_params: List[Tuple[str, str]]", "_query_params: List[Tuple[str, object]]", 1),
+            ("_header_params: Dict[str, Optional[str]]", "_header_params: Dict[str, object]", 1),
+            ("_form_params: List[Tuple[str, str]]", "_form_params: List[Tuple[str, object]]", 1),
+            ("_body_params: Optional[bytes]", "_body_params: object", 1),
+        ]
+        for old, new, count in edits:
+            self.assertEqual(expected.count(old), count, old)
+            expected = expected.replace(old, new)
+        actual = (ROOT / "generator" / "templates" / "python" / "api.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
+    def test_python_api_client_override_types_the_existing_transport_not_string_named_models(self) -> None:
+        expected = self.stock("python/api_client.mustache")
+        edits = [
+            ("from {{packageName}}.api_response import ApiResponse, T as ApiResponseT",
+             "from {{packageName}}.api_response import ApiResponse"),
+            ("RequestSerialized = Tuple[str, str, Dict[str, str], Optional[str], List[str]]",
+             "RequestSerialized = Tuple[str, str, Dict[str, str], object, List[Tuple[str, object]]]"),
+            ("def get_default(cls):", 'def get_default(cls) -> "ApiClient":'),
+            ("response_types_map: Optional[Dict[str, ApiResponseT]]=None\n    ) -> ApiResponse[ApiResponseT]:",
+             "response_types_map: Optional[Dict[str, Optional[str]]]=None\n    ) -> ApiResponse[object]:"),
+            ("        assert response_data.data is not None, msg\n",
+             "        assert response_data.data is not None, msg\n"
+             '        if response_types_map is None:\n            raise ValueError("response type binding required")\n'),
+            ("def select_header_content_type(self, content_types):",
+             "def select_header_content_type(self, content_types: List[str]) -> Optional[str]:"),
+            ("def sanitize_for_serialization(self, obj):",
+             "def sanitize_for_serialization(self, obj: object) -> object:"),
+            ("        if data is None:\n            return None\n",
+             "        if data is None:\n"
+             "            from {{packageName}}.provider_model import ProviderModel, ProviderWireError\n"
+             "            candidate: object = getattr({{modelPackage}}, klass, None) if isinstance(klass, str) else klass\n"
+             "            if isinstance(candidate, type) and issubclass(candidate, ProviderModel):\n"
+             "                raise ProviderWireError()\n"
+             "            return None\n"),
+        ]
+        for old, new in edits:
+            expected = self.replace_once(expected, old, new)
+        start = expected.index('        try:\n            if response_type in ("bytearray", "bytes"):')
+        end = expected.index("\n        return ApiResponse(", start)
+        block = expected[start:end]
+        self.assertEqual(block.count("        finally:\n"), 1)
+        lines = block.replace("        try:\n", "", 1).replace("        finally:\n", "", 1).splitlines(keepends=True)
+        expected = expected[:start] + "".join(line[4:] if line.startswith("            ") else line for line in lines) + expected[end:]
+        actual = (ROOT / "generator" / "templates" / "python" / "api_client.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
+    def test_python_rest_override_types_the_actual_urllib3_base_response_and_bytes(self) -> None:
+        expected = self.stock("python/rest.mustache")
+        for old, new in [
+            ("import ssl\n", "import ssl\nfrom typing import Optional\n"),
+            ("RESTResponseType = urllib3.HTTPResponse", "RESTResponseType = urllib3.response.BaseHTTPResponse"),
+            ("def __init__(self, resp) -> None:", "def __init__(self, resp: RESTResponseType) -> None:"),
+            ("        self.data = None\n", "        self.data: Optional[bytes] = None\n"),
+            ("    def read(self):", "    def read(self) -> bytes:"),
+        ]:
+            expected = self.replace_once(expected, old, new)
+        actual = (ROOT / "generator" / "templates" / "python" / "rest.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
     def test_python_model_override_is_stock_plus_known_edits(self) -> None:
         stock = self.stock("python/model_generic.mustache")
         override = (ROOT / "generator" / "templates" / "python" / "model_generic.mustache").read_text(encoding="utf-8")
@@ -263,6 +341,10 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             expected, config,
             config + "        # PenniLogic: ADR-015 s2.2 strict models; diagnostics never echo the offending value (s1.5, s5).\n        strict=True,\n        hide_input_in_errors=True,\n",
         )
+        expected = ("{{#vendorExtensions.x-pennilogic-strict-provider}}\n{{>model_provider}}\n"
+                    "{{/vendorExtensions.x-pennilogic-strict-provider}}\n"
+                    "{{^vendorExtensions.x-pennilogic-strict-provider}}\n" + expected +
+                    "{{/vendorExtensions.x-pennilogic-strict-provider}}\n")
         self.assertEqual(override, expected, "generator/templates/python/model_generic.mustache drifted from the pinned generator's template; re-apply the documented edits on the new stock template")
 
     def test_kotlin_api_client_override_is_stock_plus_known_edits(self) -> None:
@@ -297,7 +379,139 @@ class TemplateOverrideDriftTest(unittest.TestCase):
 
     def test_no_other_template_is_overridden(self) -> None:
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
-        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache", "python/model_generic.mustache"])
+        self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
+                                    "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "python/api.mustache", "python/api_client.mustache",
+                                    "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
+                                    "python/rest.mustache",
+                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache",
+                                    "typescript/providerField.mustache"])
+
+    def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
+        stock = self.stock("kotlin-client/data_class.mustache")
+        override = (ROOT / "generator" / "templates" / "kotlin" / "data_class.mustache").read_text(encoding="utf-8")
+        serializable = "{{#multiplatform}}@Serializable{{/multiplatform}}{{#kotlinx_serialization}}{{#serializableModel}}@KSerializable{{/serializableModel}}{{^serializableModel}}@Serializable{{/serializableModel}}{{/kotlinx_serialization}}{{#moshi}}{{#moshiCodeGen}}@JsonClass(generateAdapter = true){{/moshiCodeGen}}{{/moshi}}{{#jackson}}{{#discriminator}}{{>typeInfoAnnotation}}{{/discriminator}}{{/jackson}}\n"
+        expected = self.replace_once(
+            stock, serializable,
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)\n@kotlinx.serialization.KeepGeneratedSerializer\n"
+            "@Serializable(with = {{classname}}ProviderSerializer::class)\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n{{^vendorExtensions.x-pennilogic-strict-provider}}\n" +
+            serializable + "{{/vendorExtensions.x-pennilogic-strict-provider}}\n",
+        )
+        expected = self.replace_once(
+            expected, "{{/vendorExtensions.x-has-data-class-body}}\n{{#generateRoomModels}}\n",
+            "{{/vendorExtensions.x-has-data-class-body}}\n"
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "    init { {{classname}}ProviderSerializer.validateValue(this) }\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n{{#generateRoomModels}}\n",
+        )
+        marker = "{{#vendorExtensions.x-pennilogic-strict-provider}}\n\n@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)\n"
+        self.assertEqual(override.split(marker, 1)[0], expected)
+        added = override.split(marker, 1)[1]
+        self.assertIn('StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer(), "{{name}}")', added)
+        self.assertIn("{{#isEnumRef}}", added)
+        self.assertIn('ProviderConstraints.patternMatches("{{{pattern}}}", member.content)', added)
+        self.assertIn("member.content.codePointCount(0, member.content.length)", added)
+        for constraint in ("minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems"):
+            self.assertIn("{{#" + constraint + "}}", added)
+        self.assertIn("override fun verify(value: {{classname}})", added)
+        self.assertNotIn("ignoreUnknownKeys", added)
+
+    def test_typescript_generic_override_keeps_stock_conversion_inside_provider_guards(self) -> None:
+        stock = self.stock("typescript-fetch/modelGeneric.mustache")
+        override = (ROOT / "generator" / "templates" / "typescript" / "modelGeneric.mustache").read_text(encoding="utf-8")
+        expected = (
+            "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+            "import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
+            "{{/vendorExtensions.x-pennilogic-strict-provider}}\n" + stock
+        )
+        field_block = override.split("{{>modelGenericInterfaces}}\n", 1)[1].split("\n\n/**", 1)[0]
+        self.assertTrue(field_block.startswith("{{#vendorExtensions.x-pennilogic-strict-provider}}"))
+        self.assertTrue(field_block.rstrip().endswith("{{/vendorExtensions.x-pennilogic-strict-provider}}"))
+        expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n", "{{>modelGenericInterfaces}}\n" + field_block)
+        from_json = "export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boolean): {{classname}} {\n"
+        expected = self.replace_once(expected, from_json, from_json +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     "    providerObject(json, providerFields, true);\n"
+                                     '    providerWire(json, "{{name}}");\n'
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        to_json = "export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classname}}, {{#readOnlyVars}}'{{name}}'{{^-last}}|{{/-last}}{{/readOnlyVars}}>{{/hasReadOnly}}{{^hasReadOnly}}{{classname}}{{/hasReadOnly}} | null, ignoreDiscriminator: boolean = false): any {\n"
+        expected = self.replace_once(expected, to_json, to_json +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     "    if (value === null) throw new ProviderWireError();\n"
+                                     "    if (value !== undefined) providerObject(value, providerFields, false);\n"
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        expected = self.replace_once(
+            expected, "        '{{baseName}}': {{datatype}}ToJSON(value['{{name}}']),\n",
+            "        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}"
+            "{{datatype}}ToJSON(value['{{name}}']),\n",
+        )
+        expected = self.replace_once(
+            expected, "    return {\n        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}\n",
+            "    {{#vendorExtensions.x-pennilogic-strict-provider}}const result ={{/vendorExtensions.x-pennilogic-strict-provider}}"
+            "{{^vendorExtensions.x-pennilogic-strict-provider}}return{{/vendorExtensions.x-pennilogic-strict-provider}} {\n"
+            "        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}\n",
+        )
+        ending = "        {{/isReadOnly}}\n        {{/vars}}\n    };\n"
+        expected = self.replace_once(expected, ending, ending +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     "    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));\n"
+                                     '    providerWire(wire, "{{name}}");\n    return wire;\n'
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        self.assertEqual(override, expected)
+        self.assertIn("{{>providerField}}", field_block)
+        partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")
+        self.assertIn("{{#isInteger}}kind: 'integer'", partial)
+        self.assertIn("{{#isBoolean}}kind: 'boolean'", partial)
+        self.assertIn("{{#isModel}}kind: 'object'", partial)
+        self.assertIn('providerPattern("{{{pattern}}}")', partial)
+        self.assertIn("{{#uniqueItems}}uniqueItems: true", partial)
+        self.assertIn("{{#items}}\nitems: {\n    name: '', required: true,\n    {{>providerField}}", partial)
+
+    def test_python_enum_override_is_stock_plus_strict_wire_seam(self) -> None:
+        stock = self.stock("python/model_enum.mustache")
+        override = (ROOT / "generator" / "templates" / "python" / "model_enum.mustache").read_text(encoding="utf-8")
+        expected = self.replace_once(stock, "from typing_extensions import Self\n",
+                                     "from typing import Any\nfrom pydantic import GetCoreSchemaHandler\n"
+                                     "from pydantic_core import CoreSchema, core_schema\nfrom typing_extensions import Self\n")
+        anchor = "    @classmethod\n    def from_json(cls, json_str: str) -> Self:\n"
+        seam = (
+            "    @classmethod\n    def from_wire(cls, value: object) -> Self:\n"
+            "        if isinstance(value, cls):\n            return value\n"
+            "        if type(value) is {{vendorExtensions.x-py-enum-type}} and any(member.value == value for member in cls):\n            return cls(value)\n"
+            '        raise ValueError("enum value rejected")\n\n'
+            "    @classmethod\n    def __get_pydantic_core_schema__(cls, _source: Any, _handler: GetCoreSchemaHandler) -> CoreSchema:\n"
+            "        # Strict generated models accept the exact wire spelling, never coercion or input-echoing enum errors.\n"
+            "        return core_schema.no_info_plain_validator_function(\n            cls.from_wire,\n"
+            "            json_schema_input_schema=core_schema.literal_schema([member.value for member in cls]),\n"
+            "            serialization=core_schema.plain_serializer_function_ser_schema(lambda member: member.value),\n        )\n\n"
+        )
+        expected = self.replace_once(expected, anchor, seam + anchor)
+        expected = self.replace_once(expected, "        return cls(json.loads(json_str))\n",
+                                     "        return cls.from_wire(json.loads(json_str))\n")
+        self.assertEqual(override, expected.rstrip() + "\n")
+
+    def test_typescript_enum_override_replaces_only_converter_functions(self) -> None:
+        stock = self.stock("typescript-fetch/modelEnum.mustache")
+        override = (ROOT / "generator" / "templates" / "typescript" / "modelEnum.mustache").read_text(encoding="utf-8")
+        self.assertEqual(stock.split("\n\n", 1)[0], "{{>modelEnumInterfaces}}")
+        expected = (
+            "{{>modelEnumInterfaces}}\n\n"
+            "export function instanceOf{{classname}}(value: unknown): value is {{classname}} {\n"
+            "    return Object.values({{classname}}).some((member) => member === value);\n}\n\n"
+            "export function {{classname}}FromJSON(json: unknown): {{classname}} {\n"
+            "    return {{classname}}FromJSONTyped(json, false);\n}\n\n"
+            "export function {{classname}}FromJSONTyped(json: unknown, ignoreDiscriminator: boolean): {{classname}} {\n"
+            '    if (!instanceOf{{classname}}(json)) throw new TypeError("enum value rejected");\n    return json;\n}\n\n'
+            "export function {{classname}}ToJSON(value?: {{classname}} | null): {{classname}} | null | undefined {\n"
+            "    if (value == null) return value;\n    return {{classname}}FromJSON(value);\n}\n\n"
+            "export function {{classname}}ToJSONTyped(value?: {{classname}} | null, ignoreDiscriminator: boolean = false): {{classname}} | null | undefined {\n"
+            "    return {{classname}}ToJSON(value);\n}\n"
+        )
+        self.assertEqual(override, expected)
+        stock_functions = [line.split("(")[0] for line in stock.splitlines() if line.startswith("export function ")]
+        self.assertEqual(stock_functions, [line.split("(")[0] for line in override.splitlines() if line.startswith("export function ")])
 
 class DeterminismTest(unittest.TestCase):
     def test_verify_passes_on_the_committed_golden(self) -> None:

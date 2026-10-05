@@ -1,0 +1,43 @@
+{
+  "description": "Synthetic scratch-generated marked-model constraints. No product schema, endpoint or record is added.",
+  "control": {
+    "grid": [[0, 10]],
+    "ids": ["cor_00000000-0000-4000-8000-000000000001"],
+    "tokens": [["ok_a", "ok_abc"]],
+    "flags": [[false, true]],
+    "codes": ["request_failed"],
+    "aliases": ["cor_00000000-0000-4000-8000-000000000001"],
+    "interval": [1, 9],
+    "empty": [],
+    "glyphs": ["\ud83d\ude00"],
+    "money_items": [{"amount": "0.00", "currency": "INR"}]
+  },
+  "negatives": [
+    {"name": "nested item below minimum", "field": "grid", "value": [[-1]], "keyword": "minimum"},
+    {"name": "nested item above maximum", "field": "grid", "value": [[11]], "keyword": "maximum"},
+    {"name": "empty inner array", "field": "grid", "value": [[]], "keyword": "minItems"},
+    {"name": "three-item inner array", "field": "grid", "value": [[0, 1, 2]], "keyword": "maxItems"},
+    {"name": "empty outer array", "field": "grid", "value": [], "keyword": "minItems"},
+    {"name": "duplicate inner arrays", "field": "grid", "value": [[0], [0]], "keyword": "uniqueItems"},
+    {"name": "short referenced identifier", "field": "ids", "value": ["cor_x"], "keyword": "minLength"},
+    {"name": "same-length wrong namespace", "field": "ids", "value": ["rec_00000000-0000-4000-8000-000000000001"], "keyword": "pattern"},
+    {"name": "same-length UUID version", "field": "ids", "value": ["cor_00000000-0000-5000-8000-000000000001"], "keyword": "pattern"},
+    {"name": "same-length UUID variant", "field": "ids", "value": ["cor_00000000-0000-4000-0000-000000000001"], "keyword": "pattern"},
+    {"name": "duplicate referenced identifiers", "field": "ids", "value": ["cor_00000000-0000-4000-8000-000000000001", "cor_00000000-0000-4000-8000-000000000001"], "keyword": "uniqueItems"},
+    {"name": "referenced identifier null", "field": "ids", "value": [null], "keyword": "type"},
+    {"name": "nested scalar pattern", "field": "tokens", "value": [["no_a"]], "keyword": "pattern"},
+    {"name": "nested scalar too short", "field": "tokens", "value": [["ok_"]], "keyword": "minLength"},
+    {"name": "nested scalar too long", "field": "tokens", "value": [["ok_abcd"]], "keyword": "maxLength"},
+    {"name": "nested boolean quoted", "field": "flags", "value": [["false"]], "keyword": "type"},
+    {"name": "nested integer quoted", "field": "grid", "value": [["0"]], "keyword": "type"},
+    {"name": "typed enum unknown", "field": "codes", "value": ["PRIVATE_SYNTHETIC_CANARY"], "keyword": "enum"},
+    {"name": "nested array null", "field": "grid", "value": [null], "keyword": "type"},
+    {"name": "reference alias wrong namespace", "field": "aliases", "value": ["rec_00000000-0000-4000-8000-000000000001"], "keyword": "pattern"},
+    {"name": "exclusive lower boundary", "field": "interval", "value": [0], "keyword": "exclusiveMinimum"},
+    {"name": "exclusive upper boundary", "field": "interval", "value": [10], "keyword": "exclusiveMaximum"},
+    {"name": "zero maximum cardinality", "field": "empty", "value": [1], "keyword": "maxItems"},
+    {"name": "code-point minimum length", "field": "glyphs", "value": [""], "keyword": "minLength"},
+    {"name": "code-point maximum length", "field": "glyphs", "value": ["ab"], "keyword": "maxLength"},
+    {"name": "private Money item member name", "field": "money_items", "value": [{"amount": "0.00", "currency": "INR", "PRIVATE_SYNTHETIC_MEMBER": "PRIVATE_SYNTHETIC_CANARY"}], "keyword": "additionalProperties"}
+  ]
+}

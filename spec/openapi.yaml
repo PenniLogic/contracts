@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: PenniLogic API contract
-  version: 0.2.0
-  summary: Shared API components and the isolated custom-destination enrollment source contract.
+  version: 0.3.0
+  summary: Shared money/time, error/import providers and custom-destination enrollment source contracts.
   description: |
     Single source of truth for the PenniLogic API. The shared components that ADR-015 (money wire
     format, time and idempotency conventions) binds on every service and generated client are
-    preserved. The additive CustomDestinations group is the contracts#27 source contract, not
-    a deployed gateway, a published release or permission to enable AI. Typed refusal and strict
-    generated-runtime integration remain release prerequisites. Other endpoints are added by
+    preserved with the accepted T-CON-12 error and T-CON-10 import/dedup providers.
+    The additive CustomDestinations group is the contracts#27 source contract, not
+    a deployed gateway, a published release or permission to enable AI. Its closed generated
+    boundaries compose the shared error and authentication families. Other endpoints are added by
     their contract expansion tickets (the skeleton by PenniLogic/contracts#1); every mutating operation
     must reference the `IdempotencyKey` parameter or carry a reasoned `x-idempotency` extension, and
     every monetary field must reference `Money`. The committed lint ruleset (`spec/.spectral.yaml`)
@@ -30,6 +31,12 @@ x-pennilogic-contract-metadata:
   instant_wire_fixtures: fixtures/instant-wire-fixtures.v1.json
   idempotency_key_lifetime: P30D
   client_retry_horizon: P14D
+  error_catalogue: error-catalogue.v1.json
+  error_group_version: 1.1.0
+  client_state_bindings: client-state-bindings.v1.json
+  import_group: import-group.v1.json
+  import_group_version: 1.0.0
+  duplicate_suspected_status: 202
   decision: ADR-015
 x-custom-destination-source:
   repository: PenniLogic/docs
@@ -495,6 +502,7 @@ components:
       description: Server-assigned UUIDv4 for a registered model; inference uses custom_model_id, not the name.
     CustomDestinationRegistrationRequest:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [host, credentialHeader, models]
       properties:
@@ -519,6 +527,7 @@ components:
         must be rejected, not ignored. Generated-runtime closure is a separate T6 obligation.
     CustomDestinationLifecycleRequest:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [version]
       properties:
@@ -529,6 +538,7 @@ components:
         No destination address, key, caller-chosen state, reason, owner or approval is accepted.
     CustomDestinationModel:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [custom_model_id, name]
       properties:
@@ -539,6 +549,7 @@ components:
       description: Owner-only registered name and server-assigned inference identifier.
     CustomDestinationValidationResult:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [destinationId, version, validated, validatedAt]
       properties:
@@ -558,6 +569,7 @@ components:
         No keys, models, pins or lifecycle state change through this response.
     CustomDestination:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [destinationId, version, destinationClass, host, pathPrefix, credentialHeader, state, models]
       x-state-denials:
@@ -602,6 +614,7 @@ components:
         key, upstream exception, capability or transferable routing URL is returned.
     CustomDestinationList:
       type: object
+      x-pennilogic-strict-provider: true
       additionalProperties: false
       required: [destinations]
       properties:
@@ -616,6 +629,1242 @@ components:
           maxLength: 2048
           description: Opaque owner-scoped continuation token; not an address or an authorization grant.
       description: Bounded owner-only registration page; do not cache personal destination settings.
+    ProblemCode:
+      type: string
+      description: Stable global T-CON-12 problem codes. Authentication codes are outside the eight-state service-error projection; AiRefusal is successful content, not a problem code.
+      enum:
+        - authentication_required
+        - dependency_unavailable
+        - egress_denied
+        - entitlement_denied
+        - grant_not_active
+        - idempotency_in_progress
+        - idempotency_key_invalid
+        - idempotency_payload_mismatch
+        - import_mapping_required
+        - import_preview_unavailable
+        - quota_exhausted
+        - rate_limited
+        - request_failed
+        - request_malformed
+        - role_capability_denied
+        - step_up_required
+        - validation_rejected
+    ClientState:
+      type: string
+      description: Identifiers from the accepted T-UX-01 taxonomy 1.1.0, not rendered copy or an accessibility implementation.
+      enum: [empty, loading, error, offline, stale, permission_denied, quota_exceeded, degraded]
+    RetryClass:
+      type: string
+      description: Catalogue classification, not a retry implementation. Every write retry remains within ADR-015's P14D horizon.
+      enum: [never, same_request, after_delay, after_reset, edited_request, reconcile_first, new_preview]
+    IdempotencyTreatment:
+      type: string
+      description: Applies only to operations requiring ADR-015 keys; authentication flows retain ADR-019's separate lifecycle.
+      enum: [reuse_unchanged, new_after_edit, new_after_body_edit_reuse_for_override, repair_missing_or_malformed, never_replace_to_escape_mismatch, new_preview_new_key]
+    ProblemField:
+      type: string
+      description: Registered field tokens only; never a dynamic JSON pointer, account identifier or offending property name. Use request for unregistered fields.
+      enum:
+        - request
+        - amount
+        - currency
+        - scale
+        - occurred_at
+        - booked_at
+        - value_date
+        - time_zone
+        - idempotency_key
+        - duplicate_override
+        - preview_ref
+        - column_mapping
+        - source_row
+        - category
+        - category_id
+        - assignment
+        - allocation
+        - as_of
+        - parent
+        - redirect
+        - snapshot
+        - transaction
+    ValidationReason:
+      type: string
+      description: Safe rejection reasons from ADR-015, ADR-016 and ADR-017 plus this provider's mapping checks; none carries an input value.
+      enum:
+        - shape
+        - number_not_string
+        - grammar
+        - currency_unknown
+        - scale_mismatch
+        - out_of_range
+        - required
+        - calendar
+        - malformed
+        - mapping_unmapped
+        - mapping_conflict
+        - not_available
+        - account_type_not_user_creatable
+        - allocation_sum_mismatch
+        - allocation_sign_mismatch
+        - allocation_shape_invalid
+        - allocation_entry_not_categorisable
+        - no_categorisable_entry
+        - category_not_found
+        - category_nature_mismatch
+        - category_archived
+        - category_redirected
+        - category_name_duplicate
+        - category_depth_exceeded
+        - category_parent_immutable
+        - category_delete_unsupported
+        - categorisation_precedence
+        - transaction_reversed
+        - transaction_is_reversal
+        - transaction_not_posted
+        - redirect_self
+        - redirect_target_not_terminal
+        - redirect_already_active
+        - redirect_depth_exceeded
+        - redirect_nature_mismatch
+        - redirect_parent_to_root
+        - redirect_already_retracted
+        - isolation_not_read_committed
+        - as_of_not_applicable
+        - currency_not_admitted
+        - exchange_rate_inconsistent
+        - already_reversed
+        - reversal_of_reversal
+        - reversal_target_not_posted
+        - repost_without_reversal
+        - repost_not_superseding
+        - snapshot_already_reconciled
+        - transaction_not_found
+    PublicCorrelationId:
+      type: string
+      minLength: 40
+      maxLength: 40
+      pattern: '^cor_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Fresh cryptographically random public UUIDv4 with cor_ namespace, generated independently of internal records, keys, principals and content. The same public value accompanies the server log event; it is never rendered as state copy.
+      examples: [cor_00000000-0000-4000-8000-000000000001]
+    PublicProblemInstance:
+      type: string
+      minLength: 68
+      maxLength: 68
+      pattern: '^urn:pennilogic:problem-instance:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Optional opaque occurrence URI. Never a resource URL, internal record identifier or request target.
+    IdempotencyKeyValue:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      minLength: 36
+      maxLength: 36
+      description: The presented ADR-015 request key, never another request's key. Binding-equal to the unchanged IdempotencyKey parameter schema.
+    AllocationMismatchDirection:
+      type: string
+      enum: [shortfall, excess]
+      description: Accepted ADR-016 section 3.2 allocation_sum_mismatch diagnostic direction; never an amount, balance, raw value or computed share.
+    ValidationIssue:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          $ref: '#/components/schemas/ProblemField'
+        reason:
+          $ref: '#/components/schemas/ValidationReason'
+        direction:
+          $ref: '#/components/schemas/AllocationMismatchDirection'
+      allOf:
+        - if:
+            properties: {reason: {const: allocation_sum_mismatch}}
+            required: [reason]
+          then:
+            required: [direction]
+          else:
+            not: {required: [direction]}
+    AllowanceUnit:
+      type: string
+      enum: [requests, tokens]
+    AllowanceWindow:
+      type: string
+      enum: [minute, hour, day, month, rolling_7_days, lifetime]
+    Allowance:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [limit, unit, window]
+      description: Server-stated allowance, never usage, a price, a balance or a hidden-resource count. Omit resets_at when no reset is known or the limit is zero; never invent a reset. Own-key token usage is not a quota exhaustion.
+      properties:
+        limit:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        unit:
+          $ref: '#/components/schemas/AllowanceUnit'
+        window:
+          $ref: '#/components/schemas/AllowanceWindow'
+        resets_at:
+          $ref: '#/components/schemas/Instant'
+      allOf:
+        - if:
+            properties: {limit: {const: 0}}
+            required: [limit]
+          then:
+            not: {required: [resets_at]}
+        - if:
+            properties: {window: {const: lifetime}}
+            required: [window]
+          then:
+            not: {required: [resets_at]}
+    EntitlementDenial:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [upgrade_available]
+      description: Whether an upgrade path is available, explicitly stated by the server. No plan name, account state, resource name or price.
+      properties:
+        upgrade_available:
+          type: boolean
+    ServiceProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: |
+        Strict T-CON-12 service provider, application/problem+json (RFC 9457).
+        It refines the unchanged scaffold ProblemDetail additively. New service contracts must
+        reference this subtype, not the permissive scaffold. Code-specific constants below bind
+        type, title, status and detail to published safe catalogue text; arbitrary human strings,
+        raw provider text, account existence signals, amounts and internal identifiers fail schema
+        validation. Titles/details are protocol diagnostics, not T-UX-01 copy or localisation.
+        Missing, foreign, revoked and expired protected resources receive the same applicable
+        denial shape; do not add existence, resource or balance members.
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 2000
+        instance:
+          $ref: '#/components/schemas/PublicProblemInstance'
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          type: string
+          enum:
+            - dependency_unavailable
+            - egress_denied
+            - entitlement_denied
+            - grant_not_active
+            - idempotency_in_progress
+            - idempotency_key_invalid
+            - idempotency_payload_mismatch
+            - import_mapping_required
+            - import_preview_unavailable
+            - quota_exhausted
+            - rate_limited
+            - request_failed
+            - request_malformed
+            - role_capability_denied
+            - validation_rejected
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        field:
+          $ref: '#/components/schemas/ProblemField'
+        reason:
+          $ref: '#/components/schemas/ValidationReason'
+        direction:
+          $ref: '#/components/schemas/AllocationMismatchDirection'
+        validation_errors:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+        idempotency_key:
+          $ref: '#/components/schemas/IdempotencyKeyValue'
+        retry_after_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: Server delay hint, not permission to change a persisted key/payload or exceed the client retry horizon.
+        allowance:
+          $ref: '#/components/schemas/Allowance'
+        entitlement:
+          $ref: '#/components/schemas/EntitlementDenial'
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - if:
+            properties: {code: {const: validation_rejected}, reason: {const: allocation_sum_mismatch}}
+            required: [code, reason]
+          then:
+            required: [field, direction]
+          else:
+            not: {required: [direction]}
+        - if:
+            properties: {code: {enum: [validation_rejected, import_mapping_required, idempotency_key_invalid]}}
+            required: [code]
+          then:
+            required: [field, reason]
+          else:
+            not:
+              anyOf: [{required: [field]}, {required: [reason]}, {required: [validation_errors]}]
+        - if:
+            properties: {code: {const: idempotency_payload_mismatch}}
+            required: [code]
+          then:
+            required: [idempotency_key]
+          else:
+            not: {required: [idempotency_key]}
+        - if:
+            properties: {code: {enum: [quota_exhausted, rate_limited]}}
+            required: [code]
+          then:
+            required: [allowance]
+          else:
+            not: {required: [allowance]}
+        - if:
+            properties: {code: {const: entitlement_denied}}
+            required: [code]
+          then:
+            required: [entitlement]
+          else:
+            not: {required: [entitlement]}
+        - if:
+            properties: {code: {enum: [dependency_unavailable, idempotency_in_progress, rate_limited, request_failed]}}
+            required: [code]
+          then:
+            if:
+              properties: {code: {enum: [idempotency_in_progress, rate_limited]}}
+              required: [code]
+            then:
+              required: [retry_after_seconds]
+          else:
+            not: {required: [retry_after_seconds]}
+        - if:
+            properties: {code: {const: dependency_unavailable}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:dependency_unavailable'}
+              title: {const: Capability unavailable}
+              status: {const: 503}
+              detail: {const: The requested capability is temporarily unavailable.}
+        - if:
+            properties: {code: {const: entitlement_denied}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:entitlement_denied'}
+              title: {const: Access not available}
+              status: {const: 403}
+              detail: {const: This capability is not available.}
+        - if:
+            properties: {code: {const: grant_not_active}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:grant_not_active'}
+              title: {const: Access not available}
+              status: {const: 403}
+              detail: {const: Access is not available.}
+        - if:
+            properties: {code: {const: idempotency_in_progress}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:idempotency_in_progress'}
+              title: {const: Request pending}
+              status: {const: 409}
+              detail: {const: The original request is still pending.}
+        - if:
+            properties: {code: {const: idempotency_key_invalid}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:idempotency_key_invalid'}
+              title: {const: Request rejected}
+              status: {const: 400}
+              detail: {const: A valid request key is required.}
+              field: {const: idempotency_key}
+              reason: {enum: [required, malformed]}
+        - if:
+            properties: {code: {const: idempotency_payload_mismatch}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:idempotency_payload_mismatch'}
+              title: {const: Request conflict}
+              status: {const: 422}
+              detail: {const: The request key cannot be used with this request.}
+        - if:
+            properties: {code: {const: import_mapping_required}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:import_mapping_required'}
+              title: {const: Mapping required}
+              status: {const: 422}
+              detail: {const: Review the column mapping before continuing.}
+              field: {const: column_mapping}
+              reason: {enum: [mapping_unmapped, mapping_conflict]}
+        - if:
+            properties: {code: {const: import_preview_unavailable}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:import_preview_unavailable'}
+              title: {const: Preview unavailable}
+              status: {const: 409}
+              detail: {const: Create a new preview before committing.}
+        - if:
+            properties: {code: {const: quota_exhausted}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:quota_exhausted'}
+              title: {const: Allowance exhausted}
+              status: {const: 429}
+              detail: {const: The current allowance is exhausted.}
+        - if:
+            properties: {code: {const: rate_limited}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:rate_limited'}
+              title: {const: Request limited}
+              status: {const: 429}
+              detail: {const: Wait before repeating this request.}
+        - if:
+            properties: {code: {const: request_failed}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:request_failed'}
+              title: {const: Request not completed}
+              status: {const: 503}
+              detail: {const: The request could not be completed.}
+        - if:
+            properties: {code: {const: request_malformed}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:request_malformed'}
+              title: {const: Request rejected}
+              status: {const: 400}
+              detail: {const: The request could not be read.}
+        - if:
+            properties: {code: {const: role_capability_denied}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:role_capability_denied'}
+              title: {const: Access not available}
+              status: {const: 403}
+              detail: {const: Access is not available.}
+        - if:
+            properties: {code: {const: validation_rejected}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:validation_rejected'}
+              title: {const: Validation rejected}
+              status: {enum: [400, 422]}
+              detail: {const: Review the indicated field.}
+        - if:
+            properties: {code: {const: validation_rejected}, field: {const: duplicate_override}}
+            required: [code, field]
+          then:
+            properties:
+              status: {const: 400}
+              reason: {enum: [malformed, not_available]}
+          else:
+            if:
+              properties: {code: {const: validation_rejected}}
+              required: [code]
+            then:
+              properties: {status: {const: 422}}
+        - if:
+            properties: {code: {const: egress_denied}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:egress_denied'}
+              title: {const: Destination not available}
+              status: {const: 403}
+              detail: {const: The destination cannot be used for this request.}
+      examples:
+        - type: urn:pennilogic:problem:validation_rejected
+          title: Validation rejected
+          status: 422
+          detail: Review the indicated field.
+          code: validation_rejected
+          correlation_id: cor_00000000-0000-4000-8000-000000000001
+          field: amount
+          reason: scale_mismatch
+    AuthenticationProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: |
+        Authentication-owned RFC 9457 family, outside the eight-state service-error projection.
+        The global code selects the excluded authentication flow, never error or permission_denied.
+        An egress step-up refusal additionally supplies the one canonical typed reason; ordinary
+        authentication challenges do not. No credential, request, resource or provider data is returned.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          anyOf: [{const: authentication_required}, {const: step_up_required}]
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        instance:
+          $ref: '#/components/schemas/PublicProblemInstance'
+        egress_denial_reason:
+          $ref: '#/components/schemas/EgressDenialReason'
+          const: step_up_required
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - if:
+            properties: {code: {const: authentication_required}}
+            required: [code]
+          then:
+            not: {required: [egress_denial_reason]}
+            properties:
+              type: {const: 'urn:pennilogic:problem:authentication_required'}
+              title: {const: Authentication required}
+              status: {const: 401}
+              detail: {const: Authentication is required for this request.}
+        - if:
+            properties: {code: {const: step_up_required}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:step_up_required'}
+              title: {const: Confirmation required}
+              status: {const: 403}
+              detail: {const: Fresh authentication confirmation is required.}
+    AuthenticationRequiredProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: The closed authentication-only 401 variant; a step-up refusal is 403, never this shape.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, const: 401}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          const: authentication_required
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        instance:
+          $ref: '#/components/schemas/PublicProblemInstance'
+      allOf:
+        - $ref: '#/components/schemas/AuthenticationProblemDetail'
+    EgressDeniedProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id, egress_denial_reason]
+      description: |
+        Shared T-CON-12 service-egress refusal with the one ADR-022 reason enum. Authentication
+        and unknown/foreign resource hiding precede this classification. A canonical step_up_required
+        is AuthenticationProblemDetail/403, not a service error. Retry policy comes from the owning
+        code catalogue; a reason never authorizes retry, fallback, repinning or provider activation.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          anyOf: [{const: egress_denied}, {const: dependency_unavailable}, {const: rate_limited}]
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        instance:
+          $ref: '#/components/schemas/PublicProblemInstance'
+        egress_denial_reason:
+          $ref: '#/components/schemas/EgressDenialReason'
+          not: {const: step_up_required}
+        retry_after_seconds: {type: integer, minimum: 1, maximum: 86400}
+        allowance:
+          $ref: '#/components/schemas/Allowance'
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - if:
+            properties:
+              egress_denial_reason:
+                anyOf: [{const: destination_busy}, {const: unreachable}]
+            required: [egress_denial_reason]
+          then:
+            properties: {code: {const: dependency_unavailable}}
+          else:
+            if:
+              properties: {egress_denial_reason: {const: registration_rate_limited}}
+              required: [egress_denial_reason]
+            then:
+              properties: {code: {const: rate_limited}}
+            else:
+              properties: {code: {const: egress_denied}}
+        - if:
+            properties: {code: {const: egress_denied}}
+            required: [code]
+          then:
+            not: {required: [retry_after_seconds]}
+            properties:
+              type: {const: 'urn:pennilogic:problem:egress_denied'}
+              title: {const: Destination not available}
+              status: {const: 403}
+              detail: {const: The destination cannot be used for this request.}
+        - if:
+            properties: {code: {const: dependency_unavailable}}
+            required: [code]
+          then:
+            properties:
+              type: {const: 'urn:pennilogic:problem:dependency_unavailable'}
+              title: {const: Capability unavailable}
+              status: {const: 503}
+              detail: {const: The requested capability is temporarily unavailable.}
+        - if:
+            properties: {code: {const: rate_limited}}
+            required: [code]
+          then:
+            required: [retry_after_seconds, allowance]
+            properties:
+              type: {const: 'urn:pennilogic:problem:rate_limited'}
+              title: {const: Request limited}
+              status: {const: 429}
+              detail: {const: Wait before repeating this request.}
+          else:
+            not: {required: [allowance]}
+    OperationProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: |
+        Closed shared egress-aware transport union used by the custom-destination operations.
+        Exactly one ordinary service, service-egress or authentication
+        family must validate before generated field conversion. A typed egress member selects a
+        refusal, not a ValidationReason or a new service state. Callers still verify HTTP status,
+        problem media and challenge/delay headers; this is not an auth verifier or retry engine.
+        Here egress_denied and step_up_required require their canonical egress reason. Unrelated authentication
+        flows use AuthenticationProblemDetail directly without an invented egress refusal.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        instance:
+          $ref: '#/components/schemas/PublicProblemInstance'
+        field:
+          $ref: '#/components/schemas/ProblemField'
+        reason:
+          $ref: '#/components/schemas/ValidationReason'
+        direction:
+          $ref: '#/components/schemas/AllocationMismatchDirection'
+        validation_errors:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+        idempotency_key:
+          $ref: '#/components/schemas/IdempotencyKeyValue'
+        retry_after_seconds: {type: integer, minimum: 1, maximum: 86400}
+        allowance:
+          $ref: '#/components/schemas/Allowance'
+        entitlement:
+          $ref: '#/components/schemas/EntitlementDenial'
+        egress_denial_reason:
+          $ref: '#/components/schemas/EgressDenialReason'
+      allOf:
+        - oneOf:
+            - $ref: '#/components/schemas/ServiceProblemDetail'
+            - $ref: '#/components/schemas/EgressDeniedProblemDetail'
+            - $ref: '#/components/schemas/AuthenticationProblemDetail'
+        - if:
+            properties: {code: {enum: [egress_denied, step_up_required]}}
+            required: [code]
+          then:
+            required: [egress_denial_reason]
+    AiRefusalCode:
+      type: string
+      enum: [ai_refusal]
+      description: Successful advice-boundary refusal, explicitly excluded from non-happy taxonomy states by T-UX-01.
+    AiRefusalMessage:
+      type: string
+      enum: [This request cannot be answered.]
+    AiRefusal:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [code, message, correlation_id]
+      description: Successful content response, not ServiceProblemDetail or a provider outage. No provider name, raw refusal text, prompt or account content crosses this shape.
+      properties:
+        code:
+          $ref: '#/components/schemas/AiRefusalCode'
+        message:
+          $ref: '#/components/schemas/AiRefusalMessage'
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+      examples:
+        - code: ai_refusal
+          message: This request cannot be answered.
+          correlation_id: cor_00000000-0000-4000-8000-000000000001
+    ImportGroupVersion:
+      type: string
+      enum: [1.0.0]
+      description: T-CON-10 component group version, independent of the repository's contract version. This is new provider source, not a published release.
+    ImportPreviewRef:
+      type: string
+      pattern: '^prv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      minLength: 40
+      maxLength: 40
+      description: Server-generated public random UUIDv4, owner-scoped and unguessable. Resolves only after authentication. Never a file digest, statement content, internal database ID or client-supplied owner claim. Mapping, rows and decisions are immutable; an edit requires a new reference.
+    DedupRecordId:
+      type: string
+      pattern: '^rec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      minLength: 40
+      maxLength: 40
+      description: |
+        The normative T-CON-10 matched surviving-record identifier. An independently random,
+        stable public UUIDv4 alias of the principal's own financial record, not an internal
+        primary key, account identifier, dedupe key or raw digest. DedupOutcome.matched_record_id
+        and DuplicateOverride reference this exact component. A foreign or unknown override
+        receives the identical validation rejection; the server rechecks ownership and the
+        current match on every request (ADR-015 section 4.7).
+    DuplicateLinkId:
+      type: string
+      pattern: '^dln_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      minLength: 40
+      maxLength: 40
+      description: Stable public random owner-scoped alias of a reversible link, independent of the internal duplicate_links identifier.
+    InstitutionPresetRef:
+      type: string
+      pattern: '^pre_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      minLength: 40
+      maxLength: 40
+      description: Public preset reference, not a bank/account number or uploaded heading. Preset implementation and registry are API import work, not this provider.
+    ConfidenceBand:
+      type: string
+      enum: [high, low]
+      description: |
+        Closed shared threshold-policy vocabulary. high meets the owning categorisation or
+        source-pair policy's acceptance threshold; low is below it or cannot be established
+        and requires clarification. ADR-016 sections 4.2/4.3 and 10 bind applied suggestions
+        versus clarification and user/rule/import precedence, not a universal numeric score.
+        This T-CON-10 provider assigns these two wire names; it does not invent a middle
+        threshold, publish a model score, or classify an immutable category assignment.
+    DedupSource:
+      type: string
+      enum: [AA, IMPORT, SMS, NOTIFICATION, MANUAL_GUESS]
+      description: Authority labels for ADR-018's AA > IMPORT > SMS > NOTIFICATION > MANUAL-guess ordering. MANUAL_GUESS is that last label, not a user-confirmed value. Other ingestion sources need an additive policy binding before use.
+    DedupMatchBasis:
+      type: string
+      enum: [structured_candidate, external_reference, merchant_similarity, operation_screen]
+      description: Explains the match without carrying compared values, raw text, blind indexes, fingerprints or an account number. A structured-key collision is a candidate, never proof of one fact.
+    DedupPrecedenceRule:
+      type: string
+      enum: [source_order, user_confirmed, same_source_existing, operation_screen]
+    DedupPrecedence:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [rule, user_confirmed_preserved]
+      properties:
+        rule:
+          $ref: '#/components/schemas/DedupPrecedenceRule'
+        incoming_source:
+          $ref: '#/components/schemas/DedupSource'
+        compared_source:
+          $ref: '#/components/schemas/DedupSource'
+        surviving_source:
+          $ref: '#/components/schemas/DedupSource'
+        user_confirmed_preserved:
+          type: boolean
+          const: true
+          description: Mandatory invariant, not inferred consent; enrichment never overrides a user-confirmed value.
+      allOf:
+        - if:
+            properties: {rule: {const: operation_screen}}
+            required: [rule]
+          then:
+            not:
+              anyOf: [{required: [incoming_source]}, {required: [compared_source]}, {required: [surviving_source]}]
+          else:
+            required: [incoming_source, compared_source, surviving_source]
+    DedupOutcomeKind:
+      type: string
+      enum: [clear, duplicate_suspected, needs_review, linked, link_reversed]
+      description: Content decisions, never T-CON-12 problem codes or an automatic queue acknowledgement.
+    DedupWindow:
+      type: string
+      enum: [PT5M, P1D, P3D, same_local_day, operation_defined]
+      description: Source-pair windows in import-group.v1.json. Operation screens use the owning operation's published field set/window, default same_local_day in the server profile zone; clients never calculate it.
+    DedupDecidedBy:
+      type: string
+      enum: [system, user]
+    DuplicateSuppressionStatus:
+      type: string
+      enum: [suppressed_by_link, restored]
+    DuplicateLink:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [link_id, suppressed_record_id, status, decided_by, can_unmerge]
+      description: Both records remain. If both were posted, suppression uses a reversal, never a ledger edit/delete; reversal of the link restores posting through a new fact (ADR-018 sections 7.3/7.4). Every system link is visible with its public ID, status and unmerge affordance.
+      properties:
+        link_id:
+          $ref: '#/components/schemas/DuplicateLinkId'
+        suppressed_record_id:
+          $ref: '#/components/schemas/DedupRecordId'
+        status:
+          $ref: '#/components/schemas/DuplicateSuppressionStatus'
+        decided_by:
+          $ref: '#/components/schemas/DedupDecidedBy'
+        can_unmerge:
+          type: boolean
+        reversed_at:
+          $ref: '#/components/schemas/Instant'
+      allOf:
+        - if:
+            properties: {status: {const: suppressed_by_link}}
+            required: [status]
+          then:
+            properties: {can_unmerge: {const: true}}
+            not: {required: [reversed_at]}
+          else:
+            required: [reversed_at]
+            properties: {can_unmerge: {const: false}}
+    DedupEnrichedField:
+      type: string
+      enum: [description, merchant_display, external_reference, source_confidence, category, needs_review, note]
+      description: Mutable descriptive fields only. No ledger fact, amount, currency, account, occurred_at, source_event_id or dedupe key may be enriched.
+    DedupEnrichment:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [field, source, source_record_id]
+      description: Public provenance of enrichment, without the field's contents. Category enrichment retains ADR-016 assignment precedence; it is not a category UPDATE.
+      properties:
+        field:
+          $ref: '#/components/schemas/DedupEnrichedField'
+        source:
+          $ref: '#/components/schemas/DedupSource'
+        source_record_id:
+          $ref: '#/components/schemas/DedupRecordId'
+    DedupOutcome:
+      type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyDedup
+      additionalProperties: false
+      required: [group_version, outcome]
+      description: |
+        Shared T-CON-10 provider for ingestion and every ADR-015 financial-write screen.
+        Matches disclose only the principal's own public surviving-record ID and explanation.
+        duplicate_suspected has no effect/created record/acknowledgement; a money screen returns
+        it at 202 under the separate DuplicateSuspected response, never with a committed-resource
+        status. Same fact acknowledges as duplicate; different fact retains the same persisted
+        key and bytes plus Duplicate-Override. A changed/additional match requires another
+        decision. A source-pair link is visible and reversible, never silent deletion.
+      properties:
+        group_version:
+          $ref: '#/components/schemas/ImportGroupVersion'
+        outcome:
+          $ref: '#/components/schemas/DedupOutcomeKind'
+        matched_record_id:
+          $ref: '#/components/schemas/DedupRecordId'
+        match_basis:
+          $ref: '#/components/schemas/DedupMatchBasis'
+        precedence:
+          $ref: '#/components/schemas/DedupPrecedence'
+        confidence_band:
+          $ref: '#/components/schemas/ConfidenceBand'
+        window:
+          $ref: '#/components/schemas/DedupWindow'
+        link:
+          $ref: '#/components/schemas/DuplicateLink'
+        enrichment:
+          type: array
+          maxItems: 7
+          items:
+            $ref: '#/components/schemas/DedupEnrichment'
+      allOf:
+        - if:
+            properties: {outcome: {const: clear}}
+            required: [outcome]
+          then:
+            not:
+              anyOf: [{required: [matched_record_id]}, {required: [match_basis]}, {required: [precedence]}, {required: [confidence_band]}, {required: [window]}, {required: [link]}, {required: [enrichment]}]
+          else:
+            required: [matched_record_id, match_basis, precedence, window]
+        - if:
+            properties: {match_basis: {const: operation_screen}}
+            required: [match_basis]
+          then:
+            properties:
+              outcome: {const: duplicate_suspected}
+              precedence: {properties: {rule: {const: operation_screen}}}
+              window: {enum: [same_local_day, operation_defined]}
+            not:
+              anyOf: [{required: [confidence_band]}, {required: [link]}, {required: [enrichment]}]
+          else:
+            if:
+              properties: {outcome: {enum: [duplicate_suspected, needs_review, linked, link_reversed]}}
+              required: [outcome]
+            then:
+              required: [confidence_band]
+              properties:
+                window: {enum: [PT5M, P1D, P3D]}
+                precedence: {properties: {rule: {enum: [source_order, user_confirmed, same_source_existing]}}}
+        - if:
+            properties: {outcome: {enum: [linked, link_reversed]}}
+            required: [outcome]
+          then:
+            required: [link, enrichment]
+          else:
+            not:
+              anyOf: [{required: [link]}, {required: [enrichment]}]
+        - if:
+            properties: {outcome: {const: linked}}
+            required: [outcome]
+          then:
+            properties:
+              confidence_band: {const: high}
+              link: {properties: {status: {const: suppressed_by_link}}}
+        - if:
+            properties: {outcome: {const: link_reversed}}
+            required: [outcome]
+          then:
+            properties: {link: {properties: {status: {const: restored}}}}
+        - if:
+            properties: {outcome: {const: needs_review}}
+            required: [outcome]
+          then:
+            properties: {confidence_band: {const: low}}
+        - if:
+            properties: {match_basis: {const: structured_candidate}, outcome: {enum: [linked, link_reversed]}}
+            required: [match_basis, outcome]
+          then:
+            properties: {link: {properties: {decided_by: {const: user}}}}
+    ImportColumnTarget:
+      type: string
+      enum: [amount, currency, occurred_at, value_date, direction, merchant, description, category, external_reference]
+      description: Semantic column roles only, not column headings or cell content. Category values are resolved under ADR-016 section 4.2; unmapped labels never create categories without explicit confirmation.
+    ImportColumnIndex:
+      type: integer
+      minimum: 1
+      maximum: 256
+    ImportColumnBinding:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [column_index, target]
+      properties:
+        column_index:
+          $ref: '#/components/schemas/ImportColumnIndex'
+        target:
+          $ref: '#/components/schemas/ImportColumnTarget'
+    ImportColumnMapping:
+      type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyMapping
+      additionalProperties: false
+      required: [column_count, detected_columns, user_overrides, unmapped_columns]
+      description: |
+        Ordinal-only mapping; never upload headers, file content, account numbers or raw cell values.
+        Bindings are sorted/unique by column. A user override replaces the detected binding for
+        that column. Effective targets are unique; unmapped_columns is exactly the sorted
+        complement. Ready-to-commit mapping has amount and currency plus occurred_at or value_date;
+        partial mappings may be previewed but require review. Presets are not implemented here.
+      properties:
+        institution_preset:
+          $ref: '#/components/schemas/InstitutionPresetRef'
+        column_count:
+          $ref: '#/components/schemas/ImportColumnIndex'
+        detected_columns:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/ImportColumnBinding'
+        user_overrides:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/ImportColumnBinding'
+        unmapped_columns:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ImportColumnIndex'
+    ImportSourceRow:
+      type: integer
+      minimum: 1
+      maximum: 2147483647
+      description: One-based physical source row position, including any header rows; never the row text.
+    ImportRowCount:
+      type: integer
+      minimum: 0
+      maximum: 10000
+    ImportRowAction:
+      type: string
+      enum: [create, skip, reject, review]
+    ImportRowReason:
+      type: string
+      enum: [ready, duplicate, not_selected, invalid, needs_review]
+      description: Content dispositions, not a second error-code vocabulary. invalid carries ImportRowError.problem with T-CON-12 ProblemCode and safe catalogue text.
+    ImportRowError:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [source_row, problem]
+      properties:
+        source_row:
+          $ref: '#/components/schemas/ImportSourceRow'
+        column_index:
+          $ref: '#/components/schemas/ImportColumnIndex'
+        problem:
+          $ref: '#/components/schemas/ServiceProblemDetail'
+      allOf:
+        - properties:
+            problem:
+              properties:
+                code: {enum: [validation_rejected, import_mapping_required]}
+    ImportPreviewRow:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [source_row, action, reason]
+      properties:
+        source_row:
+          $ref: '#/components/schemas/ImportSourceRow'
+        action:
+          $ref: '#/components/schemas/ImportRowAction'
+        reason:
+          $ref: '#/components/schemas/ImportRowReason'
+        confidence_band:
+          $ref: '#/components/schemas/ConfidenceBand'
+        dedup_outcome:
+          $ref: '#/components/schemas/DedupOutcome'
+        row_error:
+          $ref: '#/components/schemas/ImportRowError'
+      allOf:
+        - if:
+            properties: {action: {const: create}}
+            required: [action]
+          then:
+            required: [confidence_band]
+            properties:
+              reason: {const: ready}
+              confidence_band: {const: high}
+              dedup_outcome: {properties: {outcome: {const: clear}}}
+            not: {required: [row_error]}
+        - if:
+            properties: {action: {const: skip}}
+            required: [action]
+          then:
+            properties: {reason: {enum: [duplicate, not_selected]}}
+            not: {required: [row_error]}
+        - if:
+            properties: {reason: {const: duplicate}}
+            required: [reason]
+          then:
+            required: [dedup_outcome]
+            properties:
+              action: {const: skip}
+              dedup_outcome:
+                properties:
+                  outcome: {enum: [duplicate_suspected, linked]}
+                  confidence_band: {const: high}
+        - if:
+            properties: {action: {const: reject}}
+            required: [action]
+          then:
+            required: [row_error]
+            properties: {reason: {const: invalid}}
+        - if:
+            properties: {action: {const: review}}
+            required: [action]
+          then:
+            required: [confidence_band]
+            properties:
+              reason: {const: needs_review}
+              confidence_band: {const: low}
+              dedup_outcome: {properties: {outcome: {const: needs_review}}}
+            not: {required: [row_error]}
+    ImportPreviewCounts:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [row_count, create_count, skip_count, reject_count, review_count]
+      description: Exact count of rows and each action; row_count equals the sum of the four action counts and the length of rows. The same values feed import.preview.rows metrics.
+      properties:
+        row_count: {$ref: '#/components/schemas/ImportRowCount'}
+        create_count: {$ref: '#/components/schemas/ImportRowCount'}
+        skip_count: {$ref: '#/components/schemas/ImportRowCount'}
+        reject_count: {$ref: '#/components/schemas/ImportRowCount'}
+        review_count: {$ref: '#/components/schemas/ImportRowCount'}
+    ImportPreview:
+      type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyPreview
+      additionalProperties: false
+      required: [group_version, preview_ref, created_at, expires_at, correlation_id, mapping, rows, counts]
+      description: |
+        Side-effect-free immutable owner-scoped preview snapshot. No candidate is posted or linked
+        by preview. A repeated preview request with its same key/bytes returns this same snapshot;
+        edits produce a new reference. Source rows are unique and ascending. A skipped duplicate
+        is a disclosed planned suppression; commit must return its visible reversible link.
+        Unresolved review rows block commit. Uncommitted expiry is stated by the service; a
+        committed reference retains its original receipt for at least P30D from first commit.
+      properties:
+        group_version:
+          $ref: '#/components/schemas/ImportGroupVersion'
+        preview_ref:
+          $ref: '#/components/schemas/ImportPreviewRef'
+        created_at:
+          $ref: '#/components/schemas/Instant'
+        expires_at:
+          $ref: '#/components/schemas/Instant'
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        mapping:
+          $ref: '#/components/schemas/ImportColumnMapping'
+        rows:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/ImportPreviewRow'
+        counts:
+          $ref: '#/components/schemas/ImportPreviewCounts'
+    ImportCommitRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [group_version, preview_ref]
+      description: |
+        Separate commit operation; never an upload, mapping edit or raw row list.
+        Both preview and commit operations require the existing IdempotencyKey parameter and
+        remain scoped to principal/operation/key. Same preview twice, even with another request
+        key, returns its first immutable commit receipt with no additional financial fact/link.
+        Same key with another preview payload is idempotency_payload_mismatch, never a new import.
+        Atomically record consumption and the receipt with the effects; this is a service
+        obligation, not implemented by this schema or the pure conformance checks.
+      properties:
+        group_version:
+          $ref: '#/components/schemas/ImportGroupVersion'
+        preview_ref:
+          $ref: '#/components/schemas/ImportPreviewRef'
+    ImportCommitAction:
+      type: string
+      enum: [created, skipped, rejected]
+    ImportCommitRow:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [source_row, action, reason]
+      properties:
+        source_row:
+          $ref: '#/components/schemas/ImportSourceRow'
+        action:
+          $ref: '#/components/schemas/ImportCommitAction'
+        reason:
+          $ref: '#/components/schemas/ImportRowReason'
+        created_record_id:
+          $ref: '#/components/schemas/DedupRecordId'
+        dedup_outcome:
+          $ref: '#/components/schemas/DedupOutcome'
+        row_error:
+          $ref: '#/components/schemas/ImportRowError'
+      allOf:
+        - if:
+            properties: {action: {const: created}}
+            required: [action]
+          then:
+            required: [created_record_id]
+            properties: {reason: {const: ready}}
+            not:
+              anyOf: [{required: [row_error]}, {required: [dedup_outcome]}]
+          else:
+            not: {required: [created_record_id]}
+        - if:
+            properties: {action: {const: skipped}}
+            required: [action]
+          then:
+            properties: {reason: {enum: [duplicate, not_selected]}}
+            not: {required: [row_error]}
+        - if:
+            properties: {reason: {const: duplicate}}
+            required: [reason]
+          then:
+            required: [dedup_outcome]
+            properties:
+              action: {const: skipped}
+              dedup_outcome: {properties: {outcome: {const: linked}}}
+        - if:
+            properties: {action: {const: rejected}}
+            required: [action]
+          then:
+            required: [row_error]
+            properties: {reason: {const: invalid}}
+            not: {required: [dedup_outcome]}
+    ImportCommitCounts:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [row_count, created_count, skipped_count, rejected_count]
+      description: Exact row/action counts from the first commit, reused unchanged on replay and recorded by import.commit.rows metrics. A replay increments no imported-row metric.
+      properties:
+        row_count: {$ref: '#/components/schemas/ImportRowCount'}
+        created_count: {$ref: '#/components/schemas/ImportRowCount'}
+        skipped_count: {$ref: '#/components/schemas/ImportRowCount'}
+        rejected_count: {$ref: '#/components/schemas/ImportRowCount'}
+    ImportCommitResult:
+      type: object
+      x-pennilogic-strict-provider: true
+      x-pennilogic-provider-validator: com.pennilogic.contracts.imports.ImportContract.verifyCommitResult
+      additionalProperties: false
+      required: [group_version, preview_ref, completed_at, correlation_id, rows, counts]
+      description: First immutable receipt of this owner's preview. Replay returns this exact body/status, including IDs, counts, completion and public correlation; the replay marker belongs in a header, not a changed body. Contains no raw file, row strings or full account identifiers.
+      properties:
+        group_version:
+          $ref: '#/components/schemas/ImportGroupVersion'
+        preview_ref:
+          $ref: '#/components/schemas/ImportPreviewRef'
+        completed_at:
+          $ref: '#/components/schemas/Instant'
+        correlation_id:
+          $ref: '#/components/schemas/PublicCorrelationId'
+        rows:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/ImportCommitRow'
+        counts:
+          $ref: '#/components/schemas/ImportCommitCounts'
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -656,6 +1905,13 @@ components:
       in: query
       schema: { type: string, minLength: 1, maxLength: 2048 }
       description: Opaque cursor issued for this owner; never accepts another owner's listing scope.
+    DuplicateOverride:
+      name: Duplicate-Override
+      in: header
+      required: false
+      schema:
+        $ref: '#/components/schemas/DedupRecordId'
+      description: Current matched surviving-record identifier from DedupOutcome. Explicit different-fact decision, never consent or an ownership bypass; retain the same key/bytes. Unknown/foreign IDs receive identical 400 validation_rejected with no effect. A changed/additional match returns DuplicateSuspected again.
   headers:
     IdempotentReplayed:
       schema: { type: boolean }
@@ -669,12 +1925,29 @@ components:
       schema:
         type: string
         pattern: '^DPoP(?: [^\r\n]+)?$'
-      description: RFC 9449 challenge, including use_dpop_nonce for the nonce/replay/skew recovery path; never Bearer.
+      required: true
+      description: |
+        RFC 9449 challenge, never the Bearer scheme. A nonce challenge is exactly
+        DPoP error="use_dpop_nonce" and requires a fresh DPoP-Nonce in the same response.
+        use_dpop_nonce is protocol metadata, not another ProblemCode.
     CustomDestinationNoStore:
+      required: true
       schema:
         type: string
         const: no-store
       description: Personal destination settings and errors must not be cached.
+    RetryAfter:
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 86400
+      description: |
+        Decimal delta seconds, required when retry_after_seconds is present and equal to that
+        body member. A delay never authorizes an automatic retry, changed key/body, expired
+        retry horizon, reused DPoP proof or weaker authentication.
+    ImportCommitReplayed:
+      schema: {type: boolean}
+      description: Present and true when this preview's original commit receipt was returned with no additional fact, including under a new request key. Distinct from Idempotent-Replayed; neither changes the immutable receipt body.
   requestBodies:
     CustomDestinationLifecycle:
       required: true
@@ -684,11 +1957,31 @@ components:
           schema:
             $ref: '#/components/schemas/CustomDestinationLifecycleRequest'
   responses:
+    ServiceProblem:
+      description: Published safe problem detail; the HTTP status equals the catalogue status for its typed code.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ServiceProblemDetail'
+    DuplicateSuspected:
+      description: 202 content decision, no financial effect or created record, no queue acknowledgement and not an error. Committed-resource responses must use another status. The service re-screens on every override.
+      x-response-status: 202
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/DedupOutcome'
+              - properties: {outcome: {const: duplicate_suspected}}
     CustomDestinationDPoPChallenge:
       description: |
         Authentication failure. For a nonce challenge return WWW-Authenticate with DPoP
         error="use_dpop_nonce" and fresh DPoP-Nonce; the caller must sign a fresh proof.
-        The generic accepted ProblemDetail still awaits the original T-CON-12 typed status binding.
+        The shared authentication-only 401 variant is outside the service-error state projection.
+      x-response-status: 401
+      x-required-response-headers: [WWW-Authenticate, Cache-Control]
+      x-dpop-nonce-challenge:
+        authenticate: 'DPoP error="use_dpop_nonce"'
+        required-header: DPoP-Nonce
       headers:
         DPoP-Nonce:
           $ref: '#/components/headers/DPoPNonce'
@@ -699,7 +1992,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/ProblemDetail'
+            $ref: '#/components/schemas/AuthenticationRequiredProblemDetail'
     CustomDestinationStateResult:
       description: Current authoritative owner registration after the lifecycle operation.
       headers:
@@ -714,15 +2007,21 @@ components:
     CustomDestinationProblem:
       description: |
         Shared RFC 9457 problem details only, with no host, model name, address, key or upstream
-        exception. T-CON-12 (contracts#16) must supply its typed EgressDenialReason binding before
-        publication; the accepted generic ProblemDetail is not that binding or a new catalogue.
+        exception. The one shared closed union distinguishes authentication, service-egress and
+        ordinary validation/service problems before generated conversion. Match the body status
+        to the HTTP status and honour required challenge/delay headers; do not automatically retry.
+      x-required-response-headers: [Cache-Control]
+      x-response-header-bindings:
+        retry_after_seconds: Retry-After
       headers:
         Cache-Control:
           $ref: '#/components/headers/CustomDestinationNoStore'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/ProblemDetail'
+            $ref: '#/components/schemas/OperationProblemDetail'
   securitySchemes:
     DPoP:
       type: apiKey

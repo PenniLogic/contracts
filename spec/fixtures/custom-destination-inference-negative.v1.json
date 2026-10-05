@@ -23,6 +23,7 @@
   "schemas": {
     "CustomDestinationLintToolRequest": {
       "type": "object",
+      "x-pennilogic-strict-provider": true,
       "additionalProperties": false,
       "properties": {
         "destinationId": {"$ref": "#/components/schemas/CustomDestinationId"},
@@ -39,6 +40,7 @@
     },
     "CustomDestinationLintArguments": {
       "type": "object",
+      "x-pennilogic-strict-provider": true,
       "additionalProperties": false,
       "properties": {
         "target": {"$ref": "#/components/schemas/CustomDestinationLintTarget"},
@@ -47,6 +49,7 @@
     },
     "CustomDestinationLintTarget": {
       "type": "object",
+      "x-pennilogic-strict-provider": true,
       "additionalProperties": false,
       "properties": {
         "base_url": {"type": "string"}

@@ -1,6 +1,8 @@
 // PenniLogic hand-written seam shipped with every generated Kotlin client (ADR-015 §3.1).
 package com.pennilogic.contracts.time
 
+import com.pennilogic.contracts.serialization.UuidSerializer
+
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -109,5 +111,6 @@ object PennilogicSerializers {
     val module: SerializersModule = SerializersModule {
         contextual(InstantSerializer)
         contextual(LocalDateSerializer)
+        contextual(UuidSerializer)
     }
 }

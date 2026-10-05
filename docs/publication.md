@@ -12,6 +12,8 @@ whose commit contains, at that tag:
 - `spec/openapi.yaml` with `info.version` equal to the tag version;
 - `spec/currency-registry.v1.json` and `spec/fixtures/*.json` (the hand-written money and instant
   vectors and the seeded `money-roundtrip-generated.v1.json`, ADR-015 §7);
+- `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json` and
+  `spec/import-group.v1.json`, the error/import provider source companions;
 - the committed generator configuration (`generator/*.json`, `generator/openapi-generator-ignore`,
   `generator/templates/`), the runtime seams (`runtime/`) and the generator lock
   (`toolchain/versions.json`: generator version and jar SHA-256; `generator/golden.json`: SHA-256 of
@@ -20,8 +22,14 @@ whose commit contains, at that tag:
 A GitHub Release with the same tag carries, for convenience and audit: the specification
 (`openapi-vX.Y.Z.yaml`), the registry and fixtures, one archive per generated client
 (`pennilogic-contracts-<kotlin|typescript|python>-vX.Y.Z.tar.gz`), `release-manifest.json`
-(specification version and SHA-256, commit, generator name/version/jar SHA-256, per-archive SHA-256
+(specification version and SHA-256, commit, provider-source SHA-256 bindings, generator name/version/jar SHA-256, per-archive SHA-256
 and generated-tree SHA-256) and `SHA256SUMS`.
+
+The accepted `0.2.0` provider source and local combined `0.3.0` preparation do not authorise
+publication and are not released clients. Original consumer adoption, separate review, native CI/dependency conditions and
+the PenniLogic/infra#22 hold remain pending; see [provider-contracts.md](provider-contracts.md).
+The provider companions ship beside the standalone specification and inside each client
+archive, so a pinned consumer can run the same catalogue/import lint and conformance checks.
 
 A tag or Release is never moved, deleted or re-uploaded with different bytes. A mistake is fixed by
 publishing the next version. Until the owner adds a repository ruleset for `refs/tags/v*` (creation
@@ -89,6 +97,21 @@ never generate from a branch and never edit generated output; the hand-written `
 seams ship inside the generated client and are the only place money or instants are parsed or
 rendered (ADR-015 §2).
 
+### Unreleased combined source adoption
+
+AA8 (`aa8d90cb`) and accepted provider (`5b41d458`) source consumers remain pinned unchanged.
+The local `0.3.0` source/error-group `1.1.0` preparation is an expand candidate, not a migrated
+consumer, published tag, release or deployment. Future adoption requires actual regeneration
+and correct authentication-versus-service routing before new codes are emitted. Older consumer
+pins must not receive those new codes. No old wire shape has been removed, so no contract-stage
+acknowledgement is authorized or claimed.
+
+The genuine accepted-provider comparison still holds the new fixed `egress_denied` allOf
+branch, its nested import uses and shared response for review. The scalar-enum/description-only
+response proof does not waive conditional or composition changes. Until that exact finding is
+resolved through the owning review/integration process, source and native conformance passes
+are not full compatibility or publication acceptance.
+
 ## Rollback
 
 Rollback is **re-pinning the previous tag**: a consumer moves its pinned version back and
@@ -143,9 +166,14 @@ machine-readably.
 
 Adding optional properties, endpoints, enum values, registry currencies, examples or descriptions;
 relaxing a constraint; adding a response. These pass the check and need a MINOR bump.
+The response-schema proof recognizes complete, nonempty, duplicate-free scalar enum additions
+and inert description changes through otherwise unchanged properties/items and identified allOf
+members. Deleted/replaced values, new enum constraints, partial/malformed/unknown records,
+requiredness, type/ref/pattern changes, conditionals/`not`, changed compositions and response
+metadata remain unproved or breaking. Structured enum-value changes are also kept for review.
 
 ## Compatibility of the check itself
 
 Before the first tag exists there is no baseline and the check passes with an explicit notice; the
-first publication (`v0.1.0`) defines the baseline and every later change is compared with the
+first owner-authorised publication defines the baseline and every later change is compared with the
 highest tag. CI fetches all history and tags (`fetch-depth: 0`) so the baseline is always present.

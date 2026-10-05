@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "group_version": "1.1.0",
+  "description": "Synthetic owning-source auth/egress binding controls; no server authorization, provider, DNS, TLS or authentication verification is performed.",
+  "correlation_id": "cor_00000000-0000-4000-8000-000000000001",
+  "cases": [
+    {"reason": "destination_denied", "code": "egress_denied", "status": 403},
+    {"reason": "destination_not_registered", "code": "egress_denied", "status": 403},
+    {"reason": "destination_suspended", "code": "egress_denied", "status": 403},
+    {"reason": "destination_revoked", "code": "egress_denied", "status": 403},
+    {"reason": "destination_busy", "code": "dependency_unavailable", "status": 503},
+    {"reason": "resolution_changed", "code": "egress_denied", "status": 403},
+    {"reason": "redirect_denied", "code": "egress_denied", "status": 403},
+    {"reason": "redirect_hop_limit", "code": "egress_denied", "status": 403},
+    {"reason": "tls_verification_failed", "code": "egress_denied", "status": 403},
+    {"reason": "unreachable", "code": "dependency_unavailable", "status": 503},
+    {"reason": "kill_switch_active", "code": "egress_denied", "status": 403},
+    {"reason": "registration_rate_limited", "code": "rate_limited", "status": 429,
+     "extra": {"retry_after_seconds": 30, "allowance": {"limit": 5, "unit": "requests", "window": "hour"}}},
+    {"reason": "step_up_required", "code": "step_up_required", "status": 403},
+    {"reason": "pending_activation", "code": "egress_denied", "status": 403}
+  ],
+  "authentication": [
+    {"code": "authentication_required", "status": 401},
+    {"code": "step_up_required", "status": 403}
+  ],
+  "wire_examples": {
+    "authentication_required": {
+      "type": "urn:pennilogic:problem:authentication_required",
+      "title": "Authentication required",
+      "status": 401,
+      "detail": "Authentication is required for this request.",
+      "code": "authentication_required",
+      "correlation_id": "cor_00000000-0000-4000-8000-000000000001"
+    },
+    "destination_denied": {
+      "type": "urn:pennilogic:problem:egress_denied",
+      "title": "Destination not available",
+      "status": 403,
+      "detail": "The destination cannot be used for this request.",
+      "code": "egress_denied",
+      "correlation_id": "cor_00000000-0000-4000-8000-000000000001",
+      "egress_denial_reason": "destination_denied"
+    }
+  },
+  "safe_headers": {"Content-Type": "application/problem+json", "Cache-Control": "no-store"},
+  "nonce_headers": {"WWW-Authenticate": "DPoP error=\"use_dpop_nonce\"", "DPoP-Nonce": "synthetic-response-nonce"},
+  "invalid": [
+    {"name": "unknown reason", "base": "destination_denied", "set": {"egress_denial_reason": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "missing reason", "base": "destination_denied", "remove": ["egress_denial_reason"]},
+    {"name": "missing step-up egress reason", "base": "step_up_required", "remove": ["egress_denial_reason"]},
+    {"name": "wrong status", "base": "destination_denied", "set": {"status": 401}},
+    {"name": "unavailable status on denied", "base": "destination_denied", "set": {"status": 503}},
+    {"name": "wrong family reason", "base": "destination_denied", "set": {"egress_denial_reason": "step_up_required"}},
+    {"name": "egress reason is not validation", "base": "destination_denied", "set": {"reason": "destination_denied"}},
+    {"name": "private address", "base": "destination_denied", "set": {"host": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "private raw detail", "base": "destination_denied", "set": {"detail": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "wrong shared code", "base": "destination_denied", "set": {"code": "request_failed"}},
+    {"name": "false new service state", "base": "step_up_required", "set": {"state": "permission_denied"}},
+    {"name": "missing mandatory delay", "base": "registration_rate_limited", "remove": ["retry_after_seconds"]},
+    {"name": "missing mandatory allowance", "base": "registration_rate_limited", "remove": ["allowance"]},
+    {"name": "nested private allowance", "base": "registration_rate_limited",
+     "set": {"allowance": {"limit": 5, "unit": "requests", "window": "hour", "provider": "PRIVATE_SYNTHETIC_CANARY"}}},
+    {"name": "zero allowance cannot invent reset", "base": "registration_rate_limited",
+     "set": {"allowance": {"limit": 0, "unit": "requests", "window": "hour", "resets_at": "2026-10-05T12:00:00.000Z"}}},
+    {"name": "denial cannot add retry delay", "base": "destination_denied", "set": {"retry_after_seconds": 30}},
+    {"name": "service egress cannot add allowance", "base": "unreachable",
+     "set": {"allowance": {"limit": 5, "unit": "requests", "window": "hour"}}}
+  ],
+  "unknown_foreign_control": {
+    "contexts": ["absent", "foreign", "revoked", "expired"],
+    "code": "grant_not_active",
+    "forbidden": ["resource", "owner", "exists", "host", "provider", "keyRef", "exception"]
+  }
+}

@@ -9,6 +9,14 @@
     "models": ["fixture/model-v1"]
   },
   "lifecycle": {"version": "1"},
+  "list": {"destinations": []},
+  "validation": {
+    "destinationId": "00000000-0000-4000-8000-000000000001",
+    "version": "1",
+    "validated": true,
+    "validatedAt": "2026-10-05T00:00:00.000Z"
+  },
+  "ecmascript_whitespace": [9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279],
   "destination": {
     "destinationId": "00000000-0000-4000-8000-000000000001",
     "version": "1",
@@ -37,7 +45,15 @@
     {"name": "empty-model-set", "add": {"models": []}},
     {"name": "duplicate-model-set", "add": {"models": ["fixture/model-v1", "fixture/model-v1"]}},
     {"name": "model-grammar", "add": {"models": ["model with whitespace"]}},
-    {"name": "raw-key-as-reference", "add": {"providerKeyRef": "synthetic-not-a-key"}}
+    {"name": "raw-key-as-reference", "add": {"providerKeyRef": "synthetic-not-a-key"}},
+    {"name": "uppercase-key-reference", "add": {"providerKeyRef": "00000000-0000-4000-8000-00000000000A"}},
+    {"name": "compact-key-reference", "add": {"providerKeyRef": "00000000000040008000000000000002"}},
+    {"name": "urn-key-reference", "add": {"providerKeyRef": "urn:uuid:00000000-0000-4000-8000-000000000002"}},
+    {"name": "non-v4-key-reference", "add": {"providerKeyRef": "00000000-0000-1000-8000-000000000002"}},
+    {"name": "wrong-variant-key-reference", "add": {"providerKeyRef": "00000000-0000-4000-0000-000000000002"}},
+    {"name": "numeric-key-reference", "add": {"providerKeyRef": 2}},
+    {"name": "null-key-reference", "add": {"providerKeyRef": null}},
+    {"name": "trailing-newline-model", "add": {"models": ["fixture-model\n"]}}
   ],
   "invalid_lifecycle": [
     {"name": "missing-version", "wire": {}},
@@ -45,6 +61,9 @@
     {"name": "noncanonical-version", "wire": {"version": "01"}},
     {"name": "lifecycle-address", "wire": {"version": "1", "host": "blocked.example"}},
     {"name": "nested-lifecycle-address", "wire": {"version": {"endpoint": "https://blocked.example"}}},
-    {"name": "caller-selected-state", "wire": {"version": "1", "state": "active"}}
+    {"name": "caller-selected-state", "wire": {"version": "1", "state": "active"}},
+    {"name": "zero-version", "wire": {"version": "0"}},
+    {"name": "twenty-digit-version", "wire": {"version": "10000000000000000000"}},
+    {"name": "trailing-newline-version", "wire": {"version": "1\n"}}
   ]
 }

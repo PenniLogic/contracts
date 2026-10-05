@@ -1,0 +1,56 @@
+from __future__ import annotations
+import json
+from enum import Enum
+{{#vendorExtensions.x-py-other-imports}}
+{{{.}}}
+{{/vendorExtensions.x-py-other-imports}}
+from typing import Any
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
+from typing_extensions import Self
+
+
+class {{classname}}({{vendorExtensions.x-py-enum-type}}, Enum):
+    """
+    {{{description}}}{{^description}}{{{classname}}}{{/description}}
+    """
+
+    """
+    allowed enum values
+    """
+{{#allowableValues}}
+    {{#enumVars}}
+    {{{name}}} = {{{value}}}
+    {{/enumVars}}
+
+    @classmethod
+    def from_wire(cls, value: object) -> Self:
+        if isinstance(value, cls):
+            return value
+        if type(value) is {{vendorExtensions.x-py-enum-type}} and any(member.value == value for member in cls):
+            return cls(value)
+        raise ValueError("enum value rejected")
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source: Any, _handler: GetCoreSchemaHandler) -> CoreSchema:
+        # Strict generated models accept the exact wire spelling, never coercion or input-echoing enum errors.
+        return core_schema.no_info_plain_validator_function(
+            cls.from_wire,
+            json_schema_input_schema=core_schema.literal_schema([member.value for member in cls]),
+            serialization=core_schema.plain_serializer_function_ser_schema(lambda member: member.value),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> Self:
+        """Create an instance of {{classname}} from a JSON string"""
+        return cls.from_wire(json.loads(json_str))
+
+    {{#defaultValue}}
+
+    #
+    @classmethod
+    def _missing_value_(cls, value):
+        if value is no_arg:
+            return cls.{{{.}}}
+    {{/defaultValue}}
+{{/allowableValues}}

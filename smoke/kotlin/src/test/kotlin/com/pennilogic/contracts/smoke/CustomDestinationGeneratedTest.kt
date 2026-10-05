@@ -6,6 +6,9 @@ import com.pennilogic.contracts.models.CustomDestination
 import com.pennilogic.contracts.models.CustomDestinationLifecycleRequest
 import com.pennilogic.contracts.models.CustomDestinationRegistrationRequest
 import com.pennilogic.contracts.models.CustomDestinationState
+import com.pennilogic.contracts.models.CustomDestinationList
+import com.pennilogic.contracts.models.CustomDestinationModel
+import com.pennilogic.contracts.models.CustomDestinationValidationResult
 import com.pennilogic.contracts.models.DestinationClass
 import com.pennilogic.contracts.models.EgressDenialReason
 import com.pennilogic.contracts.serialization.PennilogicJson
@@ -30,6 +33,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -59,11 +66,19 @@ class CustomDestinationGeneratedTest {
     }
 
     @Test
-    fun `six real generated transports keep raw DPoP and scope headers on core routes`() = runBlocking {
+    fun `six real generated transports keep raw DPoP and scope headers on core routes`() = runBlocking<Unit> {
         val captured = mutableListOf<HttpRequestData>()
         val engine = MockEngine { request ->
             captured.add(request)
-            respond("{}", HttpStatusCode.OK, headersOf("Content-Type", ContentType.Application.Json.toString()))
+            val response = when {
+                request.url.encodedPath.endsWith("/validate") -> fixture.getValue("validation")
+                request.method.value == "GET" -> JsonObject(mapOf("destinations" to JsonArray(listOf(fixture.getValue("destination")))))
+                else -> fixture.getValue("destination")
+            }
+            val status = if (request.method.value == "POST" && request.url.encodedPath.endsWith("/custom-destinations")) {
+                HttpStatusCode.Created
+            } else HttpStatusCode.OK
+            respond(response.toString(), status, headersOf("Content-Type", ContentType.Application.Json.toString()))
         }
         val api = CustomDestinationsApi(baseUrl = "https://api.pennilogic.example/v1", httpClientEngine = engine)
         val authorization = "DPoP synthetic.access.signature"
@@ -71,12 +86,12 @@ class CustomDestinationGeneratedTest {
         val key = "00000000-0000-4000-8000-000000000010"
         val id = UUID.fromString("00000000-0000-4000-8000-000000000001")
         val lifecycle = CustomDestinationLifecycleRequest("1")
-        api.registerCustomDestination("header.register.signature", "synthetic-step-up", key, registration)
-        api.listCustomDestinations("header.list.signature")
-        api.validateCustomDestination("header.validate.signature", key, id, lifecycle)
-        api.activateCustomDestination("header.activate.signature", "synthetic-step-up", key, id, lifecycle)
-        api.suspendCustomDestination("header.suspend.signature", key, id, lifecycle)
-        api.revokeCustomDestination("header.revoke.signature", key, id, lifecycle)
+        assertEquals(id, api.registerCustomDestination("header.register.signature", "synthetic-step-up", key, registration).body().destinationId)
+        assertEquals(id, api.listCustomDestinations("header.list.signature").body().destinations.first().destinationId)
+        assertTrue(api.validateCustomDestination("header.validate.signature", key, id, lifecycle).body().validated)
+        assertEquals(id, api.activateCustomDestination("header.activate.signature", "synthetic-step-up", key, id, lifecycle).body().destinationId)
+        assertEquals(id, api.suspendCustomDestination("header.suspend.signature", key, id, lifecycle).body().destinationId)
+        assertEquals(id, api.revokeCustomDestination("header.revoke.signature", key, id, lifecycle).body().destinationId)
         val expected = listOf(
             Triple("POST", "", "register"), Triple("GET", "", "list"),
             Triple("POST", "/$id/validate", "validate"), Triple("POST", "/$id/activate", "activate"),
@@ -156,5 +171,76 @@ class CustomDestinationGeneratedTest {
                 }
             }
         }
+    }
+
+    private inline fun <reified T> assertClosed(wire: JsonElement) {
+        val json = PennilogicJson.json
+        assertEquals(wire, json.encodeToJsonElement(json.decodeFromJsonElement<T>(wire)))
+        val invalid = JsonObject(wire.jsonObject + ("PRIVATE_SYNTHETIC_CANARY" to JsonPrimitive(true)))
+        val error = assertFails { json.decodeFromString<T>(invalid.toString()); Unit }
+        assertFalse(error.message.orEmpty().contains("PRIVATE_SYNTHETIC_CANARY"))
+    }
+
+    @Test
+    fun `all six closed models and native generic lists retain their shared serializer`() {
+        assertClosed<CustomDestinationRegistrationRequest>(fixture.getValue("registration"))
+        assertClosed<CustomDestinationLifecycleRequest>(fixture.getValue("lifecycle"))
+        assertClosed<CustomDestinationValidationResult>(fixture.getValue("validation"))
+        assertClosed<CustomDestination>(fixture.getValue("destination"))
+        assertClosed<CustomDestinationModel>(fixture.getValue("destination").jsonObject.getValue("models").jsonArray.first())
+        val list = JsonArray(listOf(fixture.getValue("destination")))
+        assertClosed<CustomDestinationList>(JsonObject(mapOf("destinations" to list)))
+        val decoded = PennilogicJson.json.decodeFromString<List<CustomDestination>>(list.toString())
+        assertEquals(list, PennilogicJson.json.encodeToJsonElement(decoded))
+        val invalid = JsonArray(listOf(JsonObject(fixture.getValue("destination").jsonObject +
+            ("PRIVATE_SYNTHETIC_CANARY" to JsonPrimitive(true)))))
+        assertFails { PennilogicJson.json.decodeFromString<List<CustomDestination>>(invalid.toString()); Unit }
+    }
+
+    @Test
+    fun `whitespace source patterns retain exact ECMAScript character semantics`() {
+        val wire = fixture.getValue("registration").jsonObject
+        for (codepoint in fixture.getValue("ecmascript_whitespace").jsonArray) {
+            val character = codepoint.jsonPrimitive.int.toChar()
+            for ((name, value) in listOf("host" to "models$character.example", "pathPrefix" to "/v1$character/model")) {
+                assertFails {
+                    PennilogicJson.json.decodeFromJsonElement<CustomDestinationRegistrationRequest>(
+                        JsonObject(wire + (name to JsonPrimitive(value)))
+                    )
+                    Unit
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `actual typed destination transport rejects nested extras and invalid outbound mutation`() = runBlocking<Unit> {
+        val destination = fixture.getValue("destination").jsonObject
+        val model = destination.getValue("models").jsonArray.first().jsonObject
+        val invalid = JsonObject(destination + ("models" to JsonArray(listOf(
+            JsonObject(model + ("PRIVATE_SYNTHETIC_CANARY" to JsonPrimitive(true)))
+        ))))
+        var calls = 0
+        val api = CustomDestinationsApi(baseUrl = "https://api.pennilogic.example/v1", httpClientEngine = MockEngine {
+            calls += 1
+            respond(JsonObject(mapOf("destinations" to JsonArray(listOf(invalid)))).toString(),
+                HttpStatusCode.OK, headersOf("Content-Type", ContentType.Application.Json.toString()))
+        })
+        api.setApiKey("DPoP synthetic.access.signature", "Authorization")
+        val error = assertFails { api.listCustomDestinations("header.list.signature").body(); Unit }
+        generateSequence(error) { it.cause }.forEach {
+            assertFalse(it.message.orEmpty().contains("PRIVATE_SYNTHETIC_CANARY"))
+        }
+        assertEquals(1, calls)
+        val models = mutableSetOf("fixture-model")
+        val request = CustomDestinationRegistrationRequest("models.pennilogic.example",
+            CredentialHeader.AUTHORIZATION_BEARER, models)
+        models.add("PRIVATE SYNTHETIC CANARY")
+        assertFails {
+            api.registerCustomDestination("header.register.signature", "synthetic-step-up",
+                "00000000-0000-4000-8000-000000000010", request)
+            Unit
+        }
+        assertEquals(1, calls, "invalid outbound state must not reach Ktor's engine")
     }
 }

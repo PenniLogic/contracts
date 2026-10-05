@@ -15,8 +15,16 @@ versioned git tag plus a GitHub Release built by the owner outside CI (see
 [publication.md](publication.md)). The accepted scaffold provides shared components (`Money`,
 `CurrencyCode`, `Instant`, `LocalDate`, `TimeZone`, `ProblemDetail`, the `IdempotencyKey` parameter
 and the `IdempotentReplayed` header). The additive [custom-destination source contract](custom-destinations.md)
-is not runtime or release acceptance: generated-runtime and shared-refusal integration remain
-blocked, and global/custom AI remain OFF.
+is not runtime or release acceptance. Its closed generated models and shared error families
+are composed locally with accepted provider source; global/custom AI remain OFF.
+
+The local `0.3.0` source retains the T-CON-12 error and T-CON-10 import/dedup provider source
+accepted at `5b41d4580c85be3cc1617074c0f3052b1f7b02cd`, and adds the six custom-destination
+operations. Error group `1.1.0` composes Root's auth/egress decision; import remains `1.0.0`.
+These are not a release or current service adoption.
+Their source authority, safe diagnostics, group version, replay/override rules, conformance
+entry points and remaining rollout obligations are in [provider-contracts.md](provider-contracts.md).
+The accepted scaffold components themselves are unchanged.
 
 ## Layout
 
@@ -24,14 +32,15 @@ blocked, and global/custom AI remain OFF.
 | --- | --- |
 | `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is a source candidate until the owner publishes the matching `vX.Y.Z` tag. |
 | `spec/currency-registry.v1.json` | ISO 4217 codes and minor-unit exponents accepted by the codecs (ADR-015 §1.4); rendered into every client. |
+| `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json`, `spec/import-group.v1.json` | Proposed provider diagnostics/retry/key policy, accepted taxonomy 1.1.0 identifier projection and new T-CON-10 import/dedup group policy. Copied/hash-bound into each client and prepared as standalone release assets. |
 | `spec/fixtures/*.json` | Money and instant wire vectors (hand-written) and `money-roundtrip-generated.v1.json` (10 000 seeded values + boundaries, regenerated deterministically by `scripts/generate_money_fixtures.py`), consumed unchanged by all three smoke consumers (ADR-015 §7). Synthetic values only. |
 | `spec/.spectral.yaml`, `spec/spectral-functions/` | Committed lint ruleset and its custom functions. |
 | `spec/adr022/` | Byte-identical accepted consequence and closed-schema inputs; provenance and immutable digests are documented in custom-destinations.md. |
 | `spec/breaking-change-acknowledgement.json` | Present only while a deliberate breaking change is being published (see publication.md). |
 | `toolchain/versions.json` | Exact versions and SHA-256 digests of every downloaded tool. |
-| `generator/*.json`, `generator/openapi-generator-ignore`, `generator/templates/` | Generator configuration per target, the output ignore list and the drift-guarded template overrides (Python model; Kotlin `ApiClient` and `build.gradle`). |
+| `generator/*.json`, `generator/openapi-generator-ignore`, `generator/templates/` | Generator configuration per target, the output ignore list and exact pinned/drift-guarded model/API/transport template overrides. |
 | `generator/golden.json` | SHA-256 of each generated tree and of every file in it; CI fails when generation drifts. |
-| `runtime/<language>/` | Hand-written seams copied into every generated client: `Money`, `Instant`, `LocalDate`, serializers and the Kotlin `PennilogicJson` converter configuration. |
+| `runtime/<language>/` | Hand-written seams copied into every generated client: money/time, strict service problems, pure import receipt/mapping verification and the Kotlin `PennilogicJson` converter configuration. |
 | `smoke/<language>/` | Smoke consumers: they compile/type-check the generated client and run the conformance tests. |
 | `scripts/*.py` | The pipeline (standard-library Python; see below). `scripts/setup.py` and `scripts/check_repository.py` are generated. |
 | `scripts/tests/` | Tests of the pipeline itself (planted defects, determinism, release dry run). |
@@ -135,7 +144,16 @@ wire format nor ledger admission: registry acceptance of JPY/KWD does not admit 
 
 ### Generator templates
 
-Three templates are overridden, each the pinned generator's stock template plus documented edits:
+Twelve templates/partials are overridden; stock portions remain bound to the pinned generator:
+
+- `generator/templates/python/api.mustache`, `api_client.mustache`, `rest.mustache`: precise
+  parameter/body/return types, actual typed Pydantic `ApiResponse` validation and urllib3's real
+  `BaseHTTPResponse` interface. Non-2xx model-validation failures propagate safely rather than
+  being masked by a `finally` block that echoes an invalid raw response. Marked model targets
+  reject null before the stock deserializer shortcut; explicit Optional wrappers, legacy models
+  and no-content responses keep their existing behavior. API argument validation hides input
+  in normal exception text; structured diagnostics must still use `errors(include_input=False)`.
+  No mypy setting is relaxed.
 
 - `generator/templates/python/model_generic.mustache`: the `Instant` and `LocalDate` imports (a
   type-mapped, non-model type gets no generated import), `Any -> Any` annotations on the generated
@@ -146,11 +164,164 @@ Three templates are overridden, each the pinned generator's stock template plus 
   template wires only gson and jackson).
 - `generator/templates/kotlin/build.gradle.mustache`: the `ktor-serialization-kotlinx-json`
   dependency for `jvm-ktor` + `kotlinx_serialization`.
+- `generator/templates/python/model_enum.mustache`: exact declared wire-type enum parsing under
+  strict Pydantic models, enum-value serialization, and static no-input-echo rejection.
+- `generator/templates/typescript/modelEnum.mustache`: typed guards and enum converters that
+  reject unknown/coerced wire values instead of casting them into a known enum.
+- `generator/templates/kotlin/data_class.mustache`: provider-only registered strict serializers,
+  retained generated descriptors, mandatory source-schema binding, constructor checks and field constraints. Legacy model emission
+  is unchanged; the global JSON configuration is not made strict.
+- `generator/templates/python/model_provider.mustache`: provider-only Pydantic fields and safe
+  regex validators; `model_generic.mustache` selects this partial for marked closed models only.
+  Its schema-name binding selects the compiled recursive declarations on original ingress and
+  normal nested/outbound serialization, including reference-array patterns absent from field annotations.
+  Its payload serializer reuses the unchanged `Money.to_wire` Pydantic JSON seam, alongside the
+  time and enum seams, rather than letting an untyped payload serializer lose the Money codec.
+  Scalar UUID fields use the shared typed wire converter; actual source patterns still enforce
+  version/case restrictions. Kotlin registers its equivalent UUID serializer in the existing module.
+- `generator/templates/typescript/modelGeneric.mustache`: provider-only original-wire/native-model
+  guards and original-wire/emitted-wire declaration checks around the generator conversion bodies.
+  This rejects private Money member names before calling the unchanged dependency codec.
+  Optional referenced properties are omitted
+  before invoking a required child writer; required references and explicit null remain guarded.
+  Declared undefined optional output members are omitted after native-field validation and before
+  validating the emitted object, so closed union branches see actual JSON rather than phantom keys.
+- `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
+  for marked models, including model-valued array items. Array indices must be present and their
+  values non-null/non-undefined before conversion; property omission is not array-item omission.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other
 template is overridden), so a generator bump that changes a template fails loudly; re-apply the edits
 on the new stock template and update the test.
+
+The TypeScript target also uses its committed template directory. Manual source edits use LF
+as required by `.gitattributes`; in particular templates must not acquire CRLF fragments that
+would change generated bytes between Windows and Linux. The runtime copy already normalizes LF.
+
+### Provider conformance
+
+`pl-error-provider` binds the single code enumeration to the machine catalogue, explicit retry/key
+classification and exact safe diagnostic constants. Service rows bind one accepted state;
+authentication-owned rows bind NONE/null and the excluded authentication flow. Error responses
+resolve strict families through local references/compositions, including default/range responses,
+with a strict 401 family, no-store and conditional nonce/delay contracts. The open scaffold remains
+available but is not an admitted service response. Canonical egress reasons use their shared typed
+member and exact source-derived mappings, not a duplicate catalogue or ValidationReason union.
+`pl-import-provider` binds version, public identifiers/override, closed confidence, row/column
+limits, source-pair windows and component references; it rejects inline/local duplicates and
+raw-content/open-map escape hatches. Tagged import consumers declare separate preview/commit
+roles and reference the shared shapes and key.
+
+`scripts/tests/test_error_provider.py` and `test_import_provider.py` validate real OpenAPI 3.1
+schemas with the already integrity-pinned Spectral AJV/parser dependencies, plant unsafe
+catalogue/schema/inline-copy defects and verify exact thresholds. No dependency or framework
+was added. The new `smoke/<language>` tests compile/import the actual generated components,
+check enum typing, decode shared synthetic fixtures through the provider conformance seams,
+and reject unsafe errors, invalid mappings/counts/decisions, changed replay receipts and
+unknown confidence. JSON Schema checks and semantic-only checks are reported separately.
+Neither proves a running service's ownership, atomic commit, metrics or no-duplicate effects.
+The provider-transport inventory retains the 19 accepted closed model paths and adds the six
+destination and four shared error models, testing all 29 with
+ordinary conversion, native construction/serialization, nested models and actual generated
+transport. Missing strict wiring fails lint. Runtime-only generator metadata is ignored by the
+inline-equivalence fingerprint, so removing it does not let an equivalent local schema pass.
+The array controls enumerate all eleven declared provider array fields, including optional nested
+validation issues. All 15 recursive null controls run through Python/Kotlin conversion and transport,
+and all 45 native TypeScript absent/null/invalid-array controls must fail before writing.
+Actual TypeScript `BaseAPI` mock requests prove that undefined/sparse model
+arrays fail before JSON emission, with normal optional-property omission retained.
+`scripts/tests/test_provider_composition.py` extends the existing scratch-generation tests with
+closed synthetic DTOs that reference Money, every accepted primitive seam, optional strict
+problems, import preview and successful refusal. It runs strict mypy/TypeScript compilation,
+ordinary/native/nested/generic serialization and actual generated transports in all three targets.
+It uses the existing pinned venv/compiler/Gradle smoke dependencies; no product DTO, endpoint,
+framework, dependency or pipeline command is added.
+
+`scripts/provider_constraints.cjs` derives internal declarations directly from the owning source,
+using the existing Spectral YAML parser and shared local-reference resolver. The actual generator
+ships source-bound tables and `provider_constraints_sha256` in all three manifests. These are
+internal runtime metadata, not a new wire group, taxonomy, product policy or release asset.
+Kotlin and Python validate recursive scalar/item constraints before conversion and on ordinary
+construction, generic/nested serialization and actual client writes. TypeScript preflights the
+original body and validates projected output before transport, retaining dense-array prechecks,
+optional-property omission and the registered static enum diagnostic.
+The destination and egress-error suites add the six closed destination models and four shared
+error families through that same path, with all canonical reasons and ordinary service controls.
+The named breaking probes preserve the complete live operation/security/response document.
+They exercise the supported allOf optional-inheritance proof separately from the live oneOf
+family, whose unproven changes still require review; no detector is relaxed to make a fixture pass.
+
+For marked closed objects the generation-only layout uses the declared properties/required
+list, without the source composition/constant keywords that the pinned generator incorrectly
+flattens into extra required fields or scalar enums. The full original constraints are compiled
+first and remain the runtime authority. `generation_model_projection` binds the effective input,
+selected models and retained constraint digest; no source field or runtime guard is dropped.
+
+The supported subset is explicit: objects/arrays/strings/integers/booleans; local acyclic schema
+references; string enums and scalar constants; anchored portable ASCII regular expressions;
+code-point string lengths; inclusive/exclusive safe-integer bounds; nested min/max/unique item
+rules (including zero upper bounds); required/closed members and allOf/anyOf/oneOf/not/conditional
+assertions. The accepted date/date-time codecs and integer formats remain registered; UUIDs
+use the shared hyphenated-hex wire shape plus their owning source pattern. URI
+references receive ASCII/escape/parser checks, not an arbitrary format or IRI certification.
+Enum/constant predicates may constrain integer/boolean fields without introducing a new scalar
+enum serializer. Referencing an unmarked legacy DTO does not make that DTO globally strict.
+
+Generation fails explicitly for unknown keywords, untyped value/items, floating-number or nullable
+union schemas, tuple/contains/map-schema features, external/unresolved/cyclic references,
+nonportable patterns, unsupported formats/defaults/scalar-enum representations, malformed
+metadata or contradictory/unrepresentable bounds. No unsupported declaration is silently treated
+as a supported guard. Full producer JSON Schema validation and server obligations remain separate.
+`test_provider_constraints.py` exercises each refusal on all three actual generation commands;
+the generated composition matrix checks same-length public-ID failures, exact nested numeric/
+cardinality boundaries, aliases, Unicode length, zero bounds and private member names.
+
+The regular-expression subset is a checked grammar, not host-JavaScript parse acceptance:
+whole-value outer anchors, printable ASCII literals and portable literal escapes, ordinary
+nonempty groups with grouped alternatives, nonempty flat character classes/ranges (optional
+negation), dot, and greedy `?`/`*`/`+`/bounded repetitions. Empty whole-value `^$` is supported.
+Malformed/empty/nested/set-operation classes, ambiguous shared-endpoint ranges, ungrouped alternatives,
+internal anchors, empty group alternatives, property/backreference escapes and unsupported shorthand,
+lookarounds/inline flags, lazy/possessive modifiers and invalid/unrepresentable repetitions
+are refused before any target output is removed or emitted. This intentionally conservative
+subset does not promise universal regular-expression syntax.
+The one shorthand extension is `\s` inside a character class: all three runtimes use the exact
+25 ECMAScript whitespace code points, not Python/JVM default whitespace. It cannot serve as
+a range endpoint. No other shorthand or outside-class `\s` is admitted.
+Groups are limited to 64 levels so accepted syntax does not depend on a host parser's
+recursion limit; repetition counts use canonical nonnegative decimals within signed 32-bit bounds.
+That count range is a syntax limit, not a guarantee that the pinned generator can construct
+every matching example. The Python generator always synthesizes examples with its bundled
+RgxGen (seed 18, unbounded-repeat default 100); source-only/no-docs flags do not disable it.
+The compiler therefore computes bounded constructive work across sequences, alternatives,
+groups and repetitions, without expanding huge strings. Beyond 4,096 work units it supplies
+a generation-only, at-most-4,096-character nonblank witness, independently validated against
+the original schema with the existing AJV. An authored valid blank example may need that
+nonblank witness because the pinned generator ignores blank annotations. No original
+constraint, runtime declaration or source file is changed, and the generation manifest binds
+the effective annotated input and budget. Supplied invalid examples are never substituted
+into success.
+Witness eligibility follows the actual generator's Java-whitespace and literal-`"null"`
+rules, not JavaScript trimming. A valid bounded first enum value already bypasses RgxGen
+and needs no new annotation, including an empty enum value.
+
+If no validated bounded canonical/supplied witness exists, or a nullable child would require
+more than 4,096 mandatory repetitions, preflight refuses unsupported example construction
+before any target output mutation. Exact huge minima and aggregate over-budget concatenated/
+nested minima therefore fail explicitly, while `0..2147483647`, the neighbouring upper bound
+and alternatives with a short valid witness remain supported. This finite construction limit
+is not a wire-length, heap allowance, universal-schema or runtime-regex performance claim.
+
+Every marked string bound counts Unicode code points, including direct generated Kotlin
+fields and native constructor/copy paths. Both TypeScript recursive and field-metadata guards
+use Unicode-mode matching. Python and Kotlin translate only unescaped wildcard dots outside
+classes to the ECMAScript exclusion set (LF, CR, LS and PS); NEL remains valid dot data.
+Escaped dots and class members remain literal. Matching remains whole-value, never substring
+or permissive final-newline matching. The original ASCII Money/time/public-ID source patterns
+and primitive codecs are unchanged. Generated ordinary/native/nested/actual client tests cover
+astral positives, combining-sequence negatives, class/escape/group/repetition boundaries and
+the same newline controls in all three targets.
 
 ### Golden hashes
 
@@ -163,6 +334,23 @@ generator version, run `python scripts/generate_clients.py --update-golden` and 
 the pull request explains why the output changed. `--verify` lists the differing files when a
 mismatch is unintended.
 
+Every generation builds in a fresh owned sibling staging directory, including runtime,
+companions and the complete manifest. One requested target set is promoted only after every
+target succeeds; downstream generator/companion failures leave previous caller output intact
+and discard staging. Verification double-generates and compares before promoting any client;
+golden updates are committed together with that verified client set, never on a failed run.
+Promotion errors restore prior directories/files. If filesystem restoration itself fails or
+receives a catchable `KeyboardInterrupt`, including during rollback cleanup,
+the command fails explicitly and retains backups plus `recovery.json` in the named staging
+directory; it does not delete recoverable prior bytes or advertise partial success.
+Already-restored destinations and still-unresolved backups remain byte-verifiable against that
+mapping. A promotion interrupt with a successful rollback is re-raised after prior output is
+restored; an interrupted rollback follows the recovery-required path before staging cleanup.
+These are recoverable process-level filesystem transactions, not a single multi-path atomic
+rename, crash durability or protection against external concurrent writers. Consumers must not
+read outputs while a generation command runs. Source/root directories and linked output
+directories are refused; no persistent Git/global configuration is involved.
+
 ## Breaking-change check
 
 `python scripts/check_breaking_changes.py` compares the working-tree document with
@@ -174,6 +362,21 @@ or removed, enum values removed, `additionalProperties` becoming false, paramete
 required changes). Before the first tag exists the check reports that no baseline exists and passes;
 the first publication defines the baseline. Acknowledging a break and the expand-and-contract
 protocol are described in [publication.md](publication.md#breaking-changes).
+
+Dereferenced `allOf` inheritance and response schemas can repeat a base component's optional
+property addition. The guard recognises only proven optional-addition diffs there as additive;
+removed/required/narrowed/conditional/unknown changes and response metadata changes still fail.
+Adding an `allOf` constraint also fails. The composition and partial/stale/blanket acknowledgement
+regressions prevent this source-provider inheritance fix from becoming a bypass.
+
+The optional-inheritance proof is fail-closed at every record boundary: modified
+records have exactly base/revision/diff, matching well-formed member identities,
+no ambiguous duplicate indices, and a non-empty recursively proven optional
+property addition. Unknown record/diff keys or malformed metadata never qualify.
+Direct malformed-record cases and real pinned-oasdiff paired documents cover both
+the positive inheritance seam and retained removal/required/narrowing/response
+metadata failures. An absent published baseline is still explicitly not a release
+compatibility result.
 
 ## Smoke consumers and conformance vectors
 

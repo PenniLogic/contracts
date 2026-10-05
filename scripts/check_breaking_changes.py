@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
@@ -96,6 +97,102 @@ def operation_findings(changes: object) -> tuple[list[Finding], list[str]]:
     return findings, warnings
 
 
+def _member_identity(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) not in ({"index"}, {"index", "component"}):
+        return False
+    if type(value["index"]) is not int or value["index"] < 0:
+        return False
+    return "component" not in value or (
+        isinstance(value["component"], str) and re.fullmatch(r"[A-Za-z0-9._-]+", value["component"]) is not None
+    )
+
+
+def _only_enum_additions(change: object) -> bool:
+    if not isinstance(change, dict) or set(change) != {"added"}:
+        return False
+    added = change["added"]
+    if not isinstance(added, list) or not added:
+        return False
+    identities = set()
+    for value in added:
+        if type(value) not in (str, int, float, bool, type(None)) or \
+                (type(value) is float and not math.isfinite(value)):
+            return False
+        identity = ("number" if type(value) in (int, float) else type(value).__name__, value)
+        if identity in identities:
+            return False
+        identities.add(identity)
+    return True
+
+
+def _only_optional_property_additions(diff: object, *, enum_description: bool = False) -> bool:
+    """Recognise only additive property diffs, including dereferenced allOf inheritance.
+
+    Response proofs may also opt into scalar enum additions and inert description changes.
+    Required, removed, narrowed, conditional and unknown changes are never waived here.
+    """
+    allowed = {"properties", "items", "allOf"}
+    if enum_description:
+        allowed.update(("enum", "description"))
+    if not isinstance(diff, dict) or not diff or set(diff) - allowed:
+        return False
+    if "enum" in diff and not _only_enum_additions(diff["enum"]):
+        return False
+    if "description" in diff:
+        description = diff["description"]
+        if not isinstance(description, dict) or set(description) != {"from", "to"} or \
+                any(value is not None and not isinstance(value, str) for value in description.values()) or \
+                description["from"] == description["to"]:
+            return False
+    if "properties" in diff:
+        properties = diff["properties"]
+        if not isinstance(properties, dict) or not properties or set(properties) - {"added", "modified"}:
+            return False
+        if "added" in properties:
+            added = properties["added"]
+            if not isinstance(added, list) or not added or any(not isinstance(name, str) or not name for name in added) or len(set(added)) != len(added):
+                return False
+        if "modified" in properties:
+            modified = properties["modified"]
+            if not isinstance(modified, dict) or not modified or any(not isinstance(name, str) or not name for name in modified):
+                return False
+            if any(not _only_optional_property_additions(child, enum_description=enum_description) for child in modified.values()):
+                return False
+    if "items" in diff and not _only_optional_property_additions(diff["items"], enum_description=enum_description):
+        return False
+    if "allOf" in diff:
+        composition = diff["allOf"]
+        if not isinstance(composition, dict) or set(composition) != {"modified"}:
+            return False
+        records = composition["modified"]
+        if not isinstance(records, list) or not records:
+            return False
+        identities: set[int] = set()
+        for change in records:
+            if not isinstance(change, dict) or set(change) != {"base", "revision", "diff"} or \
+                    not _member_identity(change["base"]) or not _member_identity(change["revision"]) or \
+                    change["base"] != change["revision"] or not \
+                    _only_optional_property_additions(change["diff"], enum_description=enum_description):
+                return False
+            index = change["base"]["index"]
+            if index in identities:
+                return False
+            identities.add(index)
+    return True
+
+
+def _only_additive_response_schema(change: object) -> bool:
+    if not isinstance(change, dict) or set(change) != {"content"}:
+        return False
+    content = change["content"]
+    if not isinstance(content, dict) or set(content) != {"modified"} or \
+            not isinstance(content["modified"], dict) or not content["modified"] or \
+            any(not isinstance(name, str) or not name for name in content["modified"]):
+        return False
+    return all(isinstance(media, dict) and set(media) == {"schema"} and
+               _only_optional_property_additions(media["schema"], enum_description=True) for media in content["modified"].values())
+
+
 def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
     for key in EXACT_KEYS:
         if key in diff:
@@ -136,8 +233,16 @@ def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
         _schema_findings(f"{pointer}/items", items, findings)
     for combinator in ("oneOf", "anyOf", "allOf"):
         change = diff.get(combinator)
-        if isinstance(change, dict) and (change.get("deleted") or change.get("modified")):
+        if combinator == "allOf" and combinator in diff and (
+                not isinstance(change, dict) or not change or set(change) - {"added", "deleted", "modified"} or
+                any(key in change and (not isinstance(change[key], list) or not change[key]) for key in ("added", "deleted"))):
+            findings.append(Finding("component-schema-allof-changed", pointer, f"unrecognised allOf change at {pointer}", "component-guard"))
+        elif isinstance(change, dict) and (change.get("deleted") or "modified" in change):
+            if combinator == "allOf" and _only_optional_property_additions({"allOf": change}):
+                continue
             findings.append(Finding(f"component-schema-{combinator.lower()}-changed", pointer, f"{combinator} members changed at {pointer}", "component-guard"))
+        if combinator == "allOf" and isinstance(change, dict) and change.get("added"):
+            findings.append(Finding("component-schema-allof-added", pointer, f"allOf constraints added at {pointer}", "component-guard"))
 
 
 def component_findings(diff: object) -> list[Finding]:
@@ -165,6 +270,8 @@ def component_findings(diff: object) -> list[Finding]:
                     findings.append(Finding(f"component-{kind}-required-added", pointer, f"{pointer} became required", "component-guard"))
                 if isinstance(change.get("schema"), dict):
                     _schema_findings(f"{pointer}/schema", change["schema"], findings)
+            elif kind == "responses" and _only_additive_response_schema(change):
+                continue
             else:
                 findings.append(Finding(f"component-{kind}-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
     return findings

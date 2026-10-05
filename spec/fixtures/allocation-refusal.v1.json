@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "decision": "ADR-016 section 3.2; allocation.sum_mismatch_refusal and rejection_reasons.members",
+  "description": "Synthetic diagnostic binding only; no allocation arithmetic, amounts, accounts or endpoints.",
+  "problem": {
+    "type": "urn:pennilogic:problem:validation_rejected",
+    "title": "Validation rejected",
+    "status": 422,
+    "detail": "Review the indicated field.",
+    "code": "validation_rejected",
+    "correlation_id": "cor_00000000-0000-4000-8000-000000000001",
+    "field": "allocation",
+    "reason": "allocation_sum_mismatch"
+  },
+  "directions": ["shortfall", "excess"],
+  "invalid_directions": ["SHORTFALL", "shortfall\n", "unknown", "PRIVATE_SYNTHETIC_CANARY", "shortfall 12.34", 1, true, null, {"amount": "12.34", "currency": "INR"}]
+}

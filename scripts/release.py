@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
-    BUILD, FIXTURES, LANGUAGES, REGISTRY, ROOT, SEMVER, SPEC, PipelineError, fail, run, sha256_bytes, sha256_file,
+    BUILD, FIXTURES, LANGUAGES, PROVIDER_SOURCE_NAMES, REGISTRY, ROOT, SEMVER, SPEC, PipelineError, fail, run, sha256_bytes, sha256_file,
     spec_version, versions,
 )
 
@@ -136,7 +136,7 @@ def build_release_set(version: str, head: str, mtime: int) -> Path:
     spec_bytes = SPEC.read_bytes().replace(b"\r\n", b"\n")
     (target / f"openapi-{tag}.yaml").write_bytes(spec_bytes)
     files[f"openapi-{tag}.yaml"] = sha256_bytes(spec_bytes)
-    for extra in [REGISTRY, *sorted(FIXTURES.glob("*.json"))]:
+    for extra in [REGISTRY, *(SPEC.parent / name for name in PROVIDER_SOURCE_NAMES), *sorted(FIXTURES.glob("*.json"))]:
         data = extra.read_bytes().replace(b"\r\n", b"\n")
         (target / extra.name).write_bytes(data)
         files[extra.name] = sha256_bytes(data)
@@ -156,12 +156,14 @@ def build_release_set(version: str, head: str, mtime: int) -> Path:
         clients[language] = {
             "archive": name, "archive_sha256": files[name], "tree_sha256": manifest["tree_sha256"],
             "file_count": manifest["file_count"], "generator": manifest["generator"], "runtime_sha256": manifest["runtime_sha256"],
+            "provider_sources_sha256": manifest["provider_sources_sha256"],
         }
     release_manifest = {
         "schema_version": 1,
         "tag": tag,
         "spec_version": version,
         "spec_sha256": files[f"openapi-{tag}.yaml"],
+        "provider_sources_sha256": {name: files[name] for name in PROVIDER_SOURCE_NAMES},
         "commit": head,
         "publication": "git tag + GitHub Release assets; consumers pin the tag and generate with scripts/generate_clients.py (docs/publication.md)",
         "toolchain": {

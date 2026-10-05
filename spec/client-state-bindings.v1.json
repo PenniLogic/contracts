@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "taxonomy_version": "1.1.0",
+  "source": {
+    "repository": "PenniLogic/docs",
+    "commit": "a700e639585c61a4610e7b99dbd02b2dab28bdcc",
+    "path": "product/client-state-taxonomy.json",
+    "sha256": "040d2f0c27332ce3f6794a90139e714b3c50afb5b7340aa596d47b8866f2b3fb"
+  },
+  "description": "Exact identifier/condition projection of the accepted taxonomy, not its rendered copy, composition logic or accessibility implementation. Authentication and successful AI refusal remain outside the error vocabulary.",
+  "states": ["empty", "loading", "error", "offline", "stale", "permission_denied", "quota_exceeded", "degraded"],
+  "service_conditions": {
+    "entitlement_denied": "permission_denied",
+    "grant_not_active": "permission_denied",
+    "role_capability_denied": "permission_denied",
+    "quota_exhausted": "quota_exceeded",
+    "rate_limited": "quota_exceeded",
+    "dependency_unavailable": "error",
+    "request_failed": "error",
+    "validation_rejected": "error"
+  },
+  "excluded_conditions": ["pending_sync", "filtered_no_results", "ai_refusal", "authentication_required", "confirmation_and_success"]
+}
