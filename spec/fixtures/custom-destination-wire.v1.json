@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "scope": "Synthetic wire/schema controls only. Reserved .example hosts are deliberately ineligible for real egress; no positive network, authorization or activation result is implied.",
+  "registration": {
+    "host": "models.pennilogic.example",
+    "pathPrefix": "/v1",
+    "credentialHeader": "authorization_bearer",
+    "providerKeyRef": "00000000-0000-4000-8000-000000000002",
+    "models": ["fixture/model-v1"]
+  },
+  "lifecycle": {"version": "1"},
+  "destination": {
+    "destinationId": "00000000-0000-4000-8000-000000000001",
+    "version": "1",
+    "destinationClass": "runtime_registered_custom",
+    "host": "models.pennilogic.example",
+    "pathPrefix": "/v1",
+    "credentialHeader": "authorization_bearer",
+    "state": "pending_activation",
+    "models": [
+      {"custom_model_id": "00000000-0000-4000-8000-000000000003", "name": "fixture/model-v1"}
+    ],
+    "reason": "pending_activation"
+  },
+  "invalid_registration": [
+    {"name": "top-level-address", "add": {"base_url": "https://blocked.example"}},
+    {"name": "address-alias", "add": {"endpoint": "https://blocked.example"}},
+    {"name": "nested-headers", "add": {"headers": {"host": "blocked.example"}}},
+    {"name": "raw-key-field", "add": {"providerKey": "synthetic-not-a-key"}},
+    {"name": "owner-spoof", "add": {"ownerId": "00000000-0000-4000-8000-000000000004"}},
+    {"name": "approval-spoof", "add": {"state": "active"}},
+    {"name": "class-promotion", "add": {"destinationClass": "code_managed_provider"}},
+    {"name": "closed-credential-enum", "add": {"credentialHeader": "x_custom_key"}},
+    {"name": "full-url-in-host", "add": {"host": "https://blocked.example"}},
+    {"name": "port-in-host", "add": {"host": "blocked.example:443"}},
+    {"name": "nested-model-address", "add": {"models": [{"name": "fixture/model-v1", "host": "blocked.example"}]}},
+    {"name": "empty-model-set", "add": {"models": []}},
+    {"name": "duplicate-model-set", "add": {"models": ["fixture/model-v1", "fixture/model-v1"]}},
+    {"name": "model-grammar", "add": {"models": ["model with whitespace"]}},
+    {"name": "raw-key-as-reference", "add": {"providerKeyRef": "synthetic-not-a-key"}}
+  ],
+  "invalid_lifecycle": [
+    {"name": "missing-version", "wire": {}},
+    {"name": "numeric-version", "wire": {"version": 1}},
+    {"name": "noncanonical-version", "wire": {"version": "01"}},
+    {"name": "lifecycle-address", "wire": {"version": "1", "host": "blocked.example"}},
+    {"name": "nested-lifecycle-address", "wire": {"version": {"endpoint": "https://blocked.example"}}},
+    {"name": "caller-selected-state", "wire": {"version": "1", "state": "active"}}
+  ]
+}

@@ -12,18 +12,21 @@ against the last published tag (oasdiff + a component guard), deterministic gene
 Kotlin, TypeScript and Python clients (openapi-generator, one pinned version), and three smoke
 consumers that compile, type-check and run the money/instant conformance vectors. Publication is a
 versioned git tag plus a GitHub Release built by the owner outside CI (see
-[publication.md](publication.md)). Business endpoints are **not** part of this scaffold; the
-document carries the shared components only (`Money`, `CurrencyCode`, `Instant`, `LocalDate`,
-`TimeZone`, `ProblemDetail`, the `IdempotencyKey` parameter and the `IdempotentReplayed` header).
+[publication.md](publication.md)). The accepted scaffold provides shared components (`Money`,
+`CurrencyCode`, `Instant`, `LocalDate`, `TimeZone`, `ProblemDetail`, the `IdempotencyKey` parameter
+and the `IdempotentReplayed` header). The additive [custom-destination source contract](custom-destinations.md)
+is not runtime or release acceptance: generated-runtime and shared-refusal integration remain
+blocked, and global/custom AI remain OFF.
 
 ## Layout
 
 | Path | Owner / purpose |
 | --- | --- |
-| `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is the published version (`vX.Y.Z` tag). |
+| `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is a source candidate until the owner publishes the matching `vX.Y.Z` tag. |
 | `spec/currency-registry.v1.json` | ISO 4217 codes and minor-unit exponents accepted by the codecs (ADR-015 §1.4); rendered into every client. |
 | `spec/fixtures/*.json` | Money and instant wire vectors (hand-written) and `money-roundtrip-generated.v1.json` (10 000 seeded values + boundaries, regenerated deterministically by `scripts/generate_money_fixtures.py`), consumed unchanged by all three smoke consumers (ADR-015 §7). Synthetic values only. |
 | `spec/.spectral.yaml`, `spec/spectral-functions/` | Committed lint ruleset and its custom functions. |
+| `spec/adr022/` | Byte-identical accepted consequence and closed-schema inputs; provenance and immutable digests are documented in custom-destinations.md. |
 | `spec/breaking-change-acknowledgement.json` | Present only while a deliberate breaking change is being published (see publication.md). |
 | `toolchain/versions.json` | Exact versions and SHA-256 digests of every downloaded tool. |
 | `generator/*.json`, `generator/openapi-generator-ignore`, `generator/templates/` | Generator configuration per target, the output ignore list and the drift-guarded template overrides (Python model; Kotlin `ApiClient` and `build.gradle`). |
@@ -91,6 +94,8 @@ Cold runs download Gradle and the Kotlin toolchain (several minutes).
 | `pl-operation-security` | Every operation has a non-empty security requirement, at operation level or root level (ADR-019 §16; the root DPoP scheme is contracts#1's). |
 | `pl-money-example-registry-scale` | Every Money example uses a registry currency with exactly the registry exponent of fraction digits. |
 | `pl-problem-detail-no-money` | `ProblemDetail` never carries a monetary value. |
+| `pl-custom-destination-contract` | Direct accepted ADR-022 byte/schema/provenance validation, four exactly-once enum definitions, closed registration fields and canonical state-denial mapping. |
+| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no address, header, open-map or encoded-argument escape. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
 
 `oas3-unused-component` is off: the shared components are published before any operation
 references them. The money-example rule reads `currency-registry.v1.json` from the linted
@@ -182,6 +187,11 @@ wire); comparison across currencies or against a float never coerces. The Python
 type-checks with `mypy --strict` (the generated transport modules `api_client`, `rest`,
 `exceptions`, `configuration` and `api_response` use openapi-generator's own baseline through
 per-module overrides in `smoke/python/mypy.ini`; every model and seam is strict).
+
+The namespaced custom-destination tests also use real generated transports and decoders.
+Unlike schema-only controls, they currently expose shared generator defects; failed T6 controls
+must remain failures, not be skipped or replaced with a separate strict decoder. See
+[the source-only boundary and reproduction commands](custom-destinations.md#generated-runtime-gaps).
 
 ### CrossLanguageMoneyRoundTripTest
 

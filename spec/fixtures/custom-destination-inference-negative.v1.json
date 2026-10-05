@@ -1,0 +1,56 @@
+{
+  "scope": "Planted test-only OpenAPI overlay, never a production tool/inference group.",
+  "paths": {
+    "/ai/tools/execute": {
+      "post": {
+        "operationId": "customDestinationLintProbe",
+        "description": "Synthetic nested negative control only.",
+        "tags": ["CustomDestinations"],
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"$ref": "#/components/requestBodies/CustomDestinationLintBody"},
+        "responses": {"204": {"description": "Synthetic response only."}}
+      }
+    }
+  },
+  "requestBodies": {
+    "CustomDestinationLintBody": {
+      "required": true,
+      "content": {
+        "application/json": {"schema": {"$ref": "#/components/schemas/CustomDestinationLintToolRequest"}}
+      }
+    }
+  },
+  "schemas": {
+    "CustomDestinationLintToolRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destinationId": {"$ref": "#/components/schemas/CustomDestinationId"},
+        "arguments": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {"$ref": "#/components/schemas/CustomDestinationLintArguments"},
+              {"type": "object", "additionalProperties": false, "properties": {}}
+            ]
+          }
+        }
+      }
+    },
+    "CustomDestinationLintArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {"$ref": "#/components/schemas/CustomDestinationLintTarget"},
+        "next": {"$ref": "#/components/schemas/CustomDestinationLintArguments"}
+      }
+    },
+    "CustomDestinationLintTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "base_url": {"type": "string"}
+      }
+    }
+  }
+}

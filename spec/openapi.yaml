@@ -1,13 +1,15 @@
 openapi: 3.1.0
 info:
   title: PenniLogic API contract
-  version: 0.1.0
-  summary: Shared components of the PenniLogic API contract; business endpoints are added by later contract tickets.
+  version: 0.2.0
+  summary: Shared API components and the isolated custom-destination enrollment source contract.
   description: |
-    Single source of truth for the PenniLogic API. This first published version carries only the
-    shared components that ADR-015 (money wire format, time and idempotency conventions) binds on
-    every service and every generated client. Business endpoints are added additively by the
-    contract expansion tickets (the skeleton by PenniLogic/contracts#1); every mutating operation
+    Single source of truth for the PenniLogic API. The shared components that ADR-015 (money wire
+    format, time and idempotency conventions) binds on every service and generated client are
+    preserved. The additive CustomDestinations group is the contracts#27 source contract, not
+    a deployed gateway, a published release or permission to enable AI. Typed refusal and strict
+    generated-runtime integration remain release prerequisites. Other endpoints are added by
+    their contract expansion tickets (the skeleton by PenniLogic/contracts#1); every mutating operation
     must reference the `IdempotencyKey` parameter or carry a reasoned `x-idempotency` extension, and
     every monetary field must reference `Money`. The committed lint ruleset (`spec/.spectral.yaml`)
     enforces those rules. All examples are synthetic.
@@ -29,7 +31,244 @@ x-pennilogic-contract-metadata:
   idempotency_key_lifetime: P30D
   client_retry_horizon: P14D
   decision: ADR-015
-paths: {}
+x-custom-destination-source:
+  repository: PenniLogic/docs
+  commit: 9e394961032b50eafb68b37ff3f7c209243127cf
+  artifact: adr-022-ai-egress-consequences@1.1.0
+  policyVersion: "2026-10-05.2"
+  consequences: adr022/ai-egress-consequences.json
+  consequencesSha256: 44c3b40b8caa01c26c46a6b8103667501bc9e1be2a2cf714dcb84d8a358f476f
+  schema: adr022/ai-egress-consequences.schema.json
+  schemaSha256: 61f625d370840e9a40e1d7a05355c5504cc8a9d98aafac4814d641d21a021d73
+security:
+  - DPoP: []
+x-dpop-protocol:
+  standard: RFC9449
+  authorization: "DPoP <at+jwt>"
+  codegenMapping: raw-authorization-header-not-api-key-authentication
+  apiKeyPrefix: unset
+  proof: fresh-per-physical-send-including-retries-and-nonce-challenges
+  requiredBindings: [htm, htu, ath, cnf.jkt, iat, jti]
+  iatWindowSeconds: 60
+  jtiReplayCacheSeconds: 300
+  automaticRetryAdoption: blocked-without-per-send-proof-support
+x-step-up-request-binding:
+  version: step-up-request@1
+  op: OpenAPI-operationId
+  rq: unpadded-base64url-SHA256-UTF8-RFC8785-canonical-JSON-envelope
+  envelope:
+    version: step-up-request@1
+    operation: OpenAPI-operationId
+    method: uppercase-HTTP-method
+    target: all-validated-path-parameters-closed-object
+    body: exact-strict-validated-request-JSON-object
+  preserveOmittedFields: true
+  insertDefaults: false
+  normalizeBeforeDigest: false
+  reject: [unknown-fields, duplicate-JSON-names, non-IJSON-values, unknown-query-parameters]
+  sessionAndKeyAuthority: verified-session-and-key-context-only
+  passkeyUserVerificationRequired: true
+  freshnessSeconds: 300
+  singleUse: atomic
+  verifier: recompute-from-actual-operation-target-and-body
+  issuer: validate-and-bind-the-same-intent
+  evidenceScope: finite-contract-vectors-not-an-issuer-or-JCS-runtime
+tags:
+  - name: CustomDestinations
+    description: |
+      Owner-only custom destination enrollment through the authenticated core API, never direct
+      provider access. ADR-022 source contracts do not enable AI: global/custom flags remain OFF,
+      provider/custom approvals and deployment inventory remain empty, and H1/H2 plus every
+      applicable T1-T20 gate must pass before exposure. Operators cannot register or promote
+      destinations through this group; administrative abuse controls use their separate authority.
+paths:
+  /ai/custom-destinations:
+    get:
+      operationId: listCustomDestinations
+      tags: [CustomDestinations]
+      description: |
+        List only the live authenticated owner's registrations. Ownership comes from verified
+        ADR-019 session/device authority, never a supplied account identifier or UUID possession.
+        Host/prefix/model names are personal settings, not operator, audit or telemetry fields.
+        Reading registrations does not probe DNS/TLS, approve a destination or turn on AI.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CustomDestinationListLimit'
+        - $ref: '#/components/parameters/CustomDestinationListCursor'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '200':
+          description: A bounded owner-only page; absence of nextCursor ends the listing.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CustomDestinationNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDestinationList'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
+    post:
+      operationId: registerCustomDestination
+      tags: [CustomDestinations]
+      description: |
+        Register owner enrollment data, including the model set, under a live owner-bound
+        ADR-019 session and fresh single-use passkey step-up bound to this operation and canonical
+        parameters. Key enrollment is a separate operation: only a previously enrolled owner/key/
+        destination/audience-bound providerKeyRef is accepted here, never key material or headers.
+        Enforce versioned transfer consent, both relevant flags, retention/custodian/runtime gates,
+        five attempts/hour and twenty/day before DNS. A TLS-only, bodyless/keyless candidate probe
+        expires after 120 seconds and alone cannot approve. Create active only when every check
+        passes; otherwise use pending_activation where the risk policy requires a 24-hour hold,
+        verified notification and cancellation. Time alone cannot activate. Enforce at most one
+        active destination per owner atomically. No inference, quota reservation or provider
+        fallback is performed by registration. All non-2xx responses remain shared problem details.
+      x-custom-destination-step-up: required
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/StepUpToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomDestinationRegistrationRequest'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '201':
+          description: Owner registration and current authoritative state, not permission to infer.
+          headers:
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+            Cache-Control:
+              $ref: '#/components/headers/CustomDestinationNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDestination'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
+  /ai/custom-destinations/{destinationId}/validate:
+    parameters:
+      - $ref: '#/components/parameters/CustomDestinationId'
+    post:
+      operationId: validateCustomDestination
+      tags: [CustomDestinations]
+      description: |
+        Probe the owner's existing registration at its exact current version with a live
+        ADR-019 session, without enrollment step-up. Resolve and check the complete current answer
+        set and TLS identity under
+        the same OFF, consent, rate, audit and privacy gates as registration. Return only the
+        coarse outcome and server validation instant, never pins, resolver answers, latency or
+        upstream exceptions. This TLS-only probe cannot infer, change active pins, models, keys,
+        state or approval, promote a destination or reconfirm enrollment. A changed answer set
+        is a refused probe, not permission to re-pin; runtime admission independently enforces
+        the canonical suspension policy. State-mutating reconfirmation uses activate with step-up.
+      x-custom-destination-step-up: not-required-probe-only
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CustomDestinationLifecycle'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '200':
+          description: Coarse TLS-only probe result; no active-pin, model, state or approval mutation.
+          headers:
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+            Cache-Control:
+              $ref: '#/components/headers/CustomDestinationNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDestinationValidationResult'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
+  /ai/custom-destinations/{destinationId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/CustomDestinationId'
+    post:
+      operationId: activateCustomDestination
+      tags: [CustomDestinations]
+      description: |
+        Explicit owner confirmation of the exact registration version under fresh single-use
+        ADR-019 step-up bound to destinationId, version and operation. Repeat all registration
+        checks before approval/re-pinning after resolution, validation or recovery suspension.
+        Respect the hold and verified consent; neither an elapsed timer nor successful validation
+        is approval. A kill-switch suspension additionally requires independently authorized ON
+        and fresh validation. Do not switch any global/class flag or revive a revoked registration.
+        Atomically refuse a concurrent active destination; stale versions cannot change state.
+      x-custom-destination-step-up: required
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/StepUpToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CustomDestinationLifecycle'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '200':
+          $ref: '#/components/responses/CustomDestinationStateResult'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
+  /ai/custom-destinations/{destinationId}/suspend:
+    parameters:
+      - $ref: '#/components/parameters/CustomDestinationId'
+    post:
+      operationId: suspendCustomDestination
+      tags: [CustomDestinations]
+      description: |
+        Protective owner OFF for this exact destination/version, entering suspended_kill_switch.
+        This is not an operator endpoint and cannot choose another owner or arbitrary state/reason.
+        A live authenticated owner may stop traffic without fresh step-up, an available audit
+        writer, ON flags or a working upstream. Close new admission immediately and all affected
+        traffic within the total 60-second bound. Never undo a terminal revocation. Emergency OFF
+        remains available; reopening needs authorized ON and fresh validation, not this operation.
+      x-custom-destination-step-up: not-required-protective-off
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CustomDestinationLifecycle'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '200':
+          $ref: '#/components/responses/CustomDestinationStateResult'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
+  /ai/custom-destinations/{destinationId}:
+    parameters:
+      - $ref: '#/components/parameters/CustomDestinationId'
+    delete:
+      operationId: revokeCustomDestination
+      tags: [CustomDestinations]
+      description: |
+        Immediately revoke the owner's exact destination/version, also cancelling pending
+        activation. This protective action requires a live owner session but no fresh step-up,
+        ON flag, working upstream or available audit writer. Revocation is terminal: refuse new
+        admission and terminate in-flight traffic within 60 seconds end-to-end. Repeated delivery
+        reuses the persisted Idempotency-Key. Erasure and restore must not resurrect keys, pins,
+        approvals or ON flags; they retain the existing opaque immutable audit, never addresses.
+      x-custom-destination-step-up: not-required-protective-off
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CustomDestinationLifecycle'
+      responses:
+        '401':
+          $ref: '#/components/responses/CustomDestinationDPoPChallenge'
+        '200':
+          $ref: '#/components/responses/CustomDestinationStateResult'
+        default:
+          $ref: '#/components/responses/CustomDestinationProblem'
 components:
   schemas:
     Money:
@@ -136,6 +375,247 @@ components:
           correlation_id: req-01HZY0000000000000000000
           field: amount
           reason: scale_mismatch
+    DPoPProofValue:
+      type: string
+      minLength: 5
+      pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+      not:
+        pattern: '[\r\n]'
+      description: |
+        Fresh RFC 9449 proof for this physical send, not a static API credential. Three nonempty
+        unpadded base64url segments are a shape check only, never signature or admission proof.
+        The caller signs actual htm/htu/ath with the cnf.jkt-bound key, iat within 60 seconds and
+        a fresh jti (300-second replay cache). Retries, redirects and nonce-challenge resends need
+        fresh proofs. A generated call parameter alone supplies no per-send signing/retry hook.
+    StepUpTokenValue:
+      type: string
+      minLength: 1
+      description: |
+        Opaque single-use step-up token; no JWT encoding is assumed. The issuer and verifier bind
+        sid/jkt from verified context, op to operationId and rq to x-step-up-request-binding.
+        Require passkey user verification within 300 seconds, expiry and atomic single use.
+        Never log or expose this token, rq, request body, host or key reference in public audit.
+    DestinationClass:
+      type: string
+      description: ADR-022 destination trust class; a registration cannot promote itself to a provider.
+      enum: [code_managed_provider, runtime_registered_custom]
+    CredentialHeader:
+      type: string
+      description: |
+        Chosen only at enrollment. The canonical artifact maps authorization_bearer to
+        Authorization with Bearer scheme, x_api_key to x-api-key, and api_key to api-key.
+        This is a selector, not a header map or credential; outbound headers are built server-side.
+      enum: [authorization_bearer, x_api_key, api_key]
+    CustomDestinationState:
+      type: string
+      description: Authoritative ADR-022 lifecycle state. The ephemeral validation candidate is not a public state.
+      enum:
+        - pending_activation
+        - active
+        - suspended_resolution_changed
+        - suspended_validation_failed
+        - suspended_recovery
+        - suspended_kill_switch
+        - revoked
+    EgressDenialReason:
+      type: string
+      description: |
+        Coarse ADR-022 egress reason, not a new global problem-code catalogue. T-CON-12 owns
+        the typed binding into the shared problem-detail contract; no upstream value is exposed.
+      enum:
+        - destination_denied
+        - destination_not_registered
+        - destination_suspended
+        - destination_revoked
+        - destination_busy
+        - resolution_changed
+        - redirect_denied
+        - redirect_hop_limit
+        - tls_verification_failed
+        - unreachable
+        - kill_switch_active
+        - registration_rate_limited
+        - step_up_required
+        - pending_activation
+    CustomDestinationId:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Server-random UUIDv4; possession never grants ownership or egress authority.
+    CustomDestinationVersion:
+      type: string
+      pattern: '^[1-9][0-9]{0,18}$'
+      maxLength: 19
+      description: |
+        Server-assigned monotonic registration revision, serialized as a decimal string without
+        floating-point conversion. Lifecycle commands require the exact current version and bind
+        it into step-up where required. A stale revision cannot re-pin, activate or overwrite state.
+    CustomDestinationHost:
+      type: string
+      minLength: 1
+      maxLength: 254
+      pattern: '^[^\s:/\\?#@%\[\]]+$'
+      description: |
+        DNS host only, never a full URL, scheme, port or IP literal. The lexical schema does not
+        implement network authorization. The server performs ADR-022's UTS-46 non-transitional
+        STD3 conversion, optional single trailing-dot removal, 63-byte label/253-byte total limits,
+        pre/post-IDNA literal checks and complete DNS/self/deny validation. Owner responses use
+        the normalized lowercase A-label. No DNS or provider contact occurs in contract tests.
+    CustomDestinationPathPrefix:
+      type: string
+      minLength: 1
+      maxLength: 256
+      pattern: '^/[^\s?#\\]*$'
+      description: |
+        Optional absolute path prefix. The server enforces the 256 UTF-8-byte bound, one decode,
+        canonical re-encoding, no encoded separators/nested escapes/dot segments, and segment-boundary
+        matching. Omission selects the root path. The string-length check is not a URL normalizer.
+    CustomDestinationProviderKeyRef:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: |
+        Opaque reference to a separately enrolled credential. Resolve only under the verified
+        owner/destination/audience binding; never treat a caller-supplied reference as authority.
+        This operation never enrolls, persists on the client, or returns a raw key.
+    CustomDestinationModelName:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'
+      description: |
+        ADR-023 registration-only model name, not an inference selector or a model-name whitelist.
+        The server applies the published credential-pattern checks best effort. Names remain
+        owner-only personal destination data and never enter refusals, traces, usage or operator
+        surfaces, even when an arbitrary token evades those checks.
+    CustomDestinationModelId:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Server-assigned UUIDv4 for a registered model; inference uses custom_model_id, not the name.
+    CustomDestinationRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [host, credentialHeader, models]
+      properties:
+        host:
+          $ref: '#/components/schemas/CustomDestinationHost'
+        pathPrefix:
+          $ref: '#/components/schemas/CustomDestinationPathPrefix'
+        credentialHeader:
+          $ref: '#/components/schemas/CredentialHeader'
+        providerKeyRef:
+          $ref: '#/components/schemas/CustomDestinationProviderKeyRef'
+        models:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/CustomDestinationModelName'
+      description: |
+        The five exact canonical registration fields; owner identity, approval, state and
+        destination class are server-owned. Unknown members, including raw keys/custom headers,
+        must be rejected, not ignored. Generated-runtime closure is a separate T6 obligation.
+    CustomDestinationLifecycleRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          $ref: '#/components/schemas/CustomDestinationVersion'
+      description: |
+        Compare the current owner-bound destination revision atomically before changing state.
+        No destination address, key, caller-chosen state, reason, owner or approval is accepted.
+    CustomDestinationModel:
+      type: object
+      additionalProperties: false
+      required: [custom_model_id, name]
+      properties:
+        custom_model_id:
+          $ref: '#/components/schemas/CustomDestinationModelId'
+        name:
+          $ref: '#/components/schemas/CustomDestinationModelName'
+      description: Owner-only registered name and server-assigned inference identifier.
+    CustomDestinationValidationResult:
+      type: object
+      additionalProperties: false
+      required: [destinationId, version, validated, validatedAt]
+      properties:
+        destinationId:
+          $ref: '#/components/schemas/CustomDestinationId'
+        version:
+          $ref: '#/components/schemas/CustomDestinationVersion'
+        validated:
+          type: boolean
+        validatedAt:
+          $ref: '#/components/schemas/Instant'
+        reason:
+          $ref: '#/components/schemas/EgressDenialReason'
+      description: |
+        Coarse probe outcome only. A successful TLS probe does not approve or activate; a
+        refusal uses the canonical reason class without resolver answers or upstream details.
+        No keys, models, pins or lifecycle state change through this response.
+    CustomDestination:
+      type: object
+      additionalProperties: false
+      required: [destinationId, version, destinationClass, host, pathPrefix, credentialHeader, state, models]
+      x-state-denials:
+        pending_activation: pending_activation
+        suspended_resolution_changed: resolution_changed
+        suspended_validation_failed: destination_suspended
+        suspended_recovery: destination_suspended
+        suspended_kill_switch: kill_switch_active
+        revoked: destination_revoked
+      properties:
+        destinationId:
+          $ref: '#/components/schemas/CustomDestinationId'
+        version:
+          $ref: '#/components/schemas/CustomDestinationVersion'
+        destinationClass:
+          $ref: '#/components/schemas/DestinationClass'
+          const: runtime_registered_custom
+        host:
+          $ref: '#/components/schemas/CustomDestinationHost'
+        pathPrefix:
+          $ref: '#/components/schemas/CustomDestinationPathPrefix'
+        credentialHeader:
+          $ref: '#/components/schemas/CredentialHeader'
+        state:
+          $ref: '#/components/schemas/CustomDestinationState'
+        models:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/CustomDestinationModel'
+        lastValidatedAt:
+          $ref: '#/components/schemas/Instant'
+        activationNotBefore:
+          $ref: '#/components/schemas/Instant'
+          description: Server-computed hold end; elapsed time is not approval. Clients never compute it.
+        reason:
+          $ref: '#/components/schemas/EgressDenialReason'
+      description: |
+        Owner settings only. Current state is authoritative, active is never a generated default,
+        and reason follows x-state-denials for a non-active state. No IP set, validation timing,
+        key, upstream exception, capability or transferable routing URL is returned.
+    CustomDestinationList:
+      type: object
+      additionalProperties: false
+      required: [destinations]
+      properties:
+        destinations:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CustomDestination'
+        nextCursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Opaque owner-scoped continuation token; not an address or an authorization grant.
+      description: Bounded owner-only registration page; do not cache personal destination settings.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -145,7 +625,112 @@ components:
         type: string
         pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
       description: Client-generated lowercase UUID version 4, one per intended effect, persisted before the first send and reused unchanged on every retry (ADR-015 §4).
+    DPoPProof:
+      name: DPoP
+      in: header
+      required: true
+      schema:
+        $ref: '#/components/schemas/DPoPProofValue'
+      description: Fresh proof per physical send; the token and proof are not persisted in a generated default.
+    StepUpToken:
+      name: Step-Up-Token
+      in: header
+      required: true
+      schema:
+        $ref: '#/components/schemas/StepUpTokenValue'
+      description: Single-use operation/target/body-bound grant using step-up-request@1; not an authorization substitute.
+    CustomDestinationId:
+      name: destinationId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/CustomDestinationId'
+      description: The authenticated owner's destination; reject wrong-owner/unknown identifiers without disclosure.
+    CustomDestinationListLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      description: Maximum number of the owner's registrations returned on this page.
+    CustomDestinationListCursor:
+      name: cursor
+      in: query
+      schema: { type: string, minLength: 1, maxLength: 2048 }
+      description: Opaque cursor issued for this owner; never accepts another owner's listing scope.
   headers:
     IdempotentReplayed:
       schema: { type: boolean }
       description: Present and true when the response was served from the idempotency store.
+    DPoPNonce:
+      schema:
+        type: string
+        minLength: 1
+      description: Fresh server challenge nonce to bind into the next newly signed proof, not a required request header.
+    DPoPAuthenticate:
+      schema:
+        type: string
+        pattern: '^DPoP(?: [^\r\n]+)?$'
+      description: RFC 9449 challenge, including use_dpop_nonce for the nonce/replay/skew recovery path; never Bearer.
+    CustomDestinationNoStore:
+      schema:
+        type: string
+        const: no-store
+      description: Personal destination settings and errors must not be cached.
+  requestBodies:
+    CustomDestinationLifecycle:
+      required: true
+      description: Exact current revision; identity comes from verified session authority and destinationId.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CustomDestinationLifecycleRequest'
+  responses:
+    CustomDestinationDPoPChallenge:
+      description: |
+        Authentication failure. For a nonce challenge return WWW-Authenticate with DPoP
+        error="use_dpop_nonce" and fresh DPoP-Nonce; the caller must sign a fresh proof.
+        The generic accepted ProblemDetail still awaits the original T-CON-12 typed status binding.
+      headers:
+        DPoP-Nonce:
+          $ref: '#/components/headers/DPoPNonce'
+        WWW-Authenticate:
+          $ref: '#/components/headers/DPoPAuthenticate'
+        Cache-Control:
+          $ref: '#/components/headers/CustomDestinationNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    CustomDestinationStateResult:
+      description: Current authoritative owner registration after the lifecycle operation.
+      headers:
+        Idempotent-Replayed:
+          $ref: '#/components/headers/IdempotentReplayed'
+        Cache-Control:
+          $ref: '#/components/headers/CustomDestinationNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CustomDestination'
+    CustomDestinationProblem:
+      description: |
+        Shared RFC 9457 problem details only, with no host, model name, address, key or upstream
+        exception. T-CON-12 (contracts#16) must supply its typed EgressDenialReason binding before
+        publication; the accepted generic ProblemDetail is not that binding or a new catalogue.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CustomDestinationNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+  securitySchemes:
+    DPoP:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        RFC 9449 DPoP-bound access-token authentication, NOT API-key or Bearer authentication.
+        openapi-generator 7.25.0 has no HTTP-DPoP template: apiKey is only a raw-header codegen
+        mapping. Supply the COMPLETE "DPoP <at+jwt>" value and leave apiKeyPrefix unset.
+        Send the separate required fresh DPoP proof. Generated transport tests verify no Bearer
+        or doubled prefix; they do not verify signatures, nonce handling or live session authority.

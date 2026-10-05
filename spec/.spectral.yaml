@@ -15,6 +15,8 @@ functions:
   - operationSecurity
   - moneyExampleScale
   - problemDetailNoMoney
+  - customDestinationContract
+  - noInferenceAddress
 rules:
   # The shared components are a library consumed by contract expansion tickets and by every
   # generated client; the document intentionally publishes them before any operation references them.
@@ -227,3 +229,21 @@ rules:
     given: $.components.schemas.ProblemDetail
     then:
       function: problemDetailNoMoney
+
+  pl-custom-destination-contract:
+    description: ADR-022's exact canonical consequence/schema bytes, closed registration fields and single shared enum definitions are binding; source validation never enables AI.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: customDestinationContract
+
+  pl-no-inference-address:
+    description: Inference/tool request bodies and parameters are closed recursively through local references, arrays and compositions; address aliases, custom headers and encoded tool payloads belong nowhere in these requests.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: noInferenceAddress
