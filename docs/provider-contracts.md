@@ -15,6 +15,13 @@ definitions of done remain unchanged. Final endpoint adoption is original
 [PenniLogic/infra#22](https://github.com/PenniLogic/infra/issues/22) remains an
 integration hold. A source pin is not a published client pin.
 
+The later ordinary base merge imports only the separately accepted Kotlin Money
+value-key correction from contracts `aa8d90cb98cec9b6dd08c91b3a4d869e47362662`.
+Its exact accepted source replaces the earlier Money byte binding explicitly;
+the wrapper API, wire format, currency/range rules and financial arithmetic are
+unchanged. Canonical generation reconciles that runtime change with the proposed
+providers, without accepting those providers or clearing their remaining holds.
+
 ## Sources and machine catalogues
 
 `spec/openapi.yaml` owns wire shapes. `error-catalogue.v1.json` owns error diagnostics

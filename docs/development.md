@@ -122,6 +122,19 @@ scale, range — with the 19-digit bound applied before any integer conversion; 
 vectors of `money-wire-fixtures.v1.json` prove it per language. The wire seams add `shape` and
 `number_not_string` in front (ADR-015 §1.5).
 
+### Kotlin Money value keys
+
+`Money` remains `Comparable<Money>` with same-currency ordering and arithmetic only; equality
+across currencies is false. Its hash partitions currencies into separate ranges and retains
+16 bits of the minor-unit hash. Three-uppercase-ASCII-letter ISO codes have distinct Java
+`String` hashes spanning less than 65536, so their low 16 bits remain distinct. JDK `HashMap`
+spreading preserves distinct full hashes: a shared bucket can contain different currencies,
+but an equal-hash tree comparison can only see one currency. Same-currency collisions remain
+valid and use the existing minor-unit ordering; exact hashes and collision-free storage are
+not contracts. `MoneyCollectionTest` covers both reported corpora, equal-key set/map operations,
+same-currency hash collisions and mixed-currency bucket collisions. This changes neither the
+wire format nor ledger admission: registry acceptance of JPY/KWD does not admit them to an INR ledger.
+
 ### Generator templates
 
 Nine templates/partials are overridden; stock portions remain bound to the pinned generator:

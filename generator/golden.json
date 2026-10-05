@@ -1,6 +1,6 @@
 {
   "kotlin": {
-    "tree_sha256": "a1ca2ebb6b187ced8b07e72eb88c1f8093879f59363a9bbdddb924cc4756d8e3",
+    "tree_sha256": "c2797a8879e921eb9ca65c27c173bfed67214549ced1b9b38f294f6153e5820a",
     "spec_version": "0.2.0",
     "spec_sha256": "3f397d11a2795d9da98295a0943179bffb6a1765a7ad570e0f4710a496d680f7",
     "file_count": 76,
@@ -75,7 +75,7 @@
       "src/main/kotlin/com/pennilogic/contracts/models/ValidationIssue.kt": "07c183b17a46451e13e20c70a7bc4089e859c386f7ffea3543456df964ea98d9",
       "src/main/kotlin/com/pennilogic/contracts/models/ValidationReason.kt": "9d138633cc9449d0a04fc4c8a831b7972e385bc322b3839d917177b5f0e00f60",
       "src/main/kotlin/com/pennilogic/contracts/money/CurrencyRegistry.kt": "10d491ae90bc8f077afe5d45be671af52a5b7891c88eacfccd437a10f4956b21",
-      "src/main/kotlin/com/pennilogic/contracts/money/Money.kt": "7d973d9f2a43859cc20c79789c57ebb793c051b9e7ce7652126d32e79cb97459",
+      "src/main/kotlin/com/pennilogic/contracts/money/Money.kt": "eddf78d0c9f694d660a7b13fd8e9e1154bc9b6c801ba0782b72973055d86c79d",
       "src/main/kotlin/com/pennilogic/contracts/serialization/PennilogicJson.kt": "25e5d11041797d5f13fa0e85dabb50f9a04d4d5439bed27378838ff91a9e82be",
       "src/main/kotlin/com/pennilogic/contracts/serialization/ProviderConstraintData.kt": "668993c1d94a63adc54b296c545bbd4447614dc8644750891b189ff358afe5b7",
       "src/main/kotlin/com/pennilogic/contracts/serialization/ProviderConstraints.kt": "a1b8b491febc43a4210c2de88218aa0a64f43c37b08af6c0d9ba046a500c3f0b",

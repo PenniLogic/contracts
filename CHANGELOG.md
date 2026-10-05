@@ -62,6 +62,12 @@ restores, installed-target cleanup and successful restore followed by re-raising
 the original promotion interrupt. This is process cleanup safety, not hard-kill,
 power-loss durability, concurrent-reader atomicity or product acceptance.
 
+The ordinary base merge after this repair imports the separately accepted Kotlin
+Money value-key correction from `aa8d90cb98cec9b6dd08c91b3a4d869e47362662`,
+preserving its exact source and collection tests. Full canonical generation
+reconciles the provider golden with that explicit accepted-source delta; it is
+not a new Money implementation, wire change or approval of the provider source.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 
