@@ -1,6 +1,6 @@
 import { Instant } from './models/Instant.js';
 import { LocalDate } from './models/LocalDate.js';
-import { validateProvider } from './providerConstraints.js';
+import { providerRegularExpression, validateProvider } from './providerConstraints.js';
 
 export class ProviderWireError extends TypeError {
     constructor() { super('provider value rejected'); }
@@ -41,8 +41,8 @@ export function providerObject(value: unknown, fields: Readonly<Record<string, P
 
 export function providerPattern(literal: string): RegExp {
     const end = literal.lastIndexOf('/');
-    if (!literal.startsWith('/') || end < 1) throw new ProviderWireError();
-    return new RegExp(literal.slice(1, end), literal.slice(end + 1));
+    if (!literal.startsWith('/') || end < 1 || !['', 'u'].includes(literal.slice(end + 1))) throw new ProviderWireError();
+    return providerRegularExpression(literal.slice(1, end));
 }
 
 export function providerWire(value: unknown, name: string, omitUndefined: boolean = false): void {

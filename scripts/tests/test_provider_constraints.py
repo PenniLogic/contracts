@@ -86,6 +86,55 @@ class ConstraintCompilationTest(unittest.TestCase):
                     self.assertIn("provider constraint generation rejected:", result.stderr)
                     self.assertNotIn("openapi-generator failed", result.stderr)
 
+    def test_nonportable_class_syntax_fails_before_any_target_output_is_touched(self) -> None:
+        anchor = """    PatternProbe:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: """
+        for pattern in (
+            "^[]$", "^[^]$", "^[a&&b]$", "^[a||b]$", "^[a~~b]$", "^[a--b]$", "^[a-b-c]$",
+            "^a|b$", "^()$", "^(a|)$", "^a+?$", "^a++$", r"^\-$", r"^\u0041$",
+            r"^(a\1)$", "^a{2,1}$", "^a{2147483648}$", "^[z-a]$", "^" + "(" * 65 + "a" + ")" * 65 + "$",
+        ):
+            source = self.spec.write(replace_once(spec_text(), "  schemas:\n", "  schemas:\n" +
+                                                 anchor + json.dumps({"type": "string", "pattern": pattern}) + "\n"))
+            for target in ("python", "typescript", "kotlin"):
+                with self.subTest(pattern=pattern, target=target):
+                    output = self.spec.path / "regex-output"
+                    directory = output / target
+                    directory.mkdir(parents=True, exist_ok=True)
+                    sentinel = directory / "preflight-sentinel.txt"
+                    sentinel.write_bytes(b"preserve-before-any-generator-output\n")
+                    result = run_script("generate_clients.py", "--language", target, "--spec", str(source),
+                                        "--output-dir", str(output))
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("provider constraint generation rejected:", result.stderr)
+                    self.assertEqual(sentinel.read_bytes(), b"preserve-before-any-generator-output\n")
+
+    def test_accepted_pattern_grammar_keeps_original_source_and_refuses_partial_outer_anchors(self) -> None:
+        accepted = [
+            "^$", "^.$", "^..$", "^[^a]+$", r"^a\.b$", "^x/y$", r"^\[a\]$",
+            "^([a-z]{1,3}|[0-9]{2,4})$", "^[A-Za-z0-9_+-]+$", r"^\^\$$",
+            "^a{0}$", "^a{0,2}$", "^a{2,}$", "^[.]$", r"^a\\b$", "^" + "(" * 64 + "a" + ")" * 64 + "$",
+        ]
+        for pattern in accepted:
+            with self.subTest(pattern=pattern):
+                model = """    PatternControl:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: """ + json.dumps({"type": "string", "pattern": pattern}) + "\n"
+                source = self.spec.write(replace_once(spec_text(), "  schemas:\n", "  schemas:\n" + model))
+                result = subprocess.run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(source)],
+                                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["schemas"]["PatternControl"]["properties"]["text"]["pattern"], pattern)
+
 
 if __name__ == "__main__":
     unittest.main()

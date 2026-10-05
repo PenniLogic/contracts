@@ -1,5 +1,4 @@
 from __future__ import annotations
-import re
 from typing import ClassVar
 {{#vendorExtensions.x-py-other-imports}}
 {{{.}}}
@@ -10,6 +9,7 @@ from typing import ClassVar
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.local_date import LocalDate
 from pennilogic_contracts.provider_model import ProviderModel, ProviderWireError
+from pennilogic_contracts.provider_constraints import pattern_matches
 
 
 class {{classname}}(ProviderModel):
@@ -23,7 +23,7 @@ class {{classname}}(ProviderModel):
 
     @field_validator('{{{name}}}', mode="before")
     def {{{name}}}_validate_regular_expression(cls, value: Any) -> Any:
-        if isinstance(value, str) and re.fullmatch(r"{{{.}}}", value{{#vendorExtensions.x-modifiers}}, re.{{{.}}}{{/vendorExtensions.x-modifiers}}) is None:
+        if isinstance(value, str) and not pattern_matches(r"{{{.}}}", value):
             raise ProviderWireError()
         return value
     {{/vendorExtensions.x-regex}}

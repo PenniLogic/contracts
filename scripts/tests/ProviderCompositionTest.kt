@@ -146,7 +146,7 @@ class ProviderCompositionTest {
         val methods = ProviderCompositionTest::class.java.declaredMethods.filter {
             it.isAnnotationPresent(org.junit.jupiter.api.Test::class.java)
         }
-        assertEquals(6, methods.size)
+        assertEquals(7, methods.size)
         assertTrue(methods.all { it.returnType == Void.TYPE })
     }
 
@@ -208,5 +208,58 @@ class ProviderCompositionTest {
         val nested = buildJsonObject { put("record", invalid); put("records", JsonArray(listOf(invalid))) }
         safe(assertFails { json.decodeFromJsonElement<SyntheticProviderEnvelope>(nested) })
         safe(assertFails { Probe(engine(nested)).get().wrap<SyntheticProviderEnvelope>().body() })
+    }
+
+    @Test fun unicodeCodePointLengthsAndPortablePatternBoundariesReachActualGeneratedTransport() = runBlocking<Unit> {
+        val fixture = fixture("provider-unicode.v1.json")
+        val outcomes = mutableMapOf<String, Boolean>()
+        fixture.getValue("positive").jsonArray.forEach { entry ->
+            val source = entry.jsonObject
+            val name = source.getValue("name").jsonPrimitive.content
+            val wire = JsonObject(source - "name")
+            outcomes["$name/ordinary"] = runCatching {
+                json.encodeToJsonElement(json.decodeFromJsonElement<SyntheticUnicodeRecord>(wire)) == wire
+            }.getOrDefault(false)
+            outcomes["$name/actual_response"] = runCatching {
+                json.encodeToJsonElement(Probe(engine(wire)).get().wrap<SyntheticUnicodeRecord>().body()) == wire
+            }.getOrDefault(false)
+            val nested = buildJsonObject { put("record", wire) }
+            outcomes["$name/nested"] = runCatching {
+                json.encodeToJsonElement(json.decodeFromJsonElement<SyntheticUnicodeEnvelope>(nested)) == nested
+            }.getOrDefault(false)
+            outcomes["$name/nested_response"] = runCatching {
+                json.encodeToJsonElement(Probe(engine(nested)).get().wrap<SyntheticUnicodeEnvelope>().body()) == nested
+            }.getOrDefault(false)
+        }
+        val base = JsonObject(fixture.getValue("positive").jsonArray.first().jsonObject - "name")
+        val valid = json.decodeFromJsonElement<SyntheticUnicodeRecord>(base)
+        var sent: String? = null
+        val astral = "\uD83E\uDDEA"
+        outcomes["astral/native_copy_request"] = runCatching {
+            val model = valid.copy(symbol = astral, unit = astral, wild = listOf(astral), notA = listOf(astral))
+            Probe(engine(base) { sent = it }).post(model)
+            val actual = json.parseToJsonElement(assertNotNull(sent)).jsonObject
+            actual.getValue("symbol").jsonPrimitive.content == astral
+        }.getOrDefault(false)
+        val constructor = SyntheticUnicodeRecord(
+            symbol = astral, unit = astral, wild = listOf(astral), notA = listOf(astral), literal = valid.literal,
+            choice = valid.choice, bounded = valid.bounded, unbounded = valid.unbounded, empty = valid.empty,
+            slash = valid.slash, brackets = valid.brackets, backslash = valid.backslash, anchors = valid.anchors,
+            classDot = valid.classDot, hyphen = valid.hyphen, rangeText = valid.rangeText,
+            double = valid.double, zeroRepeat = valid.zeroRepeat,
+        )
+        Probe(engine(base) { sent = it }).post(SyntheticUnicodeEnvelope(constructor))
+        val sentRecord = json.parseToJsonElement(assertNotNull(sent)).jsonObject.getValue("record").jsonObject
+        assertEquals(astral, sentRecord.getValue("symbol").jsonPrimitive.content)
+        safe(assertFails { valid.copy(symbol = "e\u0301") })
+        safe(assertFails { constructor.copy(symbol = "") })
+        fixture.getValue("negative").jsonArray.forEach { entry ->
+            val negative = entry.jsonObject
+            val wire = JsonObject(base + (negative.getValue("field").jsonPrimitive.content to negative.getValue("value")))
+            val name = negative.getValue("name").jsonPrimitive.content
+            outcomes["$name/ordinary"] = runCatching { json.decodeFromJsonElement<SyntheticUnicodeRecord>(wire) }.isFailure
+            outcomes["$name/actual_response"] = runCatching { Probe(engine(wire)).get().wrap<SyntheticUnicodeRecord>().body() }.isFailure
+        }
+        assertEquals(emptyList(), outcomes.filterValues { !it }.keys.toList())
     }
 }

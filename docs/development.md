@@ -225,6 +225,28 @@ as a supported guard. Full producer JSON Schema validation and server obligation
 the generated composition matrix checks same-length public-ID failures, exact nested numeric/
 cardinality boundaries, aliases, Unicode length, zero bounds and private member names.
 
+The regular-expression subset is a checked grammar, not host-JavaScript parse acceptance:
+whole-value outer anchors, printable ASCII literals and portable literal escapes, ordinary
+nonempty groups with grouped alternatives, nonempty flat character classes/ranges (optional
+negation), dot, and greedy `?`/`*`/`+`/bounded repetitions. Empty whole-value `^$` is supported.
+Malformed/empty/nested/set-operation classes, ambiguous shared-endpoint ranges, ungrouped alternatives,
+internal anchors, empty group alternatives, shorthand/property/backreference escapes,
+lookarounds/inline flags, lazy/possessive modifiers and invalid/unrepresentable repetitions
+are refused before any target output is removed or emitted. This intentionally conservative
+subset does not promise universal regular-expression syntax.
+Groups are limited to 64 levels so accepted syntax does not depend on a host parser's
+recursion limit; repetition counts use canonical nonnegative decimals within signed 32-bit bounds.
+
+Every marked string bound counts Unicode code points, including direct generated Kotlin
+fields and native constructor/copy paths. Both TypeScript recursive and field-metadata guards
+use Unicode-mode matching. Python and Kotlin translate only unescaped wildcard dots outside
+classes to the ECMAScript exclusion set (LF, CR, LS and PS); NEL remains valid dot data.
+Escaped dots and class members remain literal. Matching remains whole-value, never substring
+or permissive final-newline matching. The original ASCII Money/time/public-ID source patterns
+and primitive codecs are unchanged. Generated ordinary/native/nested/actual client tests cover
+astral positives, combining-sequence negatives, class/escape/group/repetition boundaries and
+the same newline controls in all three targets.
+
 ### Golden hashes
 
 `generator/golden.json` records the tree SHA-256 and every file's SHA-256 per target. The per-file

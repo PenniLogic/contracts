@@ -21,6 +21,8 @@ from pennilogic_contracts.models.synthetic_provider_envelope import SyntheticPro
 from pennilogic_contracts.models.synthetic_provider_record import SyntheticProviderRecord
 from pennilogic_contracts.models.synthetic_constraint_bundle import SyntheticConstraintBundle
 from pennilogic_contracts.models.synthetic_constraint_envelope import SyntheticConstraintEnvelope
+from pennilogic_contracts.models.synthetic_unicode_record import SyntheticUnicodeRecord
+from pennilogic_contracts.models.synthetic_unicode_envelope import SyntheticUnicodeEnvelope
 
 
 ROOT = Path(os.environ["PL_CONTRACTS_ROOT"])
@@ -201,6 +203,48 @@ class ProviderCompositionTest(unittest.TestCase):
                 read()
             self.assertNotIn("PRIVATE_SYNTHETIC_MEMBER", str(caught.exception))
             self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(caught.exception))
+
+    def test_unicode_lengths_patterns_and_native_nested_actual_client_roundtrips(self) -> None:
+        data = fixture("provider-unicode.v1.json")
+        outcomes = {}
+        for entry in data["positive"]:
+            source = {key: value for key, value in entry.items() if key != "name"}
+            readers: dict[str, Callable[[], object]] = {
+                "ordinary": lambda: sanitize(SyntheticUnicodeRecord.from_dict(source)),
+                "constructor": lambda: sanitize(SyntheticUnicodeRecord(**source)),
+                "generic": lambda: json.loads(TypeAdapter(SyntheticUnicodeRecord).dump_json(
+                    TypeAdapter(SyntheticUnicodeRecord).validate_json(json.dumps(source)))),
+                "actual_client": lambda: sanitize(ApiClient().deserialize(json.dumps(source), "SyntheticUnicodeRecord", "application/json")),
+                "nested": lambda: sanitize(SyntheticUnicodeEnvelope.from_dict({"record": source})),
+            }
+            for route, read in readers.items():
+                try:
+                    result = read()
+                    outcomes[entry["name"] + "/" + route] = result == ({"record": source} if route == "nested" else source)
+                except ValueError:
+                    outcomes[entry["name"] + "/" + route] = False
+        base = {key: value for key, value in data["positive"][0].items() if key != "name"}
+        valid = SyntheticUnicodeRecord.from_dict(base)
+        astral_source = {key: value for key, value in data["positive"][1].items() if key != "name"}
+        self.assertEqual(sanitize(valid.model_copy(update=astral_source)), astral_source)
+        self.assertEqual(json.loads(TypeAdapter(SyntheticUnicodeRecord).dump_json(valid.model_copy(update=astral_source))), astral_source)
+        for entry in data["negative"]:
+            invalid = {**base, entry["field"]: entry["value"]}
+            negative_readers: dict[str, Callable[[], object]] = {
+                "ordinary": lambda: SyntheticUnicodeRecord.from_dict(invalid),
+                "generic": lambda: TypeAdapter(SyntheticUnicodeRecord).validate_json(json.dumps(invalid)),
+                "actual_client": lambda: ApiClient().deserialize(json.dumps(invalid), "SyntheticUnicodeRecord", "application/json"),
+                "native_write": lambda: sanitize(valid.model_copy(update={entry["field"]: entry["value"]})),
+                "nested": lambda: SyntheticUnicodeEnvelope.from_dict({"record": invalid}),
+            }
+            for route, read in negative_readers.items():
+                try:
+                    read()
+                    outcomes[entry["name"] + "/" + route] = False
+                except ValueError as error:
+                    self.assertNotIn("PRIVATE_SYNTHETIC", str(error))
+                    outcomes[entry["name"] + "/" + route] = True
+        self.assertEqual([name for name, passed in outcomes.items() if not passed], [])
 
 
 if __name__ == "__main__":

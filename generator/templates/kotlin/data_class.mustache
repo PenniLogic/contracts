@@ -437,13 +437,13 @@ object {{classname}}ProviderSerializer : com.pennilogic.contracts.serialization.
             {{/isEnumRef}}
             {{#pattern}}
             if (member !is kotlinx.serialization.json.JsonPrimitive || !member.isString ||
-                !Regex("{{{pattern}}}").matches(member.content)) throw com.pennilogic.contracts.serialization.ProviderWireException()
+                !com.pennilogic.contracts.serialization.ProviderConstraints.patternMatches("{{{pattern}}}", member.content)) throw com.pennilogic.contracts.serialization.ProviderWireException()
             {{/pattern}}
             {{#minLength}}
-            if (member !is kotlinx.serialization.json.JsonPrimitive || member.content.length < {{minLength}}) throw com.pennilogic.contracts.serialization.ProviderWireException()
+            if (member !is kotlinx.serialization.json.JsonPrimitive || member.content.codePointCount(0, member.content.length) < {{minLength}}) throw com.pennilogic.contracts.serialization.ProviderWireException()
             {{/minLength}}
             {{#maxLength}}
-            if (member !is kotlinx.serialization.json.JsonPrimitive || member.content.length > {{maxLength}}) throw com.pennilogic.contracts.serialization.ProviderWireException()
+            if (member !is kotlinx.serialization.json.JsonPrimitive || member.content.codePointCount(0, member.content.length) > {{maxLength}}) throw com.pennilogic.contracts.serialization.ProviderWireException()
             {{/maxLength}}
             {{#minimum}}
             if (member !is kotlinx.serialization.json.JsonPrimitive || member.content.toLongOrNull()?.let { it >= {{minimum}}L } != true) throw com.pennilogic.contracts.serialization.ProviderWireException()

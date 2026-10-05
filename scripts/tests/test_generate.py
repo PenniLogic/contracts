@@ -331,7 +331,8 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         added = override.split(marker, 1)[1]
         self.assertIn('StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer(), "{{name}}")', added)
         self.assertIn("{{#isEnumRef}}", added)
-        self.assertIn('Regex("{{{pattern}}}").matches(member.content)', added)
+        self.assertIn('ProviderConstraints.patternMatches("{{{pattern}}}", member.content)', added)
+        self.assertIn("member.content.codePointCount(0, member.content.length)", added)
         for constraint in ("minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems"):
             self.assertIn("{{#" + constraint + "}}", added)
         self.assertIn("override fun verify(value: {{classname}})", added)

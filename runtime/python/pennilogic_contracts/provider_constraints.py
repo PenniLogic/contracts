@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -15,6 +16,38 @@ from pennilogic_contracts.provider_constraint_data import SCHEMAS
 class ProviderConstraintError(ValueError):
     def __init__(self) -> None:
         super().__init__("provider value rejected")
+
+@lru_cache(maxsize=256)
+def _pattern(source: str) -> re.Pattern[str]:
+    parts: list[str] = []
+    in_class = False
+    escaped = False
+    for character in source:
+        if escaped:
+            parts.append(character)
+            escaped = False
+        elif character == "\\":
+            parts.append(character)
+            escaped = True
+        elif character == "[":
+            in_class = True
+            parts.append(character)
+        elif character == "]":
+            in_class = False
+            parts.append(character)
+        elif character == "." and not in_class:
+            # ECMAScript dot excludes these four terminators, but includes NEL.
+            parts.append(r"[^\n\r\u2028\u2029]")
+        else:
+            parts.append(character)
+    try:
+        return re.compile("".join(parts), re.ASCII)
+    except re.PatternError:
+        raise ProviderConstraintError() from None
+
+
+def pattern_matches(source: str, value: str) -> bool:
+    return _pattern(source).fullmatch(value) is not None
 
 
 def validate_provider(name: str, value: Mapping[str, Any]) -> None:
@@ -82,7 +115,7 @@ def _matches(value: Any, schema: Mapping[str, Any]) -> bool:
         if ("minLength" in schema and len(value) < schema["minLength"]) or (
                 "maxLength" in schema and len(value) > schema["maxLength"]):
             return False
-        if "pattern" in schema and re.fullmatch(schema["pattern"], value, re.ASCII) is None:
+        if "pattern" in schema and not pattern_matches(schema["pattern"], value):
             return False
         if "format" in schema and not _format(value, schema["format"]):
             return False

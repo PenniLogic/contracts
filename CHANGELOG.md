@@ -37,6 +37,15 @@ boundary probes and explicit unsupported-generation failures accompany the chang
 No production schema/version, accepted primitive codec, global JSON or dependency
 policy changes; earlier negative reviews and native green history stay immutable.
 
+The correction after frozen `95dec40` aligns direct Kotlin string bounds with
+recursive code-point semantics, including native construction/copy and transport.
+Both TypeScript pattern guards now use Unicode matching, and all targets share
+explicit wildcard line-terminator semantics. Source preflight checks a conservative
+portable grammar before any target output mutation, refusing nonportable classes
+and dialect constructs rather than admitting runtime pattern exceptions. Astral,
+combining, newline and accepted-pattern family controls preserve prior required
+tests; no accepted codec/global JSON/product schema or publication is changed.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

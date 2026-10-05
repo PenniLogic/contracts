@@ -138,6 +138,44 @@ MODELS = """    SyntheticProviderRecord:
       properties:
         bundle:
           $ref: '#/components/schemas/SyntheticConstraintBundle'
+    SyntheticUnicodeRecord:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [symbol, unit, wild, not_a, literal, choice, bounded, unbounded, empty, slash, brackets, backslash, anchors, class_dot, hyphen, range_text, double, zero_repeat]
+      properties:
+        symbol: {type: string, minLength: 1, maxLength: 1}
+        unit: {type: string, pattern: '^.$', minLength: 1, maxLength: 1}
+        wild:
+          type: array
+          items: {type: string, pattern: '^.$', minLength: 1, maxLength: 1}
+        not_a:
+          type: array
+          items: {type: string, pattern: '^[^a]$', minLength: 1, maxLength: 1}
+        literal:
+          type: array
+          items: {type: string, pattern: '^a\\.b$'}
+        choice: {type: string, pattern: '^([a-z]{1,3}|[0-9]{2,4})$'}
+        bounded: {type: string, pattern: '^a{1,3}$'}
+        unbounded: {type: string, pattern: '^a{2,}$'}
+        empty: {type: string, pattern: '^$', maxLength: 0}
+        slash: {type: string, pattern: '^x/y$'}
+        brackets: {type: string, pattern: '^\\[a\\]$'}
+        backslash: {type: string, pattern: '^a\\\\b$'}
+        anchors: {type: string, pattern: '^\\^\\$$'}
+        class_dot: {type: string, pattern: '^[.]$'}
+        hyphen: {type: string, pattern: '^-$'}
+        range_text: {type: string, pattern: '^[A-Za-z0-9_+-]+$'}
+        double: {type: string, pattern: '^..$', minLength: 2, maxLength: 2}
+        zero_repeat: {type: string, pattern: '^a{0,2}$'}
+    SyntheticUnicodeEnvelope:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [record]
+      properties:
+        record:
+          $ref: '#/components/schemas/SyntheticUnicodeRecord'
 """
 
 
@@ -207,6 +245,20 @@ class ProviderCompositionTest(unittest.TestCase):
             self.assertFalse(result["valid"], negative["name"])
             self.assertIn(negative["keyword"], result["keywords"], negative["name"])
 
+    def test_unicode_patterns_and_direct_lengths_match_the_actual_schema(self) -> None:
+        data = json.loads((ROOT / "spec" / "fixtures" / "provider-unicode.v1.json").read_bytes())
+        cases = [{"name": entry["name"], "schema": "SyntheticUnicodeRecord",
+                  "wire": {key: value for key, value in entry.items() if key != "name"}}
+                 for entry in data["positive"]]
+        base = {key: value for key, value in data["positive"][0].items() if key != "name"}
+        cases += [{"name": entry["name"], "schema": "SyntheticUnicodeRecord",
+                   "wire": {**base, entry["field"]: entry["value"]}} for entry in data["negative"]]
+        results = schema_results(cases, spec=self.spec_path)
+        self.assertTrue(all(entry["valid"] for entry in results[:len(data["positive"])]))
+        for result, negative in zip(results[len(data["positive"]):], data["negative"]):
+            self.assertFalse(result["valid"], negative["name"])
+            self.assertIn(negative["keyword"], result["keywords"], negative["name"])
+
     def test_typescript_strict_compile_optional_refs_dense_arrays_and_actual_baseapi(self) -> None:
         probe = self.output / "provider_composition.test.ts"
         shutil.copyfile(ROOT / "scripts" / "tests" / probe.name, probe)
@@ -250,7 +302,7 @@ class ProviderCompositionTest(unittest.TestCase):
         from xml.etree import ElementTree
         xml = ElementTree.parse(self.output / "kotlin-build" / "test-results" / "test" /
                                 "TEST-com.pennilogic.contracts.smoke.ProviderCompositionTest.xml").getroot()
-        self.assertEqual(xml.attrib["tests"], "6")
+        self.assertEqual(xml.attrib["tests"], "7")
         for key in ("failures", "errors", "skipped"):
             self.assertEqual(xml.attrib[key], "0", key)
 

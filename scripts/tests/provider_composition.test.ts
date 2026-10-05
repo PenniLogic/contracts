@@ -10,6 +10,8 @@ import {
     SyntheticLegacyEnvelopeFromJSON, SyntheticLegacyEnvelopeToJSON,
     SyntheticConstraintBundleFromJSON, SyntheticConstraintBundleToJSON,
     SyntheticConstraintEnvelopeFromJSON, SyntheticConstraintEnvelopeToJSON,
+    SyntheticUnicodeRecordFromJSON, SyntheticUnicodeRecordToJSON,
+    SyntheticUnicodeEnvelopeFromJSON, SyntheticUnicodeEnvelopeToJSON,
 } from './typescript/src/index.js';
 import { BaseAPI, Configuration, JSONApiResponse } from './typescript/src/runtime.js';
 import { Instant } from './typescript/src/models/Instant.js';
@@ -206,3 +208,69 @@ test('private Money member names stay outside marked ordinary nested and JSONApi
     }
     assert.deepEqual(outcomes, Object.fromEntries(Object.keys(routes).map((route) => [route, true])));
 });
+
+test('code-point lengths and Unicode wildcard semantics hold on ordinary native nested and actual transport', async () => {
+    interface UnicodeFixture {
+        positive: Array<Record<string, unknown> & { name: string }>;
+        negative: Array<{ name: string; field: string; value: unknown }>;
+    }
+    const data = fixture<UnicodeFixture>('provider-unicode.v1.json');
+    const emitted: unknown[] = [];
+    const api = new RequestProbe(new Configuration({
+        basePath: 'https://api.pennilogic.example/v1',
+        fetchApi: async (_url, init) => {
+            emitted.push(JSON.parse(String(init?.body))); return new Response(null, { status: 204 });
+        },
+    }));
+    const outcomes: Record<string, boolean> = {};
+    for (const entry of data.positive) {
+        const { name, ...source } = entry;
+        try {
+            const model = SyntheticUnicodeRecordFromJSON(source);
+            await api.send(SyntheticUnicodeRecordToJSON(model));
+            outcomes[name + '/ordinary_write'] = equalWire(emitted.pop(), source);
+        } catch (error: unknown) { safe(error); outcomes[name + '/ordinary_write'] = false; }
+        try {
+            const model = await new JSONApiResponse(new Response(JSON.stringify(source)), SyntheticUnicodeRecordFromJSON).value();
+            outcomes[name + '/actual_response'] = equalWire(wire(SyntheticUnicodeRecordToJSON(model)), source);
+        } catch (error: unknown) { safe(error); outcomes[name + '/actual_response'] = false; }
+        try {
+            const envelope = SyntheticUnicodeEnvelopeFromJSON({ record: source });
+            await api.send(SyntheticUnicodeEnvelopeToJSON(envelope));
+            outcomes[name + '/nested_request'] = equalWire(emitted.pop(), { record: source });
+        } catch (error: unknown) { safe(error); outcomes[name + '/nested_request'] = false; }
+    }
+    const entry = data.positive[0]; assert.ok(entry);
+    const { name: _name, ...base } = entry;
+    const valid = SyntheticUnicodeRecordFromJSON(base);
+    const astral = '\u{1f9ea}';
+    const native = { ...valid, symbol: astral, unit: astral, wild: [astral], notA: [astral] };
+    await api.send(SyntheticUnicodeRecordToJSON(native));
+    const actualNative: unknown = emitted.pop();
+    const expectedNative = { ...base, symbol: astral, unit: astral, wild: [astral], not_a: [astral] };
+    assert.deepEqual(actualNative, expectedNative);
+    await api.send(SyntheticUnicodeEnvelopeToJSON({ record: native }));
+    assert.deepEqual(emitted.pop(), { record: expectedNative });
+    for (const negative of data.negative) {
+        const invalid = { ...base, [negative.field]: negative.value };
+        const nativeField = negative.field.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+        for (const [route, read] of Object.entries({
+            ordinary: async (): Promise<unknown> => SyntheticUnicodeRecordFromJSON(invalid),
+            response: (): Promise<unknown> => new JSONApiResponse(new Response(JSON.stringify(invalid)), SyntheticUnicodeRecordFromJSON).value(),
+            native: (): Promise<unknown> => api.send(SyntheticUnicodeRecordToJSON({ ...valid, [nativeField]: negative.value })),
+            nested: async (): Promise<unknown> => SyntheticUnicodeEnvelopeFromJSON({ record: invalid }),
+        })) {
+            try { await read(); outcomes[negative.name + '/' + route] = false; }
+            catch (error: unknown) { safe(error); outcomes[negative.name + '/' + route] = true; }
+        }
+        assert.equal(emitted.length, 0);
+    }
+    assert.deepEqual(Object.entries(outcomes).filter(([, accepted]) => !accepted), []);
+});
+
+function equalWire(left: unknown, right: unknown): boolean {
+    try { assert.deepEqual(left, right); return true; } catch (error: unknown) {
+        if (error instanceof assert.AssertionError) return false;
+        throw error;
+    }
+}

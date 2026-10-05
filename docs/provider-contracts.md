@@ -139,6 +139,12 @@ construction and serialization. `ServiceProblemDetail` invokes its existing wire
 guard through the registered serializer on ordinary, nested and actual generated
 `ApiClient` converter paths. Refusal failures use static diagnostics rather than
 stock enum diagnostics that can echo a rejected message.
+All direct and item string bounds use code-point lengths, not JVM UTF-16 units.
+The supported pattern grammar is checked before generation touches target output;
+it is not inferred from one engine accepting the syntax. TypeScript recursive and
+field guards use Unicode matching, with Python/Kotlin wildcard behavior aligned
+to ECMAScript's four line terminators. Whole-value matching and the existing public
+ASCII ID grammar remain required; unsupported dialect constructs fail explicitly.
 TypeScript checks the original marked composition before dependency conversion,
 so an unknown private Money member name cannot reach the unchanged direct codec's
 dynamic field diagnostic. Emitted composition wire is checked again before a

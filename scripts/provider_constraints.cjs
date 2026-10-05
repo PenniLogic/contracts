@@ -21,6 +21,86 @@ function scalar(value) {
   return typeof value === "string" || typeof value === "boolean" || Number.isSafeInteger(value);
 }
 
+function validatePattern(pattern) {
+  if (typeof pattern !== "string" || pattern[0] !== "^" || pattern.at(-1) !== "$" ||
+      /[^\x20-\x7e]/.test(pattern)) reject("unsupported pattern");
+  let index = 1;
+  let depth = 0;
+  const end = pattern.length - 1;
+  const peek = () => pattern[index];
+  function escaped(inClass) {
+    index += 1;
+    const character = peek();
+    if (index >= end || !(inClass ? "\\.^$*+?()[]{}|/-" : "\\.^$*+?()[]{}|/").includes(character)) {
+      reject("unsupported pattern escape");
+    }
+    index += 1;
+    return character;
+  }
+  function characterClass() {
+    index += 1;
+    if (peek() === "^") index += 1;
+    const characters = [];
+    while (index < end && peek() !== "]") {
+      const character = peek();
+      if (character === "[" || ["&&", "||", "~~", "--"].includes(pattern.slice(index, index + 2))) {
+        reject("unsupported character class");
+      }
+      if (character === "\\") characters.push({ character: escaped(true), range: false });
+      else { characters.push({ character, range: character === "-" }); index += 1; }
+    }
+    if (!characters.length || index >= end || peek() !== "]") reject("malformed character class");
+    let previousRangeEnd = -1;
+    for (let position = 1; position + 1 < characters.length; position += 1) {
+      if (characters[position].range && (characters[position - 1].range || characters[position + 1].range ||
+          position - 1 <= previousRangeEnd ||
+          characters[position - 1].character.charCodeAt(0) > characters[position + 1].character.charCodeAt(0))) {
+        reject("malformed character range");
+      }
+      if (characters[position].range) previousRangeEnd = position + 1;
+    }
+    index += 1;
+  }
+  function repetition() {
+    if (["*", "+", "?"].includes(peek())) { index += 1; return; }
+    if (peek() !== "{") return;
+    const start = ++index;
+    while (index < end && /[0-9,]/.test(peek())) index += 1;
+    const match = /^(0|[1-9][0-9]*)(?:,(0|[1-9][0-9]*)?)?$/.exec(pattern.slice(start, index));
+    if (!match || peek() !== "}") reject("malformed repetition");
+    const lower = Number(match[1]), upper = match[2] === undefined ? lower : Number(match[2]);
+    if (lower > 2147483647 || upper > 2147483647 || lower > upper) reject("unsupported repetition");
+    index += 1;
+  }
+  function sequence(inGroup) {
+    let count = 0;
+    while (index < end && (!inGroup || (peek() !== ")" && peek() !== "|"))) {
+      const character = peek();
+      if (character === "\\") escaped(false);
+      else if (character === "[") characterClass();
+      else if (character === "(") {
+        if (++depth > 64) reject("unsupported pattern depth");
+        index += 1;
+        if (!sequence(true)) reject("empty pattern group");
+        while (peek() === "|") {
+          index += 1;
+          if (!sequence(true)) reject("empty pattern alternative");
+        }
+        if (peek() !== ")") reject("malformed pattern group");
+        index += 1;
+        depth -= 1;
+      } else if ("^$|)*+?{}]".includes(character)) reject("unsupported pattern syntax");
+      else index += 1;
+      repetition();
+      count += 1;
+    }
+    return count;
+  }
+  sequence(false);
+  if (index !== end) reject("malformed pattern");
+  try { new RegExp(pattern, "u"); } catch { reject("malformed pattern"); }
+}
+
 function compile(document) {
   const schemas = object(document.components?.schemas);
   const compiled = {};
@@ -80,10 +160,7 @@ function compile(document) {
         (result.minimum !== undefined && result.exclusiveMaximum !== undefined && result.minimum >= result.exclusiveMaximum) ||
         (result.exclusiveMinimum !== undefined && result.exclusiveMaximum !== undefined && result.exclusiveMinimum >= result.exclusiveMaximum)) reject("contradictory bounds");
     if (source.pattern !== undefined) {
-      if (typeof source.pattern !== "string" || !source.pattern.startsWith("^") || !source.pattern.endsWith("$") ||
-          /[^\x20-\x7e]/.test(source.pattern) || /\(\?/.test(source.pattern) ||
-          (source.pattern.match(/\\./g) ?? []).some((escape) => !"\\.*+?()[]{}^$/-".includes(escape[1]))) reject("unsupported pattern");
-      try { new RegExp(source.pattern); } catch { reject("malformed pattern"); }
+      validatePattern(source.pattern);
       result.pattern = source.pattern;
     }
     if (source.enum !== undefined) {

@@ -46,6 +46,18 @@ export function validateProvider(name: string, value: unknown, omitUndefined: bo
 }
 
 const patterns = new Map<string, RegExp>();
+export function providerRegularExpression(source: string): RegExp {
+    const cached = patterns.get(source);
+    if (cached !== undefined) return cached;
+    try {
+        const pattern = new RegExp(source, 'u');
+        patterns.set(source, pattern);
+        return pattern;
+    } catch (error: unknown) {
+        if (error instanceof SyntaxError) throw new ProviderConstraintError();
+        throw error;
+    }
+}
 function enumMismatch(value: unknown, schema: ProviderSchema): boolean {
     if (schema.ref !== undefined) {
         const target = PROVIDER_SCHEMAS[schema.ref];
@@ -119,8 +131,7 @@ function matches(value: unknown, schema: ProviderSchema, omitUndefined: boolean)
         if ((schema.minLength !== undefined && length < schema.minLength) ||
             (schema.maxLength !== undefined && length > schema.maxLength)) return false;
         if (schema.pattern !== undefined) {
-            const pattern = patterns.get(schema.pattern) ?? new RegExp(schema.pattern);
-            patterns.set(schema.pattern, pattern);
+            const pattern = providerRegularExpression(schema.pattern);
             if (pattern.exec(value)?.[0] !== value) return false;
         }
         if (schema.format !== undefined && !format(value, schema.format)) return false;

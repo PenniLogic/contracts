@@ -6,10 +6,33 @@ import com.pennilogic.contracts.time.LocalDateSerializer
 import java.net.URI
 import java.net.URISyntaxException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.regex.PatternSyntaxException
 import kotlinx.serialization.json.*
 
 internal object ProviderConstraints {
     private val patterns = ConcurrentHashMap<String, Regex>()
+
+    fun patternMatches(source: String, value: String): Boolean {
+        val pattern = patterns.computeIfAbsent(source) {
+            val translated = StringBuilder()
+            var inClass = false
+            var escaped = false
+            source.forEach { character ->
+                when {
+                    escaped -> { translated.append(character); escaped = false }
+                    character == '\\' -> { translated.append(character); escaped = true }
+                    character == '[' -> { translated.append(character); inClass = true }
+                    character == ']' -> { translated.append(character); inClass = false }
+                    // ECMAScript dot excludes these four terminators, but includes NEL.
+                    character == '.' && !inClass -> translated.append("[^\\n\\r\\u2028\\u2029]")
+                    else -> translated.append(character)
+                }
+            }
+            try { Regex(translated.toString()) }
+            catch (_: PatternSyntaxException) { throw ProviderWireException() }
+        }
+        return pattern.matches(value)
+    }
 
     fun validate(name: String, value: JsonElement) {
         val schema = ProviderConstraintData.schemas[name] ?: throw ProviderWireException()
@@ -64,7 +87,7 @@ internal object ProviderConstraints {
             if (schema["minLength"]?.jsonPrimitive?.int?.let { length < it } == true ||
                 schema["maxLength"]?.jsonPrimitive?.int?.let { length > it } == true) return false
             schema["pattern"]?.jsonPrimitive?.content?.let { pattern ->
-                if (!patterns.computeIfAbsent(pattern) { Regex(it) }.matches(primitive.content)) return false
+                if (!patternMatches(pattern, primitive.content)) return false
             }
             schema["format"]?.jsonPrimitive?.content?.let { if (!format(primitive, it)) return false }
         }
