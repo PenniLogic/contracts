@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import Field, model_validator
 
@@ -22,6 +22,7 @@ def validate_direction(reason: ValidationReason, value: object, present: bool) -
 
 
 class ValidationIssue(ProviderModel):
+    _provider_schema_name: ClassVar[str] = "ValidationIssue"
     var_field: ProblemField = Field(alias="field")
     reason: ValidationReason
     direction: AllocationMismatchDirection | None = None

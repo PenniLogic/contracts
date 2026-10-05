@@ -1,4 +1,4 @@
-import { providerObject, type ProviderField } from '../providerGuard.js';
+import { providerObject, providerWire, type ProviderField } from '../providerGuard.js';
 import { AllocationMismatchDirection, AllocationMismatchDirectionFromJSON } from './AllocationMismatchDirection.js';
 import { ProblemField, ProblemFieldFromJSON } from './ProblemField.js';
 import { ValidationReason, ValidationReasonFromJSON } from './ValidationReason.js';
@@ -26,6 +26,7 @@ export function ValidationIssueFromJSON(value: unknown): ValidationIssue {
     const wire = providerObject(value, FIELDS, true);
     const reason = ValidationReasonFromJSON(wire.reason);
     validateDirection(reason, wire.direction, Object.hasOwn(wire, 'direction'));
+    providerWire(wire, 'ValidationIssue');
     return { field: ProblemFieldFromJSON(wire.field), reason,
         ...(Object.hasOwn(wire, 'direction') ? { direction: AllocationMismatchDirectionFromJSON(wire.direction) } : {}) };
 }
@@ -35,8 +36,10 @@ export function ValidationIssueToJSON(value?: ValidationIssue | null): Record<st
     const model = providerObject(value, FIELDS, false);
     const reason = ValidationReasonFromJSON(model.reason);
     validateDirection(reason, model.direction, model.direction !== undefined);
-    return { field: ProblemFieldFromJSON(model.field), reason,
+    const wire = { field: ProblemFieldFromJSON(model.field), reason,
         ...(model.direction !== undefined ? { direction: AllocationMismatchDirectionFromJSON(model.direction) } : {}) };
+    providerWire(wire, 'ValidationIssue');
+    return wire;
 }
 
 export function ValidationIssueFromJSONTyped(value: unknown, _ignoreDiscriminator: boolean): ValidationIssue {

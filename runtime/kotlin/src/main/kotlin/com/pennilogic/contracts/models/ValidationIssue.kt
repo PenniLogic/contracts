@@ -18,7 +18,7 @@ data class ValidationIssue(
 }
 
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-object ValidationIssueSerializer : StrictProviderSerializer<ValidationIssue>(ValidationIssue.generatedSerializer()) {
+object ValidationIssueSerializer : StrictProviderSerializer<ValidationIssue>(ValidationIssue.generatedSerializer(), "ValidationIssue") {
     override fun validateContent(value: JsonElement) = ValidationIssueContract.validateWire(value)
 }
 

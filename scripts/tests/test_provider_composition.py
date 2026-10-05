@@ -16,6 +16,7 @@ from support import ROOT, SpecDir, replace_once, spec_text
 import generate_clients as gc
 import pl_contracts
 import toolchain
+from test_error_provider import schema_results
 
 
 MODELS = """    SyntheticProviderRecord:
@@ -72,6 +73,71 @@ MODELS = """    SyntheticProviderRecord:
       properties:
         problem:
           $ref: '#/components/schemas/ServiceProblemDetail'
+    SyntheticConstraintBundle:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [grid, ids, aliases, tokens, flags, codes, interval, empty, glyphs, money_items]
+      properties:
+        grid:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: array
+            minItems: 1
+            maxItems: 2
+            items: {type: integer, minimum: 0, maximum: 10}
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PublicCorrelationId'
+        tokens:
+          type: array
+          items:
+            type: array
+            items: {type: string, pattern: '^ok_[a-z]{1,3}$', minLength: 4, maxLength: 6}
+        flags:
+          type: array
+          items:
+            type: array
+            items: {type: boolean}
+        codes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemCode'
+        aliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyntheticPublicAlias'
+        interval:
+          type: array
+          items: {type: integer, exclusiveMinimum: 0, exclusiveMaximum: 10}
+        empty:
+          type: array
+          maxItems: 0
+          items: {type: integer}
+        glyphs:
+          type: array
+          items: {type: string, minLength: 1, maxLength: 1}
+        money_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Money'
+    SyntheticPublicAlias:
+      $ref: '#/components/schemas/PublicCorrelationId'
+    SyntheticConstraintEnvelope:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [bundle]
+      properties:
+        bundle:
+          $ref: '#/components/schemas/SyntheticConstraintBundle'
 """
 
 
@@ -129,6 +195,18 @@ class ProviderCompositionTest(unittest.TestCase):
         }, label="python-runtime")
         self.assertIn("OK", result.stderr)
 
+    def test_recursive_negatives_fail_for_their_own_declared_schema_reason(self) -> None:
+        data = json.loads((ROOT / "spec" / "fixtures" / "provider-recursive.v1.json").read_bytes())
+        cases = [{"name": "control", "schema": "SyntheticConstraintBundle", "wire": data["control"]}]
+        cases += [{"name": negative["name"], "schema": "SyntheticConstraintBundle",
+                   "wire": {**data["control"], negative["field"]: negative["value"]}}
+                  for negative in data["negatives"]]
+        results = schema_results(cases, spec=self.spec_path)
+        self.assertTrue(results[0]["valid"])
+        for result, negative in zip(results[1:], data["negatives"]):
+            self.assertFalse(result["valid"], negative["name"])
+            self.assertIn(negative["keyword"], result["keywords"], negative["name"])
+
     def test_typescript_strict_compile_optional_refs_dense_arrays_and_actual_baseapi(self) -> None:
         probe = self.output / "provider_composition.test.ts"
         shutil.copyfile(ROOT / "scripts" / "tests" / probe.name, probe)
@@ -172,7 +250,7 @@ class ProviderCompositionTest(unittest.TestCase):
         from xml.etree import ElementTree
         xml = ElementTree.parse(self.output / "kotlin-build" / "test-results" / "test" /
                                 "TEST-com.pennilogic.contracts.smoke.ProviderCompositionTest.xml").getroot()
-        self.assertEqual(xml.attrib["tests"], "4")
+        self.assertEqual(xml.attrib["tests"], "6")
         for key in ("failures", "errors", "skipped"):
             self.assertEqual(xml.attrib[key], "0", key)
 

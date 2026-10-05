@@ -1,5 +1,5 @@
 {{#vendorExtensions.x-pennilogic-strict-provider}}
-import { providerObject, providerPattern, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';
+import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';
 {{/vendorExtensions.x-pennilogic-strict-provider}}
 import { mapValues{{#isDateLibraryDate}}{{#vendorExtensions.x-hasDateVars}}, parseDate, parseDateTime, serializeDate, serializeDateTime{{/vendorExtensions.x-hasDateVars}}{{/isDateLibraryDate}} } from '../runtime{{importFileExtension}}';
 {{#hasImports}}
@@ -77,6 +77,7 @@ export function {{classname}}FromJSON(json: any): {{classname}} {
 export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boolean): {{classname}} {
     {{#vendorExtensions.x-pennilogic-strict-provider}}
     providerObject(json, providerFields, true);
+    providerWire(json, "{{name}}");
     {{/vendorExtensions.x-pennilogic-strict-provider}}
     {{#hasVars}}
     if (json == null) {
@@ -185,7 +186,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
     }
     {{/discriminator}}
 
-    return {
+    {{#vendorExtensions.x-pennilogic-strict-provider}}const result ={{/vendorExtensions.x-pennilogic-strict-provider}}{{^vendorExtensions.x-pennilogic-strict-provider}}return{{/vendorExtensions.x-pennilogic-strict-provider}} {
         {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}
         {{#additionalPropertiesType}}
             ...value,
@@ -236,6 +237,10 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{/isReadOnly}}
         {{/vars}}
     };
+    {{#vendorExtensions.x-pennilogic-strict-provider}}
+    providerWire(result, "{{name}}", true);
+    return result;
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
     {{/hasVars}}
     {{^hasVars}}
     return value;

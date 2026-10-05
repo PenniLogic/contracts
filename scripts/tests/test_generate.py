@@ -329,7 +329,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         marker = "{{#vendorExtensions.x-pennilogic-strict-provider}}\n\n@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)\n"
         self.assertEqual(override.split(marker, 1)[0], expected)
         added = override.split(marker, 1)[1]
-        self.assertIn("StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer())", added)
+        self.assertIn('StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer(), "{{name}}")', added)
         self.assertIn("{{#isEnumRef}}", added)
         self.assertIn('Regex("{{{pattern}}}").matches(member.content)', added)
         for constraint in ("minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems"):
@@ -342,7 +342,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         override = (ROOT / "generator" / "templates" / "typescript" / "modelGeneric.mustache").read_text(encoding="utf-8")
         expected = (
             "{{#vendorExtensions.x-pennilogic-strict-provider}}\n"
-            "import { providerObject, providerPattern, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
+            "import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
             "{{/vendorExtensions.x-pennilogic-strict-provider}}\n" + stock
         )
         field_block = override.split("{{>modelGenericInterfaces}}\n", 1)[1].split("\n\n/**", 1)[0]
@@ -353,6 +353,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         expected = self.replace_once(expected, from_json, from_json +
                                      "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
                                      "    providerObject(json, providerFields, true);\n"
+                                     '    providerWire(json, "{{name}}");\n'
                                      "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
         to_json = "export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classname}}, {{#readOnlyVars}}'{{name}}'{{^-last}}|{{/-last}}{{/readOnlyVars}}>{{/hasReadOnly}}{{^hasReadOnly}}{{classname}}{{/hasReadOnly}} | null, ignoreDiscriminator: boolean = false): any {\n"
         expected = self.replace_once(expected, to_json, to_json +
@@ -365,6 +366,17 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             "        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}"
             "{{datatype}}ToJSON(value['{{name}}']),\n",
         )
+        expected = self.replace_once(
+            expected, "    return {\n        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}\n",
+            "    {{#vendorExtensions.x-pennilogic-strict-provider}}const result ={{/vendorExtensions.x-pennilogic-strict-provider}}"
+            "{{^vendorExtensions.x-pennilogic-strict-provider}}return{{/vendorExtensions.x-pennilogic-strict-provider}} {\n"
+            "        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}\n",
+        )
+        ending = "        {{/isReadOnly}}\n        {{/vars}}\n    };\n"
+        expected = self.replace_once(expected, ending, ending +
+                                     "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
+                                     '    providerWire(result, "{{name}}", true);\n    return result;\n'
+                                     "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
         self.assertEqual(override, expected)
         self.assertIn("{{>providerField}}", field_block)
         partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")

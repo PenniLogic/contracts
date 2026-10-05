@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping, Self
+from typing import Any, ClassVar, Mapping, Self
 
 from pydantic import ConfigDict, Field, StrictInt, StrictStr, model_validator
 from pennilogic_contracts.provider_model import ProviderModel
@@ -123,6 +123,7 @@ def validate_problem_wire(value: object) -> None:
 
 
 class ServiceProblemDetail(ProviderModel):
+    _provider_schema_name: ClassVar[str] = "ServiceProblemDetail"
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True, hide_input_in_errors=True,
                               validate_by_alias=True, validate_by_name=False)
 

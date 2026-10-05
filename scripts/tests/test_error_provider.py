@@ -6,6 +6,7 @@ import copy
 import json
 import subprocess
 import unittest
+from pathlib import Path
 
 from support import ROOT, SPEC, SpecDir, replace_once, run_script, spec_text, with_probe_paths
 from pl_contracts import node_executable
@@ -25,9 +26,9 @@ def error_examples() -> dict[str, dict]:
     }
 
 
-def schema_results(cases: list[dict]) -> list[dict]:
+def schema_results(cases: list[dict], *, spec: Path = SPEC) -> list[dict]:
     completed = subprocess.run(
-        [node_executable(), str(ROOT / "scripts" / "tests" / "provider_schema.cjs"), str(SPEC)],
+        [node_executable(), str(ROOT / "scripts" / "tests" / "provider_schema.cjs"), str(spec)],
         cwd=ROOT, input=json.dumps(cases), capture_output=True, text=True, encoding="utf-8", check=False,
     )
     if completed.returncode:

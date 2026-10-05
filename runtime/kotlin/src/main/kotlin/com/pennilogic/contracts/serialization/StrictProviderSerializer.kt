@@ -12,7 +12,7 @@ import kotlinx.serialization.modules.SerializersModule
 class ProviderWireException : SerializationException("provider value rejected")
 
 @OptIn(ExperimentalSerializationApi::class)
-abstract class StrictProviderSerializer<T>(private val delegate: KSerializer<T>) : KSerializer<T> {
+abstract class StrictProviderSerializer<T>(private val delegate: KSerializer<T>, private val schemaName: String) : KSerializer<T> {
     override val descriptor: SerialDescriptor get() = delegate.descriptor
 
     protected open fun validateContent(value: JsonElement) {}
@@ -26,6 +26,7 @@ abstract class StrictProviderSerializer<T>(private val delegate: KSerializer<T>)
 
     private fun validate(value: JsonElement, module: SerializersModule) {
         validateKinds(value, descriptor, module)
+        ProviderConstraints.validate(schemaName, value)
         validateContent(value)
     }
 

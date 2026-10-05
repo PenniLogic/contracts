@@ -8,6 +8,8 @@ import {
     SyntheticProviderRecordFromJSON, SyntheticProviderRecordToJSON,
     SyntheticProviderEnvelopeFromJSON, SyntheticProviderEnvelopeToJSON,
     SyntheticLegacyEnvelopeFromJSON, SyntheticLegacyEnvelopeToJSON,
+    SyntheticConstraintBundleFromJSON, SyntheticConstraintBundleToJSON,
+    SyntheticConstraintEnvelopeFromJSON, SyntheticConstraintEnvelopeToJSON,
 } from './typescript/src/index.js';
 import { BaseAPI, Configuration, JSONApiResponse } from './typescript/src/runtime.js';
 import { Instant } from './typescript/src/models/Instant.js';
@@ -15,7 +17,7 @@ import { LocalDate } from './typescript/src/models/LocalDate.js';
 
 const root = process.env.PL_CONTRACTS_ROOT;
 assert.ok(root);
-function fixture(name: string): Record<string, unknown> {
+function fixture<T = Record<string, unknown>>(name: string): T {
     return JSON.parse(readFileSync(join(root!, 'spec', 'fixtures', name), 'utf8'));
 }
 function control(): Record<string, unknown> {
@@ -34,7 +36,7 @@ function wire(value: unknown): unknown {
 }
 function safe(error: unknown): boolean {
     assert.ok(error instanceof Error);
-    assert.doesNotMatch(error.message, /PRIVATE_SYNTHETIC_CANARY|90071992547409\.93/);
+    assert.doesNotMatch(error.message, /PRIVATE_SYNTHETIC_CANARY|PRIVATE_SYNTHETIC_MEMBER|90071992547409\.93/);
     return true;
 }
 class RequestProbe extends BaseAPI {
@@ -143,4 +145,64 @@ test('accepted money and time invalid inputs remain refused without any numeric 
         ['currency_code', 'inr'], ['zone', '1invalid'],
         ['public_id', 'rec_00000000-0000-4000-8000-000000000001'],
     ]) assert.throws(() => SyntheticProviderRecordFromJSON({ ...control(), [field!]: invalid }), safe);
+});
+
+test('recursive declared constraints reject every negative before actual generated fetch', async () => {
+    interface RecursiveCases {
+        control: Record<string, unknown>;
+        negatives: Array<{ name: string; field: string; value: unknown }>;
+    }
+    const data = fixture<RecursiveCases>('provider-recursive.v1.json');
+    const sent: unknown[] = [];
+    const api = new RequestProbe(new Configuration({
+        basePath: 'https://api.pennilogic.example/v1',
+        fetchApi: async (_url, init) => {
+            sent.push(JSON.parse(String(init?.body))); return new Response(null, { status: 204 });
+        },
+    }));
+    const valid = SyntheticConstraintBundleFromJSON(data.control);
+    await api.send(SyntheticConstraintBundleToJSON(valid));
+    assert.deepEqual(sent.pop(), data.control);
+    for (const negative of data.negatives) {
+        const invalid = { ...data.control, [negative.field]: negative.value };
+        assert.throws(() => SyntheticConstraintBundleFromJSON(invalid), safe, negative.name);
+        await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(invalid)), SyntheticConstraintBundleFromJSON).value(), safe);
+        const nested = { bundle: invalid };
+        assert.throws(() => SyntheticConstraintEnvelopeFromJSON(nested), safe);
+        await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(nested)), SyntheticConstraintEnvelopeFromJSON).value(), safe);
+        const nativeField = negative.field.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+        assert.ok(Object.hasOwn(valid, nativeField));
+        await assert.rejects(async () => api.send(SyntheticConstraintBundleToJSON({ ...valid, [nativeField]: negative.value })), safe);
+        await assert.rejects(async () => api.send(SyntheticConstraintEnvelopeToJSON({ bundle: { ...valid, [nativeField]: negative.value } })), safe);
+        assert.equal(sent.length, 0, negative.name);
+    }
+    for (const values of [[-1], [11]]) {
+        const record = control();
+        assert.throws(() => SyntheticProviderRecordFromJSON({ ...record, values }), safe);
+    }
+});
+
+test('private Money member names stay outside marked ordinary nested and JSONApiResponse diagnostics', async () => {
+    const source = control();
+    const money = source.money;
+    assert.ok(money !== null && typeof money === 'object');
+    const invalid = { ...source, money: { ...money, PRIVATE_SYNTHETIC_MEMBER: 'PRIVATE_SYNTHETIC_CANARY' } };
+    const envelope = { record: invalid, records: [invalid] };
+    const routes: Record<string, () => unknown | Promise<unknown>> = {
+        ordinary: () => SyntheticProviderRecordFromJSON(invalid),
+        actual_response: () => new JSONApiResponse(new Response(JSON.stringify(invalid)), SyntheticProviderRecordFromJSON).value(),
+        nested: () => SyntheticProviderEnvelopeFromJSON(envelope),
+        generic_response: () => new JSONApiResponse(new Response(JSON.stringify(envelope)), SyntheticProviderEnvelopeFromJSON).value(),
+    };
+    const outcomes: Record<string, boolean> = {};
+    for (const [route, read] of Object.entries(routes)) {
+        try { await read(); outcomes[route] = false; }
+        catch (error: unknown) {
+            assert.ok(error instanceof Error);
+            const diagnostic = Object.fromEntries(Object.entries(error));
+            outcomes[route] = !error.message.includes('PRIVATE_SYNTHETIC') &&
+                !JSON.stringify(diagnostic).includes('PRIVATE_SYNTHETIC');
+        }
+    }
+    assert.deepEqual(outcomes, Object.fromEntries(Object.keys(routes).map((route) => [route, true])));
 });

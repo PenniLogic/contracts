@@ -19,6 +19,8 @@ from pennilogic_contracts.models.problem_code import ProblemCode
 from pennilogic_contracts.models.synthetic_legacy_envelope import SyntheticLegacyEnvelope
 from pennilogic_contracts.models.synthetic_provider_envelope import SyntheticProviderEnvelope
 from pennilogic_contracts.models.synthetic_provider_record import SyntheticProviderRecord
+from pennilogic_contracts.models.synthetic_constraint_bundle import SyntheticConstraintBundle
+from pennilogic_contracts.models.synthetic_constraint_envelope import SyntheticConstraintEnvelope
 
 
 ROOT = Path(os.environ["PL_CONTRACTS_ROOT"])
@@ -47,6 +49,7 @@ def sanitize(value: object) -> object:
 
 
 class ProviderCompositionTest(unittest.TestCase):
+    maxDiff = None
     def safe_rejection(self, operation: Callable[[], object]) -> None:
         with self.assertRaises(ValueError) as caught:
             operation()
@@ -152,6 +155,52 @@ class ProviderCompositionTest(unittest.TestCase):
         for field, invalid in (("currency_code", "inr"), ("zone", "1invalid"),
                                ("public_id", "rec_00000000-0000-4000-8000-000000000001")):
             self.safe_rejection(lambda: SyntheticProviderRecord.from_dict({**control(), field: invalid}))
+
+    def test_recursive_constraints_in_refs_items_generic_and_actual_transport(self) -> None:
+        data = fixture("provider-recursive.v1.json")
+        wire = data["control"]
+        valid = SyntheticConstraintBundle.from_dict(wire)
+        self.assertEqual(sanitize(valid), wire)
+        self.assertEqual(json.loads(TypeAdapter(SyntheticConstraintBundle).dump_json(valid)), wire)
+        envelope = SyntheticConstraintEnvelope(bundle=valid)
+        self.assertEqual(sanitize(envelope), {"bundle": wire})
+        outcomes = {}
+        for negative in data["negatives"]:
+            invalid = {**wire, negative["field"]: negative["value"]}
+            readers: dict[str, Callable[[], object]] = {
+                "from_dict": lambda: SyntheticConstraintBundle.from_dict(invalid),
+                "constructor": lambda: SyntheticConstraintBundle(**invalid),
+                "generic": lambda: TypeAdapter(SyntheticConstraintBundle).validate_json(json.dumps(invalid)),
+                "api_client": lambda: ApiClient().deserialize(json.dumps(invalid), "SyntheticConstraintBundle", "application/json"),
+                "native_write": lambda: sanitize(valid.model_copy(update={negative["field"]: negative["value"]})),
+                "generic_write": lambda: TypeAdapter(SyntheticConstraintBundle).dump_json(valid.model_copy(update={negative["field"]: negative["value"]})),
+                "nested_read": lambda: SyntheticConstraintEnvelope.from_dict({"bundle": invalid}),
+                "nested_generic": lambda: TypeAdapter(SyntheticConstraintEnvelope).validate_json(json.dumps({"bundle": invalid})),
+                "nested_client": lambda: ApiClient().deserialize(json.dumps({"bundle": invalid}), "SyntheticConstraintEnvelope", "application/json"),
+                "nested_write": lambda: sanitize(envelope.model_copy(update={"bundle": valid.model_copy(update={negative["field"]: negative["value"]})})),
+            }
+            for route, read in readers.items():
+                try:
+                    read()
+                    outcomes[negative["name"] + "/" + route] = False
+                except ValueError as error:
+                    self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(error))
+                    outcomes[negative["name"] + "/" + route] = True
+        self.assertEqual([name for name, rejected in outcomes.items() if not rejected], [])
+
+    def test_private_money_member_names_are_static_in_ordinary_nested_generic_and_client_paths(self) -> None:
+        source = control()
+        invalid = {**source, "money": {**source["money"], "PRIVATE_SYNTHETIC_MEMBER": "PRIVATE_SYNTHETIC_CANARY"}}
+        for read in (
+            lambda: SyntheticProviderRecord.from_dict(invalid),
+            lambda: TypeAdapter(SyntheticProviderRecord).validate_json(json.dumps(invalid)),
+            lambda: ApiClient().deserialize(json.dumps(invalid), "SyntheticProviderRecord", "application/json"),
+            lambda: SyntheticProviderEnvelope.from_dict({"record": invalid, "records": [invalid]}),
+        ):
+            with self.assertRaises(ValueError) as caught:
+                read()
+            self.assertNotIn("PRIVATE_SYNTHETIC_MEMBER", str(caught.exception))
+            self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(caught.exception))
 
 
 if __name__ == "__main__":

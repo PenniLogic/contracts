@@ -123,6 +123,12 @@ item metadata covers nested model and primitive arrays, including unique-item se
 Python's ordinary and generic provider payload writers reuse the original
 `Money.to_wire` JSON seam, just as they reuse the time and enum seams. The Money
 wrapper, currency registry, exponent/range rules and float refusal are unchanged.
+Every marked type also binds to internal recursive declarations compiled from the
+actual source rather than relying only on a generator's top-field annotations.
+Referenced item patterns, nested numeric bounds, cardinality and uniqueness apply
+to ordinary/native/nested/generic reads and writes. Unsupported or ambiguous source
+constraints fail generation explicitly; the precise supported subset is documented
+in [development.md](development.md#provider-conformance).
 
 Kotlin provider types register their own serializer with `KeepGeneratedSerializer`
 on the pinned compiler/runtime. The strict wrapper checks the original JSON tree
@@ -133,6 +139,12 @@ construction and serialization. `ServiceProblemDetail` invokes its existing wire
 guard through the registered serializer on ordinary, nested and actual generated
 `ApiClient` converter paths. Refusal failures use static diagnostics rather than
 stock enum diagnostics that can echo a rejected message.
+TypeScript checks the original marked composition before dependency conversion,
+so an unknown private Money member name cannot reach the unchanged direct codec's
+dynamic field diagnostic. Emitted composition wire is checked again before a
+request. Direct legacy Money and DTO bytes/behavior are not forked or globally
+rewritten; primitive-domain construction and serialization still use their accepted
+seams. Generic outer callers must retain the documented safe diagnostic configuration.
 
 These seams are not a replacement for full producer JSON Schema validation or
 server authorisation/atomicity. Python diagnostic strings hide inputs; structured

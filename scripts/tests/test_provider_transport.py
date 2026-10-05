@@ -125,12 +125,15 @@ class ProviderTransportSchemaTest(unittest.TestCase):
                              for index, letter in enumerate(name))
             py_text = (python / (module + ".py")).read_text(encoding="utf-8")
             self.assertIn("ProviderModel", py_text, name)
+            self.assertIn(f'_provider_schema_name: ClassVar[str] = "{name}"', py_text, name)
             self.assertNotIn("additional_properties:", py_text, name)
             ts_text = (ROOT / "build" / "generated" / "typescript" / "src" / "models" / (name + ".ts")).read_text(encoding="utf-8")
             self.assertIn("providerObject", ts_text, name)
+            self.assertIn("providerWire", ts_text, name)
             kt_text = (ROOT / "build" / "generated" / "kotlin" / "src" / "main" / "kotlin" / "com" / "pennilogic" / "contracts" / "models" / (name + ".kt")).read_text(encoding="utf-8")
             self.assertIn("KeepGeneratedSerializer", kt_text, name)
             self.assertIn("StrictProviderSerializer", kt_text, name)
+            self.assertIn(f'generatedSerializer(), "{name}"', kt_text, name)
 
 
 class ProviderWiringNegativeTest(unittest.TestCase):

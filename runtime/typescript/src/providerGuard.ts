@@ -1,5 +1,6 @@
 import { Instant } from './models/Instant.js';
 import { LocalDate } from './models/LocalDate.js';
+import { validateProvider } from './providerConstraints.js';
 
 export class ProviderWireError extends TypeError {
     constructor() { super('provider value rejected'); }
@@ -44,6 +45,10 @@ export function providerPattern(literal: string): RegExp {
     return new RegExp(literal.slice(1, end), literal.slice(end + 1));
 }
 
+export function providerWire(value: unknown, name: string, omitUndefined: boolean = false): void {
+    validateProvider(name, value, omitUndefined);
+}
+
 function validateField(value: unknown, field: ProviderField, wire: boolean): void {
     if (value === null || value === undefined) throw new ProviderWireError();
     const scalar = !wire && (value instanceof Instant || value instanceof LocalDate) ? value.toWire() : value;
@@ -55,8 +60,8 @@ function validateField(value: unknown, field: ProviderField, wire: boolean): voi
         throw new ProviderWireError();
     }
 
-    if ((field.minLength !== undefined && (typeof scalar !== 'string' || scalar.length < field.minLength)) ||
-        (field.maxLength !== undefined && (typeof scalar !== 'string' || scalar.length > field.maxLength))) throw new ProviderWireError();
+    if ((field.minLength !== undefined && (typeof scalar !== 'string' || [...scalar].length < field.minLength)) ||
+        (field.maxLength !== undefined && (typeof scalar !== 'string' || [...scalar].length > field.maxLength))) throw new ProviderWireError();
     if ((field.minimum !== undefined && (typeof value !== 'number' || value < field.minimum)) ||
         (field.maximum !== undefined && (typeof value !== 'number' || value > field.maximum))) throw new ProviderWireError();
     if (field.kind === 'array') {

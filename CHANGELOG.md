@@ -27,6 +27,16 @@ and generated-client writes. Three-target scratch-generated composition and actu
 mock request regressions retain earlier negative reviews and native CI as history,
 not source approval, publication or adoption.
 
+The correction after frozen `e343fe2` binds all marked models to source-derived
+recursive scalar/container/reference constraints. Kotlin item bounds/cardinality
+and Python reference-item patterns now execute before ordinary conversion and on
+native/nested/generic/client writes. TypeScript preflights private Money member
+names before the unchanged codec and validates emitted composition wire, preserving
+optional omission and static enum diagnostics. Nested/alias/zero/Unicode/exclusive
+boundary probes and explicit unsupported-generation failures accompany the change.
+No production schema/version, accepted primitive codec, global JSON or dependency
+policy changes; earlier negative reviews and native green history stay immutable.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

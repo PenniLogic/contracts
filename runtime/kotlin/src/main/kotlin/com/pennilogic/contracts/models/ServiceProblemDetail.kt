@@ -60,7 +60,7 @@ data class ServiceProblemDetail(
 }
 
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-object ServiceProblemDetailSerializer : StrictProviderSerializer<ServiceProblemDetail>(ServiceProblemDetail.generatedSerializer()) {
+object ServiceProblemDetailSerializer : StrictProviderSerializer<ServiceProblemDetail>(ServiceProblemDetail.generatedSerializer(), "ServiceProblemDetail") {
     override fun validateContent(value: JsonElement) = ServiceProblemContract.validateWire(value)
 }
 

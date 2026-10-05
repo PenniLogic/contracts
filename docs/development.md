@@ -140,15 +140,18 @@ Nine templates/partials are overridden; stock portions remain bound to the pinne
 - `generator/templates/typescript/modelEnum.mustache`: typed guards and enum converters that
   reject unknown/coerced wire values instead of casting them into a known enum.
 - `generator/templates/kotlin/data_class.mustache`: provider-only registered strict serializers,
-  retained generated descriptors, constructor checks and field constraints. Legacy model emission
+  retained generated descriptors, mandatory source-schema binding, constructor checks and field constraints. Legacy model emission
   is unchanged; the global JSON configuration is not made strict.
 - `generator/templates/python/model_provider.mustache`: provider-only Pydantic fields and safe
   regex validators; `model_generic.mustache` selects this partial for marked closed models only.
-  The reusable provider base closes original ingress and normal nested/outbound serialization.
+  Its schema-name binding selects the compiled recursive declarations on original ingress and
+  normal nested/outbound serialization, including reference-array patterns absent from field annotations.
   Its payload serializer reuses the unchanged `Money.to_wire` Pydantic JSON seam, alongside the
   time and enum seams, rather than letting an untyped payload serializer lose the Money codec.
 - `generator/templates/typescript/modelGeneric.mustache`: provider-only original-wire/native-model
-  guards around the generator conversion bodies. Optional referenced properties are omitted
+  guards and original-wire/emitted-wire declaration checks around the generator conversion bodies.
+  This rejects private Money member names before calling the unchanged dependency codec.
+  Optional referenced properties are omitted
   before invoking a required child writer; required references and explicit null remain guarded.
 - `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
   for marked models, including model-valued array items. Array indices must be present and their
@@ -194,6 +197,33 @@ problems, import preview and successful refusal. It runs strict mypy/TypeScript 
 ordinary/native/nested/generic serialization and actual generated transports in all three targets.
 It uses the existing pinned venv/compiler/Gradle smoke dependencies; no product DTO, endpoint,
 framework, dependency or pipeline command is added.
+
+`scripts/provider_constraints.cjs` derives internal declarations directly from the owning source,
+using the existing Spectral YAML parser and shared local-reference resolver. The actual generator
+ships source-bound tables and `provider_constraints_sha256` in all three manifests. These are
+internal runtime metadata, not a new wire group, taxonomy, product policy or release asset.
+Kotlin and Python validate recursive scalar/item constraints before conversion and on ordinary
+construction, generic/nested serialization and actual client writes. TypeScript preflights the
+original body and validates projected output before transport, retaining dense-array prechecks,
+optional-property omission and the registered static enum diagnostic.
+
+The supported subset is explicit: objects/arrays/strings/integers/booleans; local acyclic schema
+references; string enums and scalar constants; anchored portable ASCII regular expressions;
+code-point string lengths; inclusive/exclusive safe-integer bounds; nested min/max/unique item
+rules (including zero upper bounds); required/closed members and allOf/anyOf/oneOf/not/conditional
+assertions. The accepted date/date-time codecs and integer formats remain registered; URI
+references receive ASCII/escape/parser checks, not an arbitrary format or IRI certification.
+Enum/constant predicates may constrain integer/boolean fields without introducing a new scalar
+enum serializer. Referencing an unmarked legacy DTO does not make that DTO globally strict.
+
+Generation fails explicitly for unknown keywords, untyped value/items, floating-number or nullable
+union schemas, tuple/contains/map-schema features, external/unresolved/cyclic references,
+nonportable patterns, unsupported formats/defaults/scalar-enum representations, malformed
+metadata or contradictory/unrepresentable bounds. No unsupported declaration is silently treated
+as a supported guard. Full producer JSON Schema validation and server obligations remain separate.
+`test_provider_constraints.py` exercises each refusal on all three actual generation commands;
+the generated composition matrix checks same-length public-ID failures, exact nested numeric/
+cardinality boundaries, aliases, Unicode length, zero bounds and private member names.
 
 ### Golden hashes
 

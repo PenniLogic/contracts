@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
     BUILD, GENERATOR_DIR, LANGUAGES, PROVIDER_SOURCE_NAMES, REGISTRY, ROOT, RUNTIME_DIR, SPEC, PipelineError, combined_digest, fail, java_executable,
-    remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions,
+    remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions, node_executable,
 )
 from toolchain import ensure_installed  # noqa: E402
 
@@ -283,6 +283,11 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
     version = spec_version(spec.read_text(encoding="utf-8"))
     config = config_path(language)
     generator_name = json.loads(config.read_text(encoding="utf-8"))["generatorName"]
+    constraints = run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(spec)],
+                      capture=True, check=False)
+    if constraints.returncode:
+        raise PipelineError(constraints.stderr.strip() or "provider constraint generation failed")
+    declarations = json.loads(constraints.stdout)
     remove_tree(output)
     output.mkdir(parents=True)
     # The generator honours the ignore file it finds in the output directory; the committed override is
@@ -302,6 +307,35 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
     if completed.returncode != 0:
         raise PipelineError(f"openapi-generator failed for {language} (exit {completed.returncode}):\n{completed.stdout}\n{completed.stderr}")
     runtime_hash = copy_runtime(language, output)
+    if language == "python":
+        target = output / "pennilogic_contracts" / "provider_constraint_data.py"
+        content = (
+            '"""Generated declared provider constraints; do not edit."""\n'
+            "import json\nfrom typing import Any, Final\n\n"
+            f"SCHEMAS: Final[dict[str, dict[str, Any]]] = json.loads({json.dumps(json.dumps(declarations['schemas'], sort_keys=True))})\n"
+        )
+        target.write_bytes(content.encode("utf-8"))
+    elif language == "kotlin":
+        rows = []
+        for name, declaration in sorted(declarations["schemas"].items()):
+            literal = json.dumps(json.dumps(declaration, sort_keys=True)).replace("$", r"\$")
+            rows.append(f'        {json.dumps(name)} to Json.parseToJsonElement({literal}).jsonObject,\n')
+        target = output / "src" / "main" / "kotlin" / "com" / "pennilogic" / "contracts" / "serialization" / "ProviderConstraintData.kt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((
+            "// Generated declared provider constraints; do not edit.\n"
+            "package com.pennilogic.contracts.serialization\n\nimport kotlinx.serialization.json.*\n\n"
+            "internal object ProviderConstraintData {\n    val schemas: Map<String, JsonObject> = mapOf(\n" +
+            "".join(rows) + "    )\n}\n"
+        ).encode("utf-8"))
+    elif language == "typescript":
+        target = output / "src" / "providerConstraintData.ts"
+        target.write_bytes((
+            "// Generated declared provider constraints; do not edit.\n"
+            "import type { ProviderSchema } from './providerConstraints.js';\n\n"
+            "export const PROVIDER_SCHEMAS: Readonly<Record<string, ProviderSchema>> = " +
+            json.dumps(declarations["schemas"], sort_keys=True) + ";\n"
+        ).encode("utf-8"))
     relative, content = render_registry(language)
     registry_target = output / relative
     registry_target.parent.mkdir(parents=True, exist_ok=True)
@@ -330,6 +364,7 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
         "spec_sha256": spec_digest(spec),
         "currency_registry_sha256": sha256_bytes(normalized_text(REGISTRY)),
         "provider_sources_sha256": provider_hashes,
+        "provider_constraints_sha256": sha256_bytes(json.dumps(declarations, sort_keys=True).encode("utf-8")),
         "generator": {
             "name": "openapi-generator-cli",
             "version": pins["openapi_generator"]["version"],

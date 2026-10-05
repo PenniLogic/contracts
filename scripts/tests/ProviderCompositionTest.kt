@@ -50,6 +50,7 @@ class ProviderCompositionTest {
     private fun safe(error: Throwable) {
         generateSequence(error) { it.cause }.forEach {
             assertFalse(it.message.orEmpty().contains("PRIVATE_SYNTHETIC_CANARY"))
+            assertFalse(it.message.orEmpty().contains("PRIVATE_SYNTHETIC_MEMBER"))
             assertFalse(it.message.orEmpty().contains("90071992547409.93"))
         }
     }
@@ -145,7 +146,67 @@ class ProviderCompositionTest {
         val methods = ProviderCompositionTest::class.java.declaredMethods.filter {
             it.isAnnotationPresent(org.junit.jupiter.api.Test::class.java)
         }
-        assertEquals(4, methods.size)
+        assertEquals(6, methods.size)
         assertTrue(methods.all { it.returnType == Void.TYPE })
+    }
+
+    @Test fun recursiveDeclaredConstraintsApplyBeforeConversionNativeCopyAndActualFetch() = runBlocking<Unit> {
+        val fixture = fixture("provider-recursive.v1.json")
+        val wire = fixture.getValue("control").jsonObject
+        val valid = json.decodeFromJsonElement<SyntheticConstraintBundle>(wire)
+        assertEquals(wire, json.encodeToJsonElement(valid))
+        var sent: String? = null
+        Probe(engine(wire) { sent = it }).post(valid)
+        assertEquals(wire, json.parseToJsonElement(assertNotNull(sent)))
+        val outcomes = mutableMapOf<String, Boolean>()
+        fixture.getValue("negatives").jsonArray.forEach { entry ->
+            val negative = entry.jsonObject
+            val name = negative.getValue("name").jsonPrimitive.content
+            val field = negative.getValue("field").jsonPrimitive.content
+            val invalid = JsonObject(wire + (field to negative.getValue("value")))
+            outcomes["$name/ordinary"] = runCatching { json.decodeFromJsonElement<SyntheticConstraintBundle>(invalid) }.isFailure
+            outcomes["$name/actual_response"] = runCatching { Probe(engine(invalid)).get().wrap<SyntheticConstraintBundle>().body() }.isFailure
+            val nested = buildJsonObject { put("bundle", invalid) }
+            outcomes["$name/nested_ordinary"] = runCatching { json.decodeFromJsonElement<SyntheticConstraintEnvelope>(nested) }.isFailure
+            outcomes["$name/nested_response"] = runCatching { Probe(engine(nested)).get().wrap<SyntheticConstraintEnvelope>().body() }.isFailure
+        }
+        for (grid in listOf(listOf(listOf(-1)), listOf(listOf(11)), listOf(emptyList()), listOf(listOf(0, 1, 2)))) {
+            var executed = false
+            val request = MockEngine {
+                executed = true
+                respond("{}", HttpStatusCode.OK, headersOf("Content-Type", ContentType.Application.Json.toString()))
+            }
+            val rejected = runCatching { Probe(request).post(valid.copy(grid = grid.toSet())) }.isFailure
+            outcomes["$grid/native_copy_request"] = rejected && !executed
+        }
+        val record = json.decodeFromJsonElement<SyntheticProviderRecord>(control())
+        for (number in listOf(-1, 11)) {
+            outcomes["$number/direct_native_item"] = runCatching { json.encodeToJsonElement(record.copy(propertyValues = listOf(number))) }.isFailure
+        }
+        for (identifier in listOf(
+            "rec_00000000-0000-4000-8000-000000000001",
+            "cor_00000000-0000-5000-8000-000000000001",
+            "cor_00000000-0000-4000-0000-000000000001",
+        )) {
+            var executed = false
+            val request = MockEngine {
+                executed = true
+                respond("{}", HttpStatusCode.OK, headersOf("Content-Type", ContentType.Application.Json.toString()))
+            }
+            val rejected = runCatching { Probe(request).post(valid.copy(ids = setOf(identifier))) }.isFailure
+            outcomes["$identifier/native_copy_request"] = rejected && !executed
+        }
+        assertEquals(emptyList(), outcomes.filterValues { !it }.keys.toList())
+    }
+
+    @Test fun privateMoneyMemberNamesNeverEnterOrdinaryNestedOrActualResponseDiagnostics() = runBlocking<Unit> {
+        val wire = control()
+        val invalid = JsonObject(wire + ("money" to JsonObject(wire.getValue("money").jsonObject +
+            ("PRIVATE_SYNTHETIC_MEMBER" to JsonPrimitive("PRIVATE_SYNTHETIC_CANARY")))))
+        safe(assertFails { json.decodeFromJsonElement<SyntheticProviderRecord>(invalid) })
+        safe(assertFails { Probe(engine(invalid)).get().wrap<SyntheticProviderRecord>().body() })
+        val nested = buildJsonObject { put("record", invalid); put("records", JsonArray(listOf(invalid))) }
+        safe(assertFails { json.decodeFromJsonElement<SyntheticProviderEnvelope>(nested) })
+        safe(assertFails { Probe(engine(nested)).get().wrap<SyntheticProviderEnvelope>().body() })
     }
 }

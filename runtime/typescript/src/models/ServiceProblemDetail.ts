@@ -1,6 +1,6 @@
 // Strict T-CON-12 seam; the scaffold ProblemDetail remains unchanged.
 import { errorPolicy, errorStatus } from '../errorCatalogue.js';
-import { providerObject, type ProviderField } from '../providerGuard.js';
+import { providerObject, providerWire, type ProviderField } from '../providerGuard.js';
 import { Instant } from './Instant.js';
 import { ProblemCode, ProblemCodeFromJSON } from './ProblemCode.js';
 import { ProblemField, ProblemFieldFromJSON } from './ProblemField.js';
@@ -123,6 +123,7 @@ export function validateProblemWire(value: unknown): void {
         const entitlement = object(wire.entitlement, ['upgrade_available']);
         if (typeof entitlement.upgrade_available !== 'boolean') throw new ProblemWireError('entitlement');
     } else if (Object.hasOwn(wire, 'entitlement')) throw new ProblemWireError('entitlement');
+    providerWire(wire, 'ServiceProblemDetail');
 }
 
 export function ServiceProblemDetailFromJSON(value: unknown): ServiceProblemDetail {

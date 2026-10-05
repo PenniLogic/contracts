@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import pprint
 from enum import Enum
-from typing import Any, Mapping, Self
+from typing import Any, ClassVar, Mapping, Self
 
 from pydantic import BaseModel, ConfigDict, ModelWrapValidatorHandler, ValidationError, model_serializer, model_validator
 
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.local_date import LocalDate
 from pennilogic_contracts.models.money import Money
+from pennilogic_contracts.provider_constraints import ProviderConstraintError, validate_provider
 
 
 class ProviderWireError(ValueError):
@@ -34,6 +35,7 @@ def _wire_value(value: Any) -> Any:
 
 
 class ProviderModel(BaseModel):
+    _provider_schema_name: ClassVar[str] = ""
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True, hide_input_in_errors=True,
                               revalidate_instances="always", validate_by_alias=True, validate_by_name=True)
 
@@ -59,8 +61,10 @@ class ProviderModel(BaseModel):
         fields = cls._guard_fields(source, wire=False)
         normalized = {key: _wire_value(item) for key, item in fields.items()}
         try:
+            aliases = {name: field.alias or name for name, field in cls.model_fields.items()}
+            validate_provider(cls._provider_schema_name, {aliases.get(key, key): item for key, item in normalized.items()})
             return handler(normalized)
-        except ValidationError:
+        except (ValidationError, ProviderConstraintError):
             # Nested type failures must not expose raw values or unknown input keys.
             raise ProviderWireError() from None
 

@@ -425,7 +425,7 @@ import {{packageName}}.infrastructure.ITransformForStorage
 {{#vendorExtensions.x-pennilogic-strict-provider}}
 
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-object {{classname}}ProviderSerializer : com.pennilogic.contracts.serialization.StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer()) {
+object {{classname}}ProviderSerializer : com.pennilogic.contracts.serialization.StrictProviderSerializer<{{classname}}>({{classname}}.generatedSerializer(), "{{name}}") {
     override fun validateContent(value: kotlinx.serialization.json.JsonElement) {
         val wire = value as? kotlinx.serialization.json.JsonObject
             ?: throw com.pennilogic.contracts.serialization.ProviderWireException()
