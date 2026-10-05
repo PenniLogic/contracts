@@ -150,6 +150,8 @@ Risky repetitions use a bounded, schema-valid generation-only example without ch
 constraints; unconstructible exact/nested minima fail explicitly. Existing small and zero-minimum
 large-upper patterns still work. Failed downstream generation does not replace earlier valid
 clients: manifests and companions are staged, then the complete requested set is promoted.
+Catchable rollback interrupts retain unresolved previous bytes and the recovery mapping
+instead of deleting them during ordinary staging cleanup; they remain explicit failures.
 The documented finite construction and recovery rules do not imply giant-input performance,
 extra heap/storage permission, arbitrary schema support or a published provider pin.
 TypeScript checks the original marked composition before dependency conversion,

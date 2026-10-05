@@ -284,9 +284,13 @@ companions and the complete manifest. One requested target set is promoted only 
 target succeeds; downstream generator/companion failures leave previous caller output intact
 and discard staging. Verification double-generates and compares before promoting any client;
 golden updates are committed together with that verified client set, never on a failed run.
-Promotion errors restore prior directories/files. If filesystem restoration itself fails,
+Promotion errors restore prior directories/files. If filesystem restoration itself fails or
+receives a catchable `KeyboardInterrupt`, including during rollback cleanup,
 the command fails explicitly and retains backups plus `recovery.json` in the named staging
 directory; it does not delete recoverable prior bytes or advertise partial success.
+Already-restored destinations and still-unresolved backups remain byte-verifiable against that
+mapping. A promotion interrupt with a successful rollback is re-raised after prior output is
+restored; an interrupted rollback follows the recovery-required path before staging cleanup.
 These are recoverable process-level filesystem transactions, not a single multi-path atomic
 rename, crash durability or protection against external concurrent writers. Consumers must not
 read outputs while a generation command runs. Source/root directories and linked output

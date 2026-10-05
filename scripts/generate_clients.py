@@ -333,7 +333,7 @@ def _publish(stage: Path, replacements: list[tuple[Path, Path]]) -> None:
                     output.unlink()
             for backup, output in reversed(backups):
                 backup.replace(output)
-        except OSError as recovery_error:
+        except (OSError, KeyboardInterrupt) as recovery_error:
             raise _RecoveryRequired(f"generation promotion failed; recovery artifacts retained at {stage}") from recovery_error
         if isinstance(error, KeyboardInterrupt):
             raise

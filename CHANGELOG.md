@@ -55,6 +55,13 @@ updates are staged and recoverably promoted; actual downstream failures preserve
 previous output rather than deleting it or publishing a partial set. No generator
 upgrade, heap increase, wire policy or release/adoption claim is made.
 
+The correction after frozen local `cdc1f3a` retains unresolved backups and the
+recovery map when rollback restoration or cleanup receives a catchable interrupt.
+Paired filesystem regressions verify ordinary errors, first/partial interrupted
+restores, installed-target cleanup and successful restore followed by re-raising
+the original promotion interrupt. This is process cleanup safety, not hard-kill,
+power-loss durability, concurrent-reader atomicity or product acceptance.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

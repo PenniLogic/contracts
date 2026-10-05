@@ -293,5 +293,126 @@ raise SystemExit(gc.main())
         self.assertEqual(list(self.output.glob(".contracts-generation-*")), [])
 
 
+class CatchableRollbackTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp(prefix="pl-rollback-interrupt-"))
+        self.addCleanup(shutil.rmtree, self.home)
+        self.prepare("initial")
+
+    def prepare(self, label: str) -> None:
+        fixture = self.home / label
+        self.outputs = [fixture / "clients" / "kotlin", fixture / "clients" / "python", fixture / "golden.json"]
+        for output in self.outputs[:2]:
+            output.mkdir(parents=True)
+            (output / "old.txt").write_bytes(b"previous valid synthetic client\n")
+        self.outputs[2].write_bytes(b'{"previous":"synthetic golden"}\n')
+        self.before = [self.snapshot(output) for output in self.outputs]
+
+    @staticmethod
+    def snapshot(path: Path) -> tuple:
+        return ("directory", tree_hash(path)) if path.is_dir() else ("file", path.read_bytes())
+
+    def promote(self) -> None:
+        with gc._staging(self.home) as stage:
+            ready = stage / "ready"
+            ready.mkdir()
+            replacements = []
+            for index, output in enumerate(self.outputs):
+                generated = ready / str(index)
+                if index < 2:
+                    generated.mkdir()
+                    (generated / "new.txt").write_bytes(b"new synthetic client\n")
+                else:
+                    generated.write_bytes(b'{"new":"synthetic golden"}\n')
+                replacements.append((generated, output))
+            gc._publish(stage, replacements)
+
+    def assert_recoverable(self) -> None:
+        stages = list(self.home.glob(".contracts-generation-*"))
+        self.assertEqual(len(stages), 1)
+        mapping = json.loads((stages[0] / "recovery.json").read_bytes())["previous_outputs"]
+        self.assertEqual(len(mapping), len(self.outputs))
+        for index, entry in enumerate(mapping):
+            output, backup = Path(entry["output"]), Path(entry["backup"])
+            self.assertEqual(output, self.outputs[index].resolve())
+            self.assertEqual(backup.parent, stages[0] / "backups")
+            surviving = backup if backup.exists() else output
+            self.assertTrue(surviving.exists(), f"previous destination {index} must remain recoverable")
+            self.assertEqual(self.snapshot(surviving), self.before[index])
+        for entry in mapping:
+            backup, output = Path(entry["backup"]), Path(entry["output"])
+            if backup.exists():
+                backup.replace(output)
+        self.assertEqual([self.snapshot(output) for output in self.outputs], self.before)
+        gc.remove_tree(stages[0])
+
+    def test_oserror_and_interrupt_during_first_or_partial_restore_retain_every_previous_byte(self) -> None:
+        replace = Path.replace
+        for failure in (PermissionError, KeyboardInterrupt):
+            for fail_at in (1, 2, 3):
+                with self.subTest(exception=failure.__name__, restore_position=fail_at):
+                    self.prepare(f"{failure.__name__}-{fail_at}")
+                    attempts = 0
+                    def fail_restore(path: Path, target: Path) -> Path:
+                        nonlocal attempts
+                        if path.parent.name == "ready" and path.name == "2":
+                            raise PermissionError("synthetic golden promotion failure")
+                        if path.parent.name == "backups":
+                            attempts += 1
+                            if attempts == fail_at:
+                                raise failure("synthetic restoration interruption")
+                        return replace(path, target)
+                    caught: BaseException | None = None
+                    with mock.patch.object(Path, "replace", fail_restore):
+                        try:
+                            self.promote()
+                        except (PipelineError, KeyboardInterrupt) as error:
+                            caught = error
+                    self.assertIsInstance(caught, gc._RecoveryRequired)
+                    self.assertIsInstance(caught.__cause__ if caught else None, failure)
+                    self.assertEqual(attempts, fail_at)
+                    self.assert_recoverable()
+
+    def test_successful_rollback_after_promotion_interrupt_restores_and_reraises(self) -> None:
+        replace = Path.replace
+        def interrupt_promotion(path: Path, target: Path) -> Path:
+            if path.parent.name == "ready" and path.name == "2":
+                raise KeyboardInterrupt("synthetic promotion interruption")
+            return replace(path, target)
+        with mock.patch.object(Path, "replace", interrupt_promotion):
+            with self.assertRaises(KeyboardInterrupt):
+                self.promote()
+        self.assertEqual([self.snapshot(output) for output in self.outputs], self.before)
+        self.assertEqual(list(self.home.glob(".contracts-generation-*")), [])
+
+    def test_rollback_cleanup_interrupt_retains_targets_golden_and_mapping(self) -> None:
+        replace, remove = Path.replace, gc.remove_tree
+        def fail_promotion(path: Path, target: Path) -> Path:
+            if path.parent.name == "ready" and path.name == "2":
+                raise PermissionError("synthetic golden promotion failure")
+            return replace(path, target)
+        def interrupt_cleanup(path: Path) -> None:
+            if path == self.outputs[1]:
+                raise KeyboardInterrupt("synthetic installed-target cleanup interruption")
+            remove(path)
+        caught: BaseException | None = None
+        with mock.patch.object(Path, "replace", fail_promotion), mock.patch.object(gc, "remove_tree", interrupt_cleanup):
+            try:
+                self.promote()
+            except (PipelineError, KeyboardInterrupt) as error:
+                caught = error
+        self.assertIsInstance(caught, gc._RecoveryRequired)
+        self.assertIsInstance(caught.__cause__ if caught else None, KeyboardInterrupt)
+        stages = list(self.home.glob(".contracts-generation-*"))
+        self.assertEqual(len(stages), 1)
+        mapping = json.loads((stages[0] / "recovery.json").read_bytes())["previous_outputs"]
+        for index, entry in enumerate(mapping):
+            self.assertEqual(self.snapshot(Path(entry["backup"])), self.before[index])
+        for output in self.outputs[:2]:
+            if output.exists():
+                remove(output)
+        self.assert_recoverable()
+
+
 if __name__ == "__main__":
     unittest.main()
