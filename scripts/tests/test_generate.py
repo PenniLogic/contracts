@@ -96,7 +96,6 @@ class GoldenAndManifestTest(unittest.TestCase):
         # verify() refuses the record before comparing it with a generation.
         with mock.patch.object(gc, "load_golden", return_value={"python": record}), \
                 mock.patch.object(gc, "generate", return_value={"tree_sha256": golden["python"]["tree_sha256"], "file_count": 1, "files": [], "spec_version": "0.1.0", "spec_sha256": "x"}), \
-                mock.patch.object(gc, "remove_tree"), \
                 mock.patch("sys.stdout", new_callable=io.StringIO), \
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
             self.assertEqual(gc.verify(["python"], {"openapi_generator": "", "oasdiff": ""}, update_golden=False), 1)

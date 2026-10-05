@@ -19,7 +19,10 @@ import argparse
 import json
 import shutil
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
@@ -275,8 +278,91 @@ def render_import_policy(language: str, policy: dict) -> tuple[str, str]:
     raise PipelineError(f"unknown language {language}")
 
 
+class _RecoveryRequired(PipelineError):
+    pass
+
+
+def _check_output(output: Path) -> None:
+    resolved = output.resolve()
+    if resolved in {ROOT, BUILD, GENERATOR_DIR, RUNTIME_DIR, SPEC.parent} or resolved in ROOT.parents or (
+            resolved.is_relative_to(ROOT) and not resolved.is_relative_to(BUILD)):
+        raise PipelineError("refusing generation into a source or root directory")
+    if output.is_symlink() or output.is_junction() or (output.exists() and not output.is_dir()):
+        raise PipelineError("generation output must be a normal directory")
+
+
+@contextmanager
+def _staging(parent: Path) -> Iterator[Path]:
+    parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".contracts-generation-", dir=parent))
+    retain = False
+    try:
+        yield stage
+    except _RecoveryRequired:
+        retain = True
+        raise
+    finally:
+        if not retain:
+            remove_tree(stage)
+
+
+def _publish(stage: Path, replacements: list[tuple[Path, Path]]) -> None:
+    backups: list[tuple[Path, Path]] = []
+    installed: list[Path] = []
+    backup_dir = stage / "backups"
+    backup_dir.mkdir()
+    (stage / "recovery.json").write_bytes((json.dumps({
+        "previous_outputs": [{"output": str(output.resolve()), "backup": str(backup_dir / str(index))}
+                             for index, (_, output) in enumerate(replacements)]
+    }, indent=2) + "\n").encode("utf-8"))
+    try:
+        for index, (ready, output) in enumerate(replacements):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if output.exists():
+                backup = backup_dir / str(index)
+                output.replace(backup)
+                backups.append((backup, output))
+            ready.replace(output)
+            installed.append(output)
+    except (OSError, KeyboardInterrupt) as error:
+        try:
+            for output in reversed(installed):
+                if output.is_dir():
+                    remove_tree(output)
+                else:
+                    output.unlink()
+            for backup, output in reversed(backups):
+                backup.replace(output)
+        except OSError as recovery_error:
+            raise _RecoveryRequired(f"generation promotion failed; recovery artifacts retained at {stage}") from recovery_error
+        if isinstance(error, KeyboardInterrupt):
+            raise
+        raise PipelineError("generation promotion failed; previous outputs restored") from error
+
+
 def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dict:
-    """Generate one target into `output` and return its manifest."""
+    """Publish one complete target only after generation and manifest construction succeed."""
+    _check_output(output)
+    with _staging(output.parent) as stage:
+        ready = stage / "ready" / output.name
+        manifest = _generate_target(language, ready, tools, spec)
+        _publish(stage, [(ready, output)])
+    return manifest
+
+
+def generate_all(languages: list[str], output: Path, tools: dict, spec: Path = SPEC) -> dict[str, dict]:
+    """Publish a requested client set together, preserving every previous target on failure."""
+    for language in languages:
+        _check_output(output / language)
+    with _staging(output.parent) as stage:
+        manifests = {language: _generate_target(language, stage / "ready" / language, tools, spec)
+                     for language in languages}
+        _publish(stage, [(stage / "ready" / language, output / language) for language in languages])
+    return manifests
+
+
+def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dict:
+    """Build a new staged target; caller output is never removed while generation runs."""
     if language not in LANGUAGES:
         raise PipelineError(f"unknown language {language}; choose from {', '.join(LANGUAGES)}")
     pins = versions()
@@ -288,15 +374,20 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
     if constraints.returncode:
         raise PipelineError(constraints.stderr.strip() or "provider constraint generation failed")
     declarations = json.loads(constraints.stdout)
-    remove_tree(output)
+    if output.exists():
+        raise PipelineError("generation staging target is not empty")
     output.mkdir(parents=True)
+    generator_spec = spec
+    if "generation_input" in declarations:
+        generator_spec = output.parent / f"{language}-generation-input.json"
+        generator_spec.write_bytes((json.dumps(declarations["generation_input"], ensure_ascii=True) + "\n").encode("utf-8"))
     # The generator honours the ignore file it finds in the output directory; the committed override is
     # seeded there before generation and stays part of the output.
     shutil.copyfile(IGNORE_OVERRIDE, output / ".openapi-generator-ignore")
     command = [
         java_executable(), "-Dline.separator=\n", "-Dfile.encoding=UTF-8", "-Dorg.slf4j.simpleLogger.defaultLogLevel=warn",
         "-jar", tools["openapi_generator"], "generate",
-        "-i", str(spec), "-c", str(config), "-o", str(output),
+        "-i", str(generator_spec), "-c", str(config), "-o", str(output),
         "--global-property", "apiTests=false,modelTests=false,apis,models,supportingFiles,apiDocs,modelDocs",
         "--additional-properties", version_properties(language, version),
     ]
@@ -364,7 +455,8 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
         "spec_sha256": spec_digest(spec),
         "currency_registry_sha256": sha256_bytes(normalized_text(REGISTRY)),
         "provider_sources_sha256": provider_hashes,
-        "provider_constraints_sha256": sha256_bytes(json.dumps(declarations, sort_keys=True).encode("utf-8")),
+        "provider_constraints_sha256": sha256_bytes(json.dumps(
+            {key: declarations[key] for key in ("roots", "schemas")}, sort_keys=True).encode("utf-8")),
         "generator": {
             "name": "openapi-generator-cli",
             "version": pins["openapi_generator"]["version"],
@@ -380,6 +472,13 @@ def generate(language: str, output: Path, tools: dict, spec: Path = SPEC) -> dic
         "tree_sha256": digest,
         "files": [{"path": path, "sha256": file_digest} for path, file_digest in entries],
     }
+    if "generation_input" in declarations:
+        manifest["generation_examples"] = {
+            "input_sha256": sha256_bytes(generator_spec.read_bytes()),
+            "count": len(declarations["generation_examples"]),
+            "budget": declarations["generation_budget"],
+            "validated_generation_only_annotations": True,
+        }
     (output / MANIFEST_NAME).write_bytes((json.dumps(manifest, indent=2, sort_keys=False) + "\n").encode("utf-8"))
     return manifest
 
@@ -410,46 +509,51 @@ def load_golden() -> dict:
 def verify(languages: list[str], tools: dict, update_golden: bool) -> int:
     golden = load_golden()
     problems: list[str] = []
-    for language in languages:
-        first = generate(language, BUILD / "generated" / language, tools)
-        second = generate(language, BUILD / "generated-verify" / language, tools)
-        if first["tree_sha256"] != second["tree_sha256"]:
-            changed = sorted({f["path"] for f in first["files"]} ^ {f["path"] for f in second["files"]})
-            first_hashes = {f["path"]: f["sha256"] for f in first["files"]}
-            changed += sorted(p for p, h in ((f["path"], f["sha256"]) for f in second["files"]) if first_hashes.get(p) not in (None, h))
-            problems.append(f"{language}: two generations from the same input differ ({', '.join(changed[:20])}); the generator is not deterministic for this input")
-            continue
-        print(f"{language}: deterministic ({first['file_count']} files, tree sha256 {first['tree_sha256']})")
-        record = golden.get(language)
-        current_files = {f["path"]: f["sha256"] for f in first["files"]}
+    with _staging(BUILD) as stage:
+        for language in languages:
+            first = generate(language, stage / "generated" / language, tools)
+            second = generate(language, stage / "verified" / language, tools)
+            if first["tree_sha256"] != second["tree_sha256"]:
+                changed = sorted({f["path"] for f in first["files"]} ^ {f["path"] for f in second["files"]})
+                first_hashes = {f["path"]: f["sha256"] for f in first["files"]}
+                changed += sorted(p for p, h in ((f["path"], f["sha256"]) for f in second["files"]) if first_hashes.get(p) not in (None, h))
+                problems.append(f"{language}: two generations from the same input differ ({', '.join(changed[:20])}); the generator is not deterministic for this input")
+                continue
+            print(f"{language}: deterministic ({first['file_count']} files, tree sha256 {first['tree_sha256']})")
+            record = golden.get(language)
+            current_files = {f["path"]: f["sha256"] for f in first["files"]}
+            if update_golden:
+                golden[language] = {
+                    "tree_sha256": first["tree_sha256"], "spec_version": first["spec_version"], "spec_sha256": first["spec_sha256"],
+                    "file_count": first["file_count"], "files": current_files,
+                }
+            elif record is None:
+                problems.append(f"{language}: generator/golden.json has no entry; run python scripts/generate_clients.py --update-golden and commit it")
+            elif golden_inconsistency(record):
+                problems.append(f"{language}: {golden_inconsistency(record)}")
+            elif record["tree_sha256"] != first["tree_sha256"]:
+                golden_files = record.get("files", {})
+                differing = sorted(p for p in set(golden_files) | set(current_files) if golden_files.get(p) != current_files.get(p))
+                problems.append(
+                    f"{language}: generated tree sha256 {first['tree_sha256']} differs from golden {record['tree_sha256']} "
+                    f"(golden spec {record.get('spec_version')} sha256 {record.get('spec_sha256', '')[:12]}..., current spec {first['spec_version']} sha256 {first['spec_sha256'][:12]}...); "
+                    f"differing files: {', '.join(differing) or 'unknown'}. "
+                    "If the specification, generator configuration, runtime or generator version changed on purpose, run "
+                    "python scripts/generate_clients.py --update-golden and commit generator/golden.json; otherwise the output drifted."
+                )
+        if problems:
+            for problem in problems:
+                print(f"determinism check failed: {problem}", file=sys.stderr)
+            return 1
+        replacements = [(stage / "generated" / language, BUILD / "generated" / language) for language in languages]
         if update_golden:
-            golden[language] = {
-                "tree_sha256": first["tree_sha256"], "spec_version": first["spec_version"], "spec_sha256": first["spec_sha256"],
-                "file_count": first["file_count"], "files": current_files,
-            }
-        elif record is None:
-            problems.append(f"{language}: generator/golden.json has no entry; run python scripts/generate_clients.py --update-golden and commit it")
-        elif golden_inconsistency(record):
-            problems.append(f"{language}: {golden_inconsistency(record)}")
-        elif record["tree_sha256"] != first["tree_sha256"]:
-            golden_files = record.get("files", {})
-            differing = sorted(p for p in set(golden_files) | set(current_files) if golden_files.get(p) != current_files.get(p))
-            problems.append(
-                f"{language}: generated tree sha256 {first['tree_sha256']} differs from golden {record['tree_sha256']} "
-                f"(golden spec {record.get('spec_version')} sha256 {record.get('spec_sha256', '')[:12]}..., current spec {first['spec_version']} sha256 {first['spec_sha256'][:12]}...); "
-                f"differing files: {', '.join(differing) or 'unknown'}. "
-                "If the specification, generator configuration, runtime or generator version changed on purpose, run "
-                "python scripts/generate_clients.py --update-golden and commit generator/golden.json; otherwise the output drifted."
-            )
-        remove_tree(BUILD / "generated-verify" / language)
+            golden = {language: golden[language] for language in sorted(golden)}
+            ready_golden = stage / "golden.json"
+            ready_golden.write_bytes((json.dumps(golden, indent=2) + "\n").encode("utf-8"))
+            replacements.append((ready_golden, GOLDEN))
+        _publish(stage, replacements)
     if update_golden:
-        golden = {language: golden[language] for language in sorted(golden)}
-        GOLDEN.write_bytes((json.dumps(golden, indent=2) + "\n").encode("utf-8"))
         print(f"golden hashes written to {GOLDEN.relative_to(ROOT).as_posix()}")
-    if problems:
-        for problem in problems:
-            print(f"determinism check failed: {problem}", file=sys.stderr)
-        return 1
     if not update_golden:
         print("determinism check passed: byte-identical double generation and golden hashes match for " + ", ".join(languages))
     return 0
@@ -470,8 +574,8 @@ def main() -> int:
             if args.spec != SPEC or args.output_dir != BUILD / "generated":
                 raise PipelineError("--verify and --update-golden always use spec/openapi.yaml and build/generated")
             return verify(languages, tools, args.update_golden)
-        for language in languages:
-            manifest = generate(language, args.output_dir / language, tools, args.spec)
+        manifests = generate_all(languages, args.output_dir, tools, args.spec)
+        for language, manifest in manifests.items():
             print(f"{language}: generated {manifest['file_count']} files into {(args.output_dir / language).as_posix()} (tree sha256 {manifest['tree_sha256']})")
         return 0
     except (PipelineError, OSError) as error:

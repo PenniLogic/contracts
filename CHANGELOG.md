@@ -46,6 +46,15 @@ and dialect constructs rather than admitting runtime pattern exceptions. Astral,
 combining, newline and accepted-pattern family controls preserve prior required
 tests; no accepted codec/global JSON/product schema or publication is changed.
 
+The correction after frozen `86e62e7` prevents the pinned Python generator from
+expanding unbounded examples: bounded schema-valid generation-only witnesses are
+used when possible, with explicit pre-output rejection of unsupported constructive
+minima. Nested/grouped/concatenated/alternative and zero-to-large-upper controls
+retain original runtime constraints. Target sets, companions, manifests and golden
+updates are staged and recoverably promoted; actual downstream failures preserve
+previous output rather than deleting it or publishing a partial set. No generator
+upgrade, heap increase, wire policy or release/adoption claim is made.
+
 Original owning issues: [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16)
 and [#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13).
 

@@ -145,6 +145,13 @@ it is not inferred from one engine accepting the syntax. TypeScript recursive an
 field guards use Unicode matching, with Python/Kotlin wildcard behavior aligned
 to ECMAScript's four line terminators. Whole-value matching and the existing public
 ASCII ID grammar remain required; unsupported dialect constructs fail explicitly.
+The pinned generator's constructive example limits are also checked before target mutation.
+Risky repetitions use a bounded, schema-valid generation-only example without changing runtime
+constraints; unconstructible exact/nested minima fail explicitly. Existing small and zero-minimum
+large-upper patterns still work. Failed downstream generation does not replace earlier valid
+clients: manifests and companions are staged, then the complete requested set is promoted.
+The documented finite construction and recovery rules do not imply giant-input performance,
+extra heap/storage permission, arbitrary schema support or a published provider pin.
 TypeScript checks the original marked composition before dependency conversion,
 so an unknown private Money member name cannot reach the unchanged direct codec's
 dynamic field diagnostic. Emitted composition wire is checked again before a

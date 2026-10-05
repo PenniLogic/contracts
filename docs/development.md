@@ -236,6 +236,27 @@ are refused before any target output is removed or emitted. This intentionally c
 subset does not promise universal regular-expression syntax.
 Groups are limited to 64 levels so accepted syntax does not depend on a host parser's
 recursion limit; repetition counts use canonical nonnegative decimals within signed 32-bit bounds.
+That count range is a syntax limit, not a guarantee that the pinned generator can construct
+every matching example. The Python generator always synthesizes examples with its bundled
+RgxGen (seed 18, unbounded-repeat default 100); source-only/no-docs flags do not disable it.
+The compiler therefore computes bounded constructive work across sequences, alternatives,
+groups and repetitions, without expanding huge strings. Beyond 4,096 work units it supplies
+a generation-only, at-most-4,096-character nonblank witness, independently validated against
+the original schema with the existing AJV. An authored valid blank example may need that
+nonblank witness because the pinned generator ignores blank annotations. No original
+constraint, runtime declaration or source file is changed, and the generation manifest binds
+the effective annotated input and budget. Supplied invalid examples are never substituted
+into success.
+Witness eligibility follows the actual generator's Java-whitespace and literal-`"null"`
+rules, not JavaScript trimming. A valid bounded first enum value already bypasses RgxGen
+and needs no new annotation, including an empty enum value.
+
+If no validated bounded canonical/supplied witness exists, or a nullable child would require
+more than 4,096 mandatory repetitions, preflight refuses unsupported example construction
+before any target output mutation. Exact huge minima and aggregate over-budget concatenated/
+nested minima therefore fail explicitly, while `0..2147483647`, the neighbouring upper bound
+and alternatives with a short valid witness remain supported. This finite construction limit
+is not a wire-length, heap allowance, universal-schema or runtime-regex performance claim.
 
 Every marked string bound counts Unicode code points, including direct generated Kotlin
 fields and native constructor/copy paths. Both TypeScript recursive and field-metadata guards
@@ -257,6 +278,19 @@ to the specification, the generator configuration, the runtime seams, a template
 generator version, run `python scripts/generate_clients.py --update-golden` and commit the result;
 the pull request explains why the output changed. `--verify` lists the differing files when a
 mismatch is unintended.
+
+Every generation builds in a fresh owned sibling staging directory, including runtime,
+companions and the complete manifest. One requested target set is promoted only after every
+target succeeds; downstream generator/companion failures leave previous caller output intact
+and discard staging. Verification double-generates and compares before promoting any client;
+golden updates are committed together with that verified client set, never on a failed run.
+Promotion errors restore prior directories/files. If filesystem restoration itself fails,
+the command fails explicitly and retains backups plus `recovery.json` in the named staging
+directory; it does not delete recoverable prior bytes or advertise partial success.
+These are recoverable process-level filesystem transactions, not a single multi-path atomic
+rename, crash durability or protection against external concurrent writers. Consumers must not
+read outputs while a generation command runs. Source/root directories and linked output
+directories are refused; no persistent Git/global configuration is involved.
 
 ## Breaking-change check
 

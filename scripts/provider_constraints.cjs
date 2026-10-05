@@ -3,6 +3,10 @@
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
 const { resolveLocalRef } = require("../spec/spectral-functions/_shared.js");
+const Ajv = require("ajv/dist/2020").default;
+const addFormats = require("ajv-formats");
+
+const EXAMPLE_BUDGET = 4096;
 
 const ANNOTATIONS = new Set(["title", "description", "default", "example", "examples", "deprecated",
   "x-pennilogic-strict-provider", "x-pennilogic-provider-validator", "x-not-money"]);
@@ -21,6 +25,12 @@ function scalar(value) {
   return typeof value === "string" || typeof value === "boolean" || Number.isSafeInteger(value);
 }
 
+function usableGeneratorExample(value) {
+  // The pinned Python generator ignores Java-whitespace-only examples and the literal "null".
+  return typeof value === "string" && value !== "null" &&
+    /[^\t\n\v\f\r\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]/u.test(value);
+}
+
 function validatePattern(pattern) {
   if (typeof pattern !== "string" || pattern[0] !== "^" || pattern.at(-1) !== "$" ||
       /[^\x20-\x7e]/.test(pattern)) reject("unsupported pattern");
@@ -28,6 +38,12 @@ function validatePattern(pattern) {
   let depth = 0;
   const end = pattern.length - 1;
   const peek = () => pattern[index];
+  const bounded = (count) => Math.min(EXAMPLE_BUDGET + 1, count);
+  const join = (left, right) => left === null || right === null || left.length + right.length > EXAMPLE_BUDGET ? null : left + right;
+  const repeat = (value, count) => count === 0 ? "" : value === null || value.length * count > EXAMPLE_BUDGET ? null : value.repeat(count);
+  const shortest = (values) => values.filter((value) => value !== null)
+    .sort((left, right) => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0))[0] ?? null;
+  const literal = (value) => ({ shortest: value, nonblank: value.trim() ? value : null, work: 1 });
   function escaped(inClass) {
     index += 1;
     const character = peek();
@@ -39,7 +55,8 @@ function validatePattern(pattern) {
   }
   function characterClass() {
     index += 1;
-    if (peek() === "^") index += 1;
+    const negated = peek() === "^";
+    if (negated) index += 1;
     const characters = [];
     while (index < end && peek() !== "]") {
       const character = peek();
@@ -60,51 +77,97 @@ function validatePattern(pattern) {
       if (characters[position].range) previousRangeEnd = position + 1;
     }
     index += 1;
+    const allowed = new Set(characters.filter((value) => !value.range).map((value) => value.character.charCodeAt(0)));
+    for (let position = 1; position + 1 < characters.length; position += 1) {
+      if (characters[position].range) {
+        for (let code = characters[position - 1].character.charCodeAt(0); code <= characters[position + 1].character.charCodeAt(0); code += 1) allowed.add(code);
+      }
+    }
+    if (characters[0].range || characters.at(-1).range) allowed.add(45);
+    const values = Array.from({ length: 95 }, (_, position) => position + 32)
+      .filter((code) => negated ? !allowed.has(code) : allowed.has(code)).map((code) => String.fromCharCode(code));
+    if (!values.length && negated) values.push("\u00a1");
+    return { shortest: values[0] ?? null, nonblank: values.find((value) => value.trim()) ?? null, work: 1 };
   }
-  function repetition() {
-    if (["*", "+", "?"].includes(peek())) { index += 1; return; }
-    if (peek() !== "{") return;
-    const start = ++index;
-    while (index < end && /[0-9,]/.test(peek())) index += 1;
-    const match = /^(0|[1-9][0-9]*)(?:,(0|[1-9][0-9]*)?)?$/.exec(pattern.slice(start, index));
-    if (!match || peek() !== "}") reject("malformed repetition");
-    const lower = Number(match[1]), upper = match[2] === undefined ? lower : Number(match[2]);
-    if (lower > 2147483647 || upper > 2147483647 || lower > upper) reject("unsupported repetition");
-    index += 1;
+  function repetition(value) {
+    let lower, upper;
+    if (["*", "+", "?"].includes(peek())) {
+      const operator = pattern[index++];
+      lower = operator === "+" ? 1 : 0;
+      upper = operator === "?" ? 1 : 100;
+    } else if (peek() === "{") {
+      const start = ++index;
+      while (index < end && /[0-9,]/.test(peek())) index += 1;
+      const text = pattern.slice(start, index);
+      const match = /^(0|[1-9][0-9]*)(?:,(0|[1-9][0-9]*)?)?$/.exec(text);
+      if (!match || peek() !== "}") reject("malformed repetition");
+      lower = Number(match[1]);
+      upper = text.endsWith(",") ? Math.max(lower, 100) : match[2] === undefined ? lower : Number(match[2]);
+      if (lower > 2147483647 || upper > 2147483647 || lower > upper) reject("unsupported repetition");
+      index += 1;
+    } else return value;
+    if (lower > EXAMPLE_BUDGET && value.shortest === "") reject("unsupported example construction");
+    const minimum = repeat(value.shortest, lower);
+    return {
+      shortest: minimum,
+      nonblank: minimum?.trim() ? minimum : upper > 0 ? join(repeat(value.shortest, Math.max(0, lower - 1)), value.nonblank) : null,
+      work: bounded(1 + upper * value.work),
+    };
   }
   function sequence(inGroup) {
     let count = 0;
+    let value = { shortest: "", nonblank: null, work: 0 };
     while (index < end && (!inGroup || (peek() !== ")" && peek() !== "|"))) {
       const character = peek();
-      if (character === "\\") escaped(false);
-      else if (character === "[") characterClass();
+      let atom;
+      if (character === "\\") atom = literal(escaped(false));
+      else if (character === "[") atom = characterClass();
       else if (character === "(") {
         if (++depth > 64) reject("unsupported pattern depth");
         index += 1;
-        if (!sequence(true)) reject("empty pattern group");
+        const alternatives = [sequence(true)];
+        if (!alternatives[0].count) reject("empty pattern group");
         while (peek() === "|") {
           index += 1;
-          if (!sequence(true)) reject("empty pattern alternative");
+          const alternative = sequence(true);
+          if (!alternative.count) reject("empty pattern alternative");
+          alternatives.push(alternative);
         }
         if (peek() !== ")") reject("malformed pattern group");
         index += 1;
         depth -= 1;
+        atom = {
+          shortest: shortest(alternatives.map((item) => item.shortest)),
+          nonblank: shortest(alternatives.map((item) => item.nonblank)),
+          work: bounded(1 + Math.max(...alternatives.map((item) => item.work))),
+        };
       } else if ("^$|)*+?{}]".includes(character)) reject("unsupported pattern syntax");
-      else index += 1;
-      repetition();
+      else { atom = literal(character === "." ? "a" : character); index += 1; }
+      atom = repetition(atom);
+      const minimum = join(value.shortest, atom.shortest);
+      value = {
+        shortest: minimum,
+        nonblank: shortest([join(value.nonblank, atom.shortest), join(value.shortest, atom.nonblank)]),
+        work: bounded(value.work + atom.work),
+      };
       count += 1;
     }
-    return count;
+    return { ...value, count };
   }
-  sequence(false);
+  const value = sequence(false);
   if (index !== end) reject("malformed pattern");
   try { new RegExp(pattern, "u"); } catch { reject("malformed pattern"); }
+  return value;
 }
 
 function compile(document) {
   const schemas = object(document.components?.schemas);
   const compiled = {};
   const active = new Set();
+  const generationExamples = [];
+  const ajv = new Ajv({ strict: false });
+  addFormats(ajv);
+  ajv.addSchema({ components: document.components }, "generation");
   const roots = Object.keys(schemas).filter((name) => schemas[name]["x-pennilogic-strict-provider"] === true).sort();
 
   function component(name) {
@@ -160,9 +223,24 @@ function compile(document) {
         (result.minimum !== undefined && result.exclusiveMaximum !== undefined && result.minimum >= result.exclusiveMaximum) ||
         (result.exclusiveMinimum !== undefined && result.exclusiveMaximum !== undefined && result.exclusiveMinimum >= result.exclusiveMaximum)) reject("contradictory bounds");
     if (source.pattern !== undefined) {
-      validatePattern(source.pattern);
+      const construction = validatePattern(source.pattern);
+      if (construction.work > EXAMPLE_BUDGET || (source.minLength ?? 0) > EXAMPLE_BUDGET) {
+        const validate = ajv.compile({ ...source, components: document.components });
+        if (source.example !== undefined && !validate(source.example)) reject("unsupported example construction");
+        const firstEnum = source.enum?.[0];
+        const boundedEnum = typeof firstEnum === "string" && firstEnum.length <= EXAMPLE_BUDGET && validate(firstEnum);
+        const candidates = [source.example, source.const, ...(source.enum ?? []), construction.nonblank];
+        const candidate = candidates.find((value) => usableGeneratorExample(value) &&
+          value.length <= EXAMPLE_BUDGET && validate(value));
+        if (candidate === undefined && !boundedEnum) reject("unsupported example construction");
+        if (!boundedEnum && source.example !== candidate) {
+          source.example = candidate;
+          generationExamples.push({ pattern: source.pattern, example: candidate });
+        }
+      }
       result.pattern = source.pattern;
     }
+    if (source.pattern === undefined && (source.minLength ?? 0) > EXAMPLE_BUDGET) reject("unsupported example construction");
     if (source.enum !== undefined) {
       if (!Array.isArray(source.enum) || !source.enum.length || !source.enum.every(scalar) ||
           new Set(source.enum.map((value) => JSON.stringify(value))).size !== source.enum.length) reject("malformed enum");
@@ -208,7 +286,9 @@ function compile(document) {
     if (schemas[name].type !== "object" || schemas[name].additionalProperties !== false) reject("open marked provider");
     component(name);
   }
-  return { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
+  const result = { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
+  return generationExamples.length ? { ...result, generation_budget: EXAMPLE_BUDGET,
+    generation_examples: generationExamples, generation_input: document } : result;
 }
 
 module.exports = { compile };
