@@ -12,6 +12,8 @@ whose commit contains, at that tag:
 - `spec/openapi.yaml` with `info.version` equal to the tag version;
 - `spec/currency-registry.v1.json` and `spec/fixtures/*.json` (the hand-written money and instant
   vectors and the seeded `money-roundtrip-generated.v1.json`, ADR-015 §7);
+- `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json` and
+  `spec/import-group.v1.json`, the error/import provider source companions;
 - the committed generator configuration (`generator/*.json`, `generator/openapi-generator-ignore`,
   `generator/templates/`), the runtime seams (`runtime/`) and the generator lock
   (`toolchain/versions.json`: generator version and jar SHA-256; `generator/golden.json`: SHA-256 of
@@ -20,8 +22,14 @@ whose commit contains, at that tag:
 A GitHub Release with the same tag carries, for convenience and audit: the specification
 (`openapi-vX.Y.Z.yaml`), the registry and fixtures, one archive per generated client
 (`pennilogic-contracts-<kotlin|typescript|python>-vX.Y.Z.tar.gz`), `release-manifest.json`
-(specification version and SHA-256, commit, generator name/version/jar SHA-256, per-archive SHA-256
+(specification version and SHA-256, commit, provider-source SHA-256 bindings, generator name/version/jar SHA-256, per-archive SHA-256
 and generated-tree SHA-256) and `SHA256SUMS`.
+
+The local `0.2.0` provider preparation does not authorise publication and is not a released
+client. Original consumer adoption, separate review, native CI/dependency conditions and
+the PenniLogic/infra#22 hold remain pending; see [provider-contracts.md](provider-contracts.md).
+The provider companions ship beside the standalone specification and inside each client
+archive, so a pinned consumer can run the same catalogue/import lint and conformance checks.
 
 A tag or Release is never moved, deleted or re-uploaded with different bytes. A mistake is fixed by
 publishing the next version. Until the owner adds a repository ruleset for `refs/tags/v*` (creation
@@ -147,5 +155,5 @@ relaxing a constraint; adding a response. These pass the check and need a MINOR 
 ## Compatibility of the check itself
 
 Before the first tag exists there is no baseline and the check passes with an explicit notice; the
-first publication (`v0.1.0`) defines the baseline and every later change is compared with the
+first owner-authorised publication defines the baseline and every later change is compared with the
 highest tag. CI fetches all history and tags (`fetch-depth: 0`) so the baseline is always present.

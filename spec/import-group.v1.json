@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "group_version": "1.0.0",
+  "owner": "T-CON-10 (PenniLogic/contracts#13)",
+  "classification": "new_provider_source_not_accepted_or_released",
+  "sources": [
+    {"repository": "PenniLogic/docs", "commit": "a700e639585c61a4610e7b99dbd02b2dab28bdcc", "path": "adr/ADR-015.md", "sha256": "9328236928182e11d1312dbe77a49e61fe5bcb79c6cd2fd62d4045f0d47461ef", "sections": ["4.2", "4.4", "4.6", "4.7", "7", "8"]},
+    {"repository": "PenniLogic/docs", "commit": "a700e639585c61a4610e7b99dbd02b2dab28bdcc", "path": "adr/ADR-016.md", "sha256": "3de637cf26eeebcd58748bbc39565f303a02756de0d3b15370d02bf4e7b1b03d", "sections": ["4.2", "4.3", "4.5", "10"]},
+    {"repository": "PenniLogic/docs", "commit": "a700e639585c61a4610e7b99dbd02b2dab28bdcc", "path": "adr/ADR-018.md", "sha256": "6781fd6f9897508683397e6d659f212041b21fbc36579bb0eb91705410ec2aae", "sections": ["7.3", "7.4", "10"]}
+  ],
+  "schemas": [
+    "ImportGroupVersion", "ImportPreviewRef", "DedupRecordId", "DuplicateLinkId", "InstitutionPresetRef",
+    "ConfidenceBand", "DedupSource", "DedupMatchBasis", "DedupPrecedenceRule", "DedupPrecedence",
+    "DedupOutcomeKind", "DedupWindow", "DedupDecidedBy", "DuplicateSuppressionStatus", "DuplicateLink",
+    "DedupEnrichedField", "DedupEnrichment", "DedupOutcome", "ImportColumnTarget", "ImportColumnIndex",
+    "ImportColumnBinding", "ImportColumnMapping", "ImportSourceRow", "ImportRowCount", "ImportRowAction",
+    "ImportRowReason", "ImportRowError", "ImportPreviewRow", "ImportPreviewCounts", "ImportPreview",
+    "ImportCommitRequest", "ImportCommitAction", "ImportCommitRow", "ImportCommitCounts", "ImportCommitResult"
+  ],
+  "matched_identifier": {
+    "schema": "DedupRecordId",
+    "member": "DedupOutcome.matched_record_id",
+    "override_parameter": "DuplicateOverride",
+    "namespace": "rec_",
+    "generation": "independent CSPRNG UUIDv4 public alias, stable and owner-scoped",
+    "not": ["internal primary key", "account number", "dedupe_key", "raw_event_digest", "source_event_id", "Idempotency-Key"]
+  },
+  "preview": {
+    "namespace": "prv_",
+    "generation": "server CSPRNG UUIDv4, never derived from file or content",
+    "owner_scope": "authenticated principal only; no owner claim in the body",
+    "immutability": "group version, mapping, rows, decisions, counts and expiry are immutable; editing any of them makes a new reference",
+    "expiry": "server-stated absolute expires_at after created_at; no unstated client TTL",
+    "maximum_rows": 10000,
+    "maximum_columns": 256,
+    "commit_requires": "no review rows and a complete effective mapping",
+    "unavailable": "missing, unknown, foreign or expired uncommitted references receive identical import_preview_unavailable; no reference or account state is echoed",
+    "replay": "same preview reference returns its first immutable commit result/body/status, including under a different request key, with no new fact or link; Import-Commit-Replayed header is true",
+    "atomicity": "preview consumption and its stored receipt commit in the same transaction as all financial effects; concurrent commit serialises on principal/preview",
+    "receipt_retention": "at least P30D from first commit; check for a committed receipt before rejecting uncommitted-preview expiry",
+    "idempotency": "both preview and commit require the accepted IdempotencyKey parameter; same key/different preview payload is idempotency_payload_mismatch; request replay mints no candidate or link"
+  },
+  "confidence": {
+    "schema": "ConfidenceBand",
+    "vocabulary": ["high", "low"],
+    "derivation": "ADR-016 applies suggestions above the owning policy threshold and sends lower or unestablished confidence to clarification; these two wire names are chosen by this provider, not claimed to pre-exist",
+    "high": "meets the owning categorisation/source-pair acceptance policy; not consent, not authoritative category assignment and never permission to overwrite USER/RULE/IMPORT precedence",
+    "low": "below threshold or confidence cannot be established; requires clarification before commit",
+    "numeric_threshold_owner": "categorisation/inference and source-pair implementation policies; no invented universal model score or middle threshold"
+  },
+  "source_precedence": ["AA", "IMPORT", "SMS", "NOTIFICATION", "MANUAL_GUESS"],
+  "source_pair_windows": [
+    {"sources": ["AA", "AA"], "window": "P3D"},
+    {"sources": ["AA", "IMPORT"], "window": "P3D"},
+    {"sources": ["AA", "SMS"], "window": "P3D"},
+    {"sources": ["AA", "NOTIFICATION"], "window": "P3D"},
+    {"sources": ["AA", "MANUAL_GUESS"], "window": "P3D"},
+    {"sources": ["IMPORT", "IMPORT"], "window": "P3D"},
+    {"sources": ["IMPORT", "SMS"], "window": "P3D"},
+    {"sources": ["IMPORT", "NOTIFICATION"], "window": "P3D"},
+    {"sources": ["IMPORT", "MANUAL_GUESS"], "window": "P3D"},
+    {"sources": ["SMS", "SMS"], "window": "PT5M"},
+    {"sources": ["SMS", "NOTIFICATION"], "window": "PT5M"},
+    {"sources": ["SMS", "MANUAL_GUESS"], "window": "P1D"},
+    {"sources": ["NOTIFICATION", "NOTIFICATION"], "window": "PT5M"},
+    {"sources": ["NOTIFICATION", "MANUAL_GUESS"], "window": "P1D"},
+    {"sources": ["MANUAL_GUESS", "MANUAL_GUESS"], "window": "P1D"}
+  ],
+  "window_rule": "New T-CON-10 source policy: inclusive maximum absolute occurred_at difference, symmetric per source pair, minutes for SMS/notification and days for import/AA. The server selects candidates and decides matches; clients only show the named window. An operation screen uses its owning contract's structured fields/window, default same_local_day, and never fabricates an ingestion source/confidence.",
+  "dedup_rule": "The matched surviving record and every link/provenance ID are public and same-owner. Exact structured collision is only a candidate. Source precedence never overwrites a user-confirmed value. Both records remain; suppression is visible as suppressed_by_link with can_unmerge=true; posted duplicates use reversing facts, not ledger UPDATE/DELETE. Reversal has restored status, an absolute reversed_at and can_unmerge=false.",
+  "duplicate_suspected_status": 202,
+  "duplicate_screen_rule": "No effect, no created record and no queue acknowledgement. Different fact retains the same persisted key/bytes and uses DuplicateOverride equal to the current same-owner matched ID. Unknown/foreign overrides receive identical 400 validation_rejected. Changed/additional matches return the current outcome again; no match executes as new with no override. Endpoint adoption and operation-specific screen fields/windows remain contracts#1/consumer work.",
+  "mapping_rule": "Only ordinal positions and typed semantic roles cross the component. Detected/override bindings are unique and ascending by column; overrides replace that column; effective targets are unique; unmapped_columns is the exact sorted complement. Complete mapping has amount/currency and occurred_at or value_date. Category labels are resolved under ADR-016 and create no category without explicit confirmation.",
+  "commit_decision_rule": "Commit revalidates create rows; a create may be created, visibly linked/skipped, or rejected. A previewed skip/reject never becomes a new fact. A changed matched surviving-record identifier invalidates the reviewed duplicate decision and needs a new preview/decision, not silent substitution. Row errors name the same source row and an existing mapped column position.",
+  "row_reason_rule": "ready/duplicate/not_selected/invalid/needs_review are content dispositions, not error codes. Actual row rejection uses ImportRowError.problem and the same T-CON-12 code, field, reason and fixed safe message. Preview row errors repeat the row's position; duplicate suppression in commit includes the visible reversible outcome.",
+  "count_metrics": {
+    "preview": {"name": "import.preview.rows", "label": "action", "members": ["create_count", "skip_count", "reject_count", "review_count"], "total": "row_count"},
+    "commit": {"name": "import.commit.rows", "label": "action", "members": ["created_count", "skipped_count", "rejected_count"], "total": "row_count"},
+    "rule": "Derive the response counts and metrics from the same row result collection once; total is collection length and sum of action counts. A replay increments no imported-row metric. Logs contain group version, public correlation and counts/codes, not row contents, IDs, mapping values or monetary values."
+  },
+  "privacy": {
+    "absent_fields": ["raw_statement", "statement_content", "statement_file", "file_content", "raw_row", "row_text", "account_number", "full_account_id", "owner_id", "internal_id", "raw_hash", "message_digest", "raw_event_digest", "dedupe_key", "dedupe_key_version", "merchant_bidx", "external_ref_bidx"],
+    "rule": "Every object is closed; nested maps and arbitrary strings are not escape hatches. No raw row/file/account values, provider text or raw-derived/server fingerprints cross this group."
+  }
+}

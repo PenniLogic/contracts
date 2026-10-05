@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "group_version": "1.0.0",
+  "description": "Synthetic wire receipts only. IDs are deliberately recognisable UUIDv4 fixtures, not live records or proof of server randomness/ownership. Replay verification compares immutable receipts; no backend/import/dedup effect is executed.",
+  "request": {"group_version": "1.0.0", "preview_ref": "prv_00000000-0000-4000-8000-000000000001"},
+  "screen": {
+    "group_version": "1.0.0",
+    "outcome": "duplicate_suspected",
+    "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+    "match_basis": "operation_screen",
+    "precedence": {"rule": "operation_screen", "user_confirmed_preserved": true},
+    "window": "same_local_day"
+  },
+  "suspected": {
+    "group_version": "1.0.0",
+    "outcome": "duplicate_suspected",
+    "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+    "match_basis": "external_reference",
+    "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "IMPORT", "compared_source": "AA", "surviving_source": "AA"},
+    "confidence_band": "high",
+    "window": "P3D"
+  },
+  "linked": {
+    "group_version": "1.0.0",
+    "outcome": "linked",
+    "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+    "match_basis": "external_reference",
+    "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "IMPORT", "compared_source": "AA", "surviving_source": "AA"},
+    "confidence_band": "high",
+    "window": "P3D",
+    "link": {"link_id": "dln_00000000-0000-4000-8000-000000000020", "suppressed_record_id": "rec_00000000-0000-4000-8000-000000000011", "status": "suppressed_by_link", "decided_by": "system", "can_unmerge": true},
+    "enrichment": [{"field": "description", "source": "AA", "source_record_id": "rec_00000000-0000-4000-8000-000000000010"}]
+  },
+  "reversed": {
+    "group_version": "1.0.0",
+    "outcome": "link_reversed",
+    "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+    "match_basis": "external_reference",
+    "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "IMPORT", "compared_source": "AA", "surviving_source": "AA"},
+    "confidence_band": "high",
+    "window": "P3D",
+    "link": {"link_id": "dln_00000000-0000-4000-8000-000000000020", "suppressed_record_id": "rec_00000000-0000-4000-8000-000000000011", "status": "restored", "decided_by": "system", "can_unmerge": false, "reversed_at": "2026-10-02T00:00:00.000Z"},
+    "enrichment": []
+  },
+  "review": {
+    "group_version": "1.0.0",
+    "outcome": "needs_review",
+    "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+    "match_basis": "merchant_similarity",
+    "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "NOTIFICATION", "compared_source": "SMS", "surviving_source": "SMS"},
+    "confidence_band": "low",
+    "window": "PT5M"
+  },
+  "clear": {"group_version": "1.0.0", "outcome": "clear"},
+  "preview": {
+    "group_version": "1.0.0",
+    "preview_ref": "prv_00000000-0000-4000-8000-000000000001",
+    "created_at": "2026-10-01T00:00:00.000Z",
+    "expires_at": "2026-10-01T01:00:00.000Z",
+    "correlation_id": "cor_00000000-0000-4000-8000-000000000001",
+    "mapping": {
+      "column_count": 4,
+      "institution_preset": "pre_00000000-0000-4000-8000-000000000001",
+      "detected_columns": [{"column_index": 1, "target": "amount"}, {"column_index": 2, "target": "currency"}, {"column_index": 3, "target": "occurred_at"}],
+      "user_overrides": [{"column_index": 3, "target": "value_date"}],
+      "unmapped_columns": [4]
+    },
+    "rows": [
+      {"source_row": 2, "action": "create", "reason": "ready", "confidence_band": "high"},
+      {
+        "source_row": 3, "action": "skip", "reason": "duplicate",
+        "dedup_outcome": {
+          "group_version": "1.0.0", "outcome": "duplicate_suspected",
+          "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+          "match_basis": "external_reference",
+          "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "IMPORT", "compared_source": "AA", "surviving_source": "AA"},
+          "confidence_band": "high", "window": "P3D"
+        }
+      },
+      {
+        "source_row": 4, "action": "reject", "reason": "invalid",
+        "row_error": {
+          "source_row": 4, "column_index": 2,
+          "problem": {
+            "type": "urn:pennilogic:problem:validation_rejected", "title": "Validation rejected", "status": 422,
+            "detail": "Review the indicated field.", "code": "validation_rejected",
+            "correlation_id": "cor_00000000-0000-4000-8000-000000000001", "field": "currency", "reason": "currency_not_admitted"
+          }
+        }
+      }
+    ],
+    "counts": {"row_count": 3, "create_count": 1, "skip_count": 1, "reject_count": 1, "review_count": 0}
+  },
+  "result": {
+    "group_version": "1.0.0",
+    "preview_ref": "prv_00000000-0000-4000-8000-000000000001",
+    "completed_at": "2026-10-01T00:30:00.000Z",
+    "correlation_id": "cor_00000000-0000-4000-8000-000000000002",
+    "rows": [
+      {"source_row": 2, "action": "created", "reason": "ready", "created_record_id": "rec_00000000-0000-4000-8000-000000000012"},
+      {
+        "source_row": 3, "action": "skipped", "reason": "duplicate",
+        "dedup_outcome": {
+          "group_version": "1.0.0", "outcome": "linked",
+          "matched_record_id": "rec_00000000-0000-4000-8000-000000000010",
+          "match_basis": "external_reference",
+          "precedence": {"rule": "source_order", "user_confirmed_preserved": true, "incoming_source": "IMPORT", "compared_source": "AA", "surviving_source": "AA"},
+          "confidence_band": "high", "window": "P3D",
+          "link": {"link_id": "dln_00000000-0000-4000-8000-000000000020", "suppressed_record_id": "rec_00000000-0000-4000-8000-000000000011", "status": "suppressed_by_link", "decided_by": "system", "can_unmerge": true},
+          "enrichment": [{"field": "description", "source": "AA", "source_record_id": "rec_00000000-0000-4000-8000-000000000010"}]
+        }
+      },
+      {
+        "source_row": 4, "action": "rejected", "reason": "invalid",
+        "row_error": {
+          "source_row": 4, "column_index": 2,
+          "problem": {
+            "type": "urn:pennilogic:problem:validation_rejected", "title": "Validation rejected", "status": 422,
+            "detail": "Review the indicated field.", "code": "validation_rejected",
+            "correlation_id": "cor_00000000-0000-4000-8000-000000000001", "field": "currency", "reason": "currency_not_admitted"
+          }
+        }
+      }
+    ],
+    "counts": {"row_count": 3, "created_count": 1, "skipped_count": 1, "rejected_count": 1}
+  },
+  "override_rejection": {
+    "type": "urn:pennilogic:problem:validation_rejected", "title": "Validation rejected", "status": 400,
+    "detail": "Review the indicated field.", "code": "validation_rejected",
+    "correlation_id": "cor_00000000-0000-4000-8000-000000000001", "field": "duplicate_override", "reason": "not_available"
+  },
+  "invalid": [
+    {"name": "commit requires preview", "target": "request", "schema_rejected": true, "path": ["preview_ref"], "remove": true},
+    {"name": "commit forbids upload", "target": "request", "schema_rejected": true, "path": ["statement_file"], "value": "SYNTHETIC_FILE_CONTENT"},
+    {"name": "commit cannot claim owner", "target": "request", "schema_rejected": true, "path": ["owner_id"], "value": "SYNTHETIC_OWNER"},
+    {"name": "preview digest reference", "target": "request", "schema_rejected": true, "path": ["preview_ref"], "value": "SYNTHETIC_DIGEST"},
+    {"name": "preview UUIDv5", "target": "request", "schema_rejected": true, "path": ["preview_ref"], "value": "prv_00000000-0000-5000-8000-000000000001"},
+    {"name": "wrong group version", "target": "request", "schema_rejected": true, "path": ["group_version"], "value": "2.0.0"},
+    {"name": "unknown confidence", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "confidence_band"], "value": "medium"},
+    {"name": "numeric confidence", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "confidence_band"], "value": 85},
+    {"name": "low confidence auto-create", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "confidence_band"], "value": "low"},
+    {"name": "action reason mismatch", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "reason"], "value": "duplicate"},
+    {"name": "missing row error", "target": "preview", "schema_rejected": true, "path": ["rows", 2, "row_error"], "remove": true},
+    {"name": "raw row string", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "raw_row"], "value": "SYNTHETIC_STATEMENT_ROW"},
+    {"name": "full account identifier", "target": "preview", "schema_rejected": true, "path": ["rows", 0, "account_number"], "value": "SYNTHETIC_ACCOUNT_0000"},
+    {"name": "raw column heading", "target": "preview", "schema_rejected": true, "path": ["mapping", "detected_columns", 0, "heading"], "value": "SYNTHETIC_ACCOUNT_0000"},
+    {"name": "empty-name raw field", "target": "preview", "schema_rejected": true, "path": [""], "value": "SYNTHETIC_STATEMENT_ROW"},
+    {"name": "column outside bound", "target": "preview", "schema_rejected": true, "path": ["mapping", "column_count"], "value": 257},
+    {"name": "row error echoes money", "target": "preview", "schema_rejected": true, "path": ["rows", 2, "row_error", "problem", "detail"], "value": "SYNTHETIC_AMOUNT 12.34"},
+    {"name": "unknown row error vocabulary", "target": "preview", "schema_rejected": true, "path": ["rows", 2, "row_error", "problem", "code"], "value": "local_import_error"},
+    {"name": "private matched record id", "target": "suspected", "schema_rejected": true, "path": ["matched_record_id"], "value": "internal-record-42"},
+    {"name": "raw dedupe key", "target": "suspected", "schema_rejected": true, "path": ["dedupe_key"], "value": "SYNTHETIC_SERVER_DIGEST"},
+    {"name": "missing match explanation", "target": "suspected", "schema_rejected": true, "path": ["match_basis"], "remove": true},
+    {"name": "user confirmation overwritten", "target": "suspected", "schema_rejected": true, "path": ["precedence", "user_confirmed_preserved"], "value": false},
+    {"name": "screen fabricates confidence", "target": "screen", "schema_rejected": true, "path": ["confidence_band"], "value": "high"},
+    {"name": "linked missing link", "target": "linked", "schema_rejected": true, "path": ["link"], "remove": true},
+    {"name": "invisible suppression", "target": "linked", "schema_rejected": true, "path": ["link", "can_unmerge"], "value": false},
+    {"name": "low confidence system link", "target": "linked", "schema_rejected": true, "path": ["confidence_band"], "value": "low"},
+    {"name": "structured collision cannot auto-link", "target": "linked", "schema_rejected": true, "path": ["match_basis"], "value": "structured_candidate"},
+    {"name": "raw enrichment content", "target": "linked", "schema_rejected": true, "path": ["enrichment", 0, "value"], "value": "SYNTHETIC_STATEMENT_ROW"},
+    {"name": "ledger amount enrichment", "target": "linked", "schema_rejected": true, "path": ["enrichment", 0, "field"], "value": "amount"},
+    {"name": "reversal without timestamp", "target": "reversed", "schema_rejected": true, "path": ["link", "reversed_at"], "remove": true},
+    {"name": "created without record", "target": "result", "schema_rejected": true, "path": ["rows", 0, "created_record_id"], "remove": true},
+    {"name": "commit silent duplicate skip", "target": "result", "schema_rejected": true, "path": ["rows", 1, "dedup_outcome"], "remove": true},
+    {"name": "counts disagree with rows", "target": "preview", "schema_rejected": false, "path": ["counts", "create_count"], "value": 2},
+    {"name": "commit counts disagree", "target": "result", "schema_rejected": false, "path": ["counts", "created_count"], "value": 2},
+    {"name": "duplicate source row positions", "target": "preview", "schema_rejected": false, "path": ["rows", 1, "source_row"], "value": 2},
+    {"name": "incorrect unmapped complement", "target": "preview", "schema_rejected": false, "path": ["mapping", "unmapped_columns"], "value": []},
+    {"name": "effective target conflict", "target": "preview", "schema_rejected": false, "path": ["mapping", "user_overrides", 0, "target"], "value": "currency"},
+    {"name": "wrong source-pair window", "target": "suspected", "schema_rejected": false, "path": ["window"], "value": "PT5M"},
+    {"name": "source precedence downgrade", "target": "suspected", "schema_rejected": false, "path": ["precedence", "surviving_source"], "value": "IMPORT"},
+    {"name": "self suppression", "target": "linked", "schema_rejected": false, "path": ["link", "suppressed_record_id"], "value": "rec_00000000-0000-4000-8000-000000000010"},
+    {"name": "row error position mismatch", "target": "preview", "schema_rejected": false, "path": ["rows", 2, "row_error", "source_row"], "value": 5},
+    {"name": "row error column outside mapping", "target": "preview", "schema_rejected": false, "path": ["rows", 2, "row_error", "column_index"], "value": 5},
+    {"name": "expiry before creation", "target": "preview", "schema_rejected": false, "path": ["expires_at"], "value": "2026-09-30T23:59:59.999Z"}
+  ],
+  "replay_changes": [
+    {"name": "new fact id on replay", "path": ["rows", 0, "created_record_id"], "value": "rec_00000000-0000-4000-8000-000000000099"},
+    {"name": "new completion on replay", "path": ["completed_at"], "value": "2026-10-01T00:30:00.001Z"},
+    {"name": "new correlation on replay", "path": ["correlation_id"], "value": "cor_00000000-0000-4000-8000-000000000099"},
+    {"name": "new preview on replay", "path": ["preview_ref"], "value": "prv_00000000-0000-4000-8000-000000000099"}
+  ],
+  "decision_changes": [
+    {"name": "not-selected row cannot become created", "preview_change": {"path": ["rows", 0], "value": {"source_row": 2, "action": "skip", "reason": "not_selected"}}, "counts_change": {"path": ["counts"], "value": {"row_count": 3, "create_count": 0, "skip_count": 2, "reject_count": 1, "review_count": 0}}},
+    {"name": "changed matched record needs fresh preview", "result_change": {"path": ["rows", 1, "dedup_outcome", "matched_record_id"], "value": "rec_00000000-0000-4000-8000-000000000099"}}
+  ]
+}

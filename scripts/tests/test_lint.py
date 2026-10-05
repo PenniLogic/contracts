@@ -41,13 +41,13 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertRegex(output, r"\[(parser|oas3-schema)\]")
 
     def test_missing_info_version_fails_schema_rule(self) -> None:
-        output = self.lint(replace_once(spec_text(), "  version: 0.1.0\n", ""))
+        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", ""))
         self.assertIn("[oas3-schema]", output)
 
     def test_non_semver_version(self) -> None:
-        output = self.lint(replace_once(spec_text(), "  version: 0.1.0\n", "  version: '1.0'\n"))
+        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", "  version: '1.0'\n"))
         self.assertIn("[pl-info-version-semver]", output)
-        output = self.lint(replace_once(spec_text(), "  version: 0.1.0\n", "  version: 1.0\n"))
+        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", "  version: 1.0\n"))
         self.assertIn("[oas3-schema]", output)  # a YAML float is not a string version either
 
     def test_money_binding_shape_drift(self) -> None:
@@ -126,7 +126,9 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_json_number_and_float_formats_refused(self) -> None:
-        text = replace_once(spec_text(), "        status:\n          type: integer\n", "        status:\n          type: number\n          format: double\n")
+        anchor = ("        status:\n          type: integer\n          minimum: 400\n          maximum: 599\n"
+                  "          description: HTTP status code of this response.\n")
+        text = replace_once(spec_text(), anchor, anchor.replace("type: integer\n", "type: number\n          format: double\n"))
         output = self.lint(text)
         self.assertEqual(output.count("[pl-no-json-number]"), 2)
         self.assertIn("type: number is refused", output)

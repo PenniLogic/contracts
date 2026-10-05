@@ -1,3 +1,7 @@
+{{#vendorExtensions.x-pennilogic-strict-provider}}
+{{>model_provider}}
+{{/vendorExtensions.x-pennilogic-strict-provider}}
+{{^vendorExtensions.x-pennilogic-strict-provider}}
 from __future__ import annotations
 import pprint
 import re  # noqa: F401
@@ -669,3 +673,4 @@ setattr(
 {{/vendorExtensions.x-py-public-name-differs-from-storage}}
 {{/vars}}
 {{/vendorExtensions.x-py-has-public-name-properties}}
+{{/vendorExtensions.x-pennilogic-strict-provider}}

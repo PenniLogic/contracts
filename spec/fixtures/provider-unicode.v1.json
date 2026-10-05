@@ -1,0 +1,40 @@
+{
+  "description": "Synthetic scratch-generated Unicode and portable-pattern controls. No product data or endpoint.",
+  "positive": [
+    {"name": "one BMP code point", "symbol": "a", "unit": "a", "wild": ["a"], "not_a": ["b"], "literal": ["a.b"], "choice": "ab", "bounded": "a", "unbounded": "aa", "empty": "", "slash": "x/y", "brackets": "[a]", "backslash": "a\\b", "anchors": "^$", "class_dot": ".", "hyphen": "-", "range_text": "A_-9", "double": "ab", "zero_repeat": ""},
+    {"name": "one astral code point", "symbol": "\ud83e\uddea", "unit": "\ud83e\uddea", "wild": ["\ud83e\uddea"], "not_a": ["\ud83e\uddea"], "literal": ["a.b"], "choice": "1234", "bounded": "aaa", "unbounded": "aaaa", "empty": "", "slash": "x/y", "brackets": "[a]", "backslash": "a\\b", "anchors": "^$", "class_dot": ".", "hyphen": "-", "range_text": "+A0_-", "double": "\ud83e\uddea\ud83e\uddea", "zero_repeat": "aa"},
+    {"name": "NEL is not an ECMAScript dot terminator", "symbol": "\u0085", "unit": "\u0085", "wild": ["\u0085"], "not_a": ["\u0085"], "literal": ["a.b"], "choice": "abc", "bounded": "aa", "unbounded": "aa", "empty": "", "slash": "x/y", "brackets": "[a]", "backslash": "a\\b", "anchors": "^$", "class_dot": ".", "hyphen": "-", "range_text": "Z_-", "double": "\u0085a", "zero_repeat": "a"},
+    {"name": "negated class includes line terminators", "symbol": "a", "unit": "b", "wild": ["b"], "not_a": ["\n", "\r", "\u2028", "\u2029"], "literal": ["a.b"], "choice": "12", "bounded": "aa", "unbounded": "aaa", "empty": "", "slash": "x/y", "brackets": "[a]", "backslash": "a\\b", "anchors": "^$", "class_dot": ".", "hyphen": "-", "range_text": "az+-", "double": "e\u0301", "zero_repeat": "a"}
+  ],
+  "negative": [
+    {"name": "combining sequence is two code points", "field": "symbol", "value": "e\u0301", "keyword": "maxLength"},
+    {"name": "empty direct string", "field": "symbol", "value": "", "keyword": "minLength"},
+    {"name": "two astral code points", "field": "symbol", "value": "\ud83e\uddea\ud83e\uddea", "keyword": "maxLength"},
+    {"name": "direct LF wildcard", "field": "unit", "value": "\n", "keyword": "pattern"},
+    {"name": "direct CR wildcard", "field": "unit", "value": "\r", "keyword": "pattern"},
+    {"name": "direct LS wildcard", "field": "unit", "value": "\u2028", "keyword": "pattern"},
+    {"name": "direct PS wildcard", "field": "unit", "value": "\u2029", "keyword": "pattern"},
+    {"name": "nested LF wildcard", "field": "wild", "value": ["\n"], "keyword": "pattern"},
+    {"name": "nested CR wildcard", "field": "wild", "value": ["\r"], "keyword": "pattern"},
+    {"name": "nested LS wildcard", "field": "wild", "value": ["\u2028"], "keyword": "pattern"},
+    {"name": "nested PS wildcard", "field": "wild", "value": ["\u2029"], "keyword": "pattern"},
+    {"name": "negated class excluded literal", "field": "not_a", "value": ["a"], "keyword": "pattern"},
+    {"name": "literal escaped dot differs from wildcard", "field": "literal", "value": ["a-b"], "keyword": "pattern"},
+    {"name": "grouped choice lower bound", "field": "choice", "value": "1", "keyword": "pattern"},
+    {"name": "grouped choice letter upper bound", "field": "choice", "value": "abcd", "keyword": "pattern"},
+    {"name": "grouped choice digit upper bound", "field": "choice", "value": "12345", "keyword": "pattern"},
+    {"name": "bounded quantifier lower", "field": "bounded", "value": "", "keyword": "pattern"},
+    {"name": "bounded quantifier upper", "field": "bounded", "value": "aaaa", "keyword": "pattern"},
+    {"name": "unbounded quantifier lower", "field": "unbounded", "value": "a", "keyword": "pattern"},
+    {"name": "zero repetition upper", "field": "zero_repeat", "value": "aaa", "keyword": "pattern"},
+    {"name": "empty string zero upper length", "field": "empty", "value": "\n", "keyword": "maxLength"},
+    {"name": "escaped literal brackets", "field": "brackets", "value": "a", "keyword": "pattern"},
+    {"name": "escaped literal backslash", "field": "backslash", "value": "ab", "keyword": "pattern"},
+    {"name": "escaped literal anchors", "field": "anchors", "value": "", "keyword": "pattern"},
+    {"name": "dot inside class is literal", "field": "class_dot", "value": "a", "keyword": "pattern"},
+    {"name": "fixed pattern is whole value", "field": "slash", "value": "x/yz", "keyword": "pattern"},
+    {"name": "range excludes nonASCII", "field": "range_text", "value": "\u00e9", "keyword": "pattern"},
+    {"name": "two-dot astral bound", "field": "double", "value": "\ud83e\uddea", "keyword": "minLength"},
+    {"name": "three-dot string exceeds bound", "field": "double", "value": "abc", "keyword": "maxLength"}
+  ]
+}

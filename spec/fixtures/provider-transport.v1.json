@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic ordinary generated-model and transport controls. Samples reference the existing shared fixtures, not substitute schemas. All closed new object providers are covered; no real service, endpoint, message or record is involved.",
+  "models": [
+    {"schema": "AiRefusal", "fixture": "error-provider.v1.json", "path": ["refusal"]},
+    {"schema": "ServiceProblemDetail", "fixture": "import-provider.v1.json", "path": ["override_rejection"]},
+    {"schema": "ValidationIssue", "fixture": "error-provider.v1.json", "path": ["examples", 13, "validation_errors", 0]},
+    {"schema": "Allowance", "fixture": "error-provider.v1.json", "path": ["examples", 8, "allowance"]},
+    {"schema": "EntitlementDenial", "fixture": "error-provider.v1.json", "path": ["examples", 1, "entitlement"]},
+    {"schema": "DedupPrecedence", "fixture": "import-provider.v1.json", "path": ["suspected", "precedence"]},
+    {"schema": "DuplicateLink", "fixture": "import-provider.v1.json", "path": ["linked", "link"]},
+    {"schema": "DedupEnrichment", "fixture": "import-provider.v1.json", "path": ["linked", "enrichment", 0]},
+    {"schema": "DedupOutcome", "fixture": "import-provider.v1.json", "path": ["linked"]},
+    {"schema": "ImportColumnBinding", "fixture": "import-provider.v1.json", "path": ["preview", "mapping", "detected_columns", 0]},
+    {"schema": "ImportColumnMapping", "fixture": "import-provider.v1.json", "path": ["preview", "mapping"]},
+    {"schema": "ImportRowError", "fixture": "import-provider.v1.json", "path": ["preview", "rows", 2, "row_error"]},
+    {"schema": "ImportPreviewRow", "fixture": "import-provider.v1.json", "path": ["preview", "rows", 0]},
+    {"schema": "ImportPreviewCounts", "fixture": "import-provider.v1.json", "path": ["preview", "counts"]},
+    {"schema": "ImportPreview", "fixture": "import-provider.v1.json", "path": ["preview"]},
+    {"schema": "ImportCommitRequest", "fixture": "import-provider.v1.json", "path": ["request"]},
+    {"schema": "ImportCommitRow", "fixture": "import-provider.v1.json", "path": ["result", "rows", 0]},
+    {"schema": "ImportCommitCounts", "fixture": "import-provider.v1.json", "path": ["result", "counts"]},
+    {"schema": "ImportCommitResult", "fixture": "import-provider.v1.json", "path": ["result"]}
+  ],
+  "array_controls": [
+    {
+      "schema": "ServiceProblemDetail", "fixture": "allocation-refusal.v1.json", "path": ["problem"],
+      "set": {
+        "direction": "shortfall",
+        "validation_errors": [{"field": "allocation", "reason": "allocation_sum_mismatch", "direction": "shortfall"}]
+      }
+    }
+  ],
+  "refusal_negatives": [
+    {"name": "extra private provider content", "set": {"provider_detail": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "extra private member name", "set": {"PRIVATE_SYNTHETIC_CANARY": "synthetic"}},
+    {"name": "private correlation", "set": {"correlation_id": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "wrong public namespace", "set": {"correlation_id": "rec_00000000-0000-4000-8000-000000000001"}},
+    {"name": "content-based UUID version", "set": {"correlation_id": "cor_00000000-0000-5000-8000-000000000001"}},
+    {"name": "wrong UUID variant", "set": {"correlation_id": "cor_00000000-0000-4000-0000-000000000001"}},
+    {"name": "correlation trailing newline", "set": {"correlation_id": "cor_00000000-0000-4000-8000-000000000001\n"}},
+    {"name": "correlation number", "set": {"correlation_id": 1}},
+    {"name": "correlation null", "set": {"correlation_id": null}},
+    {"name": "unsafe refusal message", "set": {"message": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "unsafe refusal code", "set": {"code": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "message boolean", "set": {"message": true}},
+    {"name": "missing correlation", "remove": ["correlation_id"]},
+    {"name": "missing fixed message", "remove": ["message"]},
+    {"name": "missing typed code", "remove": ["code"]}
+  ]
+}

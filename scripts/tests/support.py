@@ -15,6 +15,7 @@ SPEC = ROOT / "spec" / "openapi.yaml"
 REGISTRY = ROOT / "spec" / "currency-registry.v1.json"
 
 sys.path.insert(0, str(SCRIPTS))
+from pl_contracts import PROVIDER_SOURCE_NAMES  # noqa: E402
 
 PROBE_PATHS = """security:
   - probe: []
@@ -93,6 +94,8 @@ class SpecDir:
     def __init__(self) -> None:
         self.path = Path(tempfile.mkdtemp(prefix="pl-spec-"))
         shutil.copyfile(REGISTRY, self.path / "currency-registry.v1.json")
+        for name in PROVIDER_SOURCE_NAMES:
+            shutil.copyfile(ROOT / "spec" / name, self.path / name)
 
     def write(self, text: str, name: str = "openapi.yaml") -> Path:
         target = self.path / name

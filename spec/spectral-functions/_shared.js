@@ -56,6 +56,12 @@ function mentionsMoney(value) {
   return JSON.stringify(value).includes(`"${MONEY_REF}"`);
 }
 
+function resolveLocalRef(ref, document) {
+  if (typeof ref !== "string" || !ref.startsWith("#/")) return undefined;
+  return ref.slice(2).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), document);
+}
+
 /**
  * True when `value` references Money directly or through any chain of local `$ref`s in the
  * unresolved document (components.schemas, requestBodies, responses, parameters, headers), walking
@@ -68,8 +74,7 @@ function referencesMoney(value, document, visited = new Set()) {
     if (value.$ref === MONEY_REF) return true;
     if (!value.$ref.startsWith("#/") || visited.has(value.$ref)) return false;
     visited.add(value.$ref);
-    const target = value.$ref.slice(2).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
-      .reduce((node, part) => (node && typeof node === "object" ? node[part] : undefined), document);
+    const target = resolveLocalRef(value.$ref, document);
     return referencesMoney(target, document, visited);
   }
   return Object.values(value).some((item) => referencesMoney(item, document, visited));
@@ -81,5 +86,5 @@ function pathString(pathParts) {
 
 module.exports = {
   MONEY_REF, AMOUNT_GRAMMAR, HTTP_METHODS, SAFE_METHODS, MUTATING_METHODS, EXEMPTIONS,
-  registry, isMoneyRef, isMoneyName, mentionsMoney, referencesMoney, pathString,
+  registry, isMoneyRef, isMoneyName, mentionsMoney, referencesMoney, resolveLocalRef, pathString,
 };
