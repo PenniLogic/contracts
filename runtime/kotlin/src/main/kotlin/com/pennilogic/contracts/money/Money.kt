@@ -63,7 +63,9 @@ class Money private constructor(val minorUnits: Long, val currency: String) : Co
 
     override fun equals(other: Any?): Boolean = other is Money && other.currency == currency && other.minorUnits == minorUnits
 
-    override fun hashCode(): Int = 31 * minorUnits.hashCode() + currency.hashCode()
+    // ISO currency codes have distinct low 16-bit String hashes; equal hashes must stay within one currency
+    // because JVM hash-tree bins can call compareTo, which deliberately rejects mixed currencies.
+    override fun hashCode(): Int = (currency.hashCode() shl 16) or (minorUnits.hashCode() and 0xffff)
 
     override fun toString(): String = toWire().let { "${it.amount} ${it.currency}" }
 
