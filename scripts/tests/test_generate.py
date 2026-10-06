@@ -237,6 +237,12 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         with zipfile.ZipFile(jar) as archive:
             return archive.read(name).decode("utf-8")
 
+    def test_every_template_uses_exact_lf_bytes_before_native_generation(self) -> None:
+        for path in (ROOT / "generator" / "templates").rglob("*.mustache"):
+            with self.subTest(template=path.relative_to(ROOT)):
+                self.assertNotIn(b"\r", path.read_bytes(),
+                                 "native templates must match committed LF bytes before golden generation")
+
     def replace_once(self, text: str, old: str, new: str) -> str:
         self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
         return text.replace(old, new)
