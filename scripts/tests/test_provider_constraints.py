@@ -191,7 +191,10 @@ class ConstraintCompilationTest(unittest.TestCase):
             self.assertEqual(projection[name].get("required", []), schemas[name].get("required", []))
             self.assertTrue(projection[name]["x-pennilogic-strict-provider"])
             self.assertFalse(projection[name]["additionalProperties"])
-            self.assertNotIn("allOf", projection[name])
+            if "allOf" in projection[name]:
+                for member in projection[name]["allOf"]:
+                    self.assertEqual(set(member), {"properties"})
+                    self.assertIn(member, schemas[name]["allOf"])
             self.assertTrue(any(keyword in json.dumps(schemas[name]) for keyword in
                                 ('"allOf"', '"anyOf"', '"oneOf"', '"if"', '"not"', '"const"')))
         self.assertNotIn("egress_denial_reason", projection["OperationProblemDetail"]["required"])
@@ -203,6 +206,64 @@ class ConstraintCompilationTest(unittest.TestCase):
         self.assertTrue(schemas["DedupPrecedence"]["properties"]["user_confirmed_preserved"]["const"])
         self.assertEqual(projection["DedupPrecedence"]["properties"]["user_confirmed_preserved"]["type"], "boolean")
         self.assertNotIn("const", projection["DedupPrecedence"]["properties"]["user_confirmed_preserved"])
+
+    def test_projection_preserves_unconditional_field_order_and_inline_helpers_without_branch_requiredness(self) -> None:
+        model = """    LayoutPayload:
+      type: object
+      properties:
+        choice: {type: string, enum: [first, second]}
+    LayoutProbe:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [position, payload]
+      properties:
+        position: {type: integer}
+        note: {type: string}
+        payload: {$ref: '#/components/schemas/LayoutPayload'}
+      allOf:
+        - properties:
+            payload:
+              properties:
+                choice: {enum: [first]}
+        - if:
+            properties: {position: {const: 1}}
+            required: [position]
+          then:
+            required: [note]
+"""
+        source = self.spec.write(replace_once(spec_text(), "  schemas:\n", "  schemas:\n" + model))
+        result = subprocess.run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(source)],
+                                cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        compiled = json.loads(result.stdout)
+        projected = compiled["generation_input"]["components"]["schemas"]["LayoutProbe"]
+        self.assertEqual(list(projected["properties"]), ["payload", "position", "note"])
+        self.assertEqual(projected["required"], ["position", "payload"])
+        self.assertEqual(projected["properties"]["payload"], {"$ref": "#/components/schemas/LayoutPayload"})
+        self.assertEqual(projected["allOf"], [{"properties": {"payload": {"properties": {"choice": {"enum": ["first"]}}}}}])
+        self.assertEqual(len(compiled["schemas"]["LayoutProbe"]["allOf"]), 2)
+        self.assertEqual(compiled["schemas"]["LayoutProbe"]["allOf"][1]["then"], {"required": ["note"]})
+        for constraint in (
+            {"enum": ["first"], "maxLength": 10},
+            {"anyOf": [{"enum": ["first"]}, {"enum": ["second"]}]},
+            {"not": {"enum": ["second"]}},
+            {"$ref": "#/components/schemas/ValidationReason"},
+        ):
+            with self.subTest(deeper_refinement=constraint):
+                altered = replace_once(model, "choice: {enum: [first]}", "choice: " + json.dumps(constraint))
+                source = self.spec.write(replace_once(spec_text(), "  schemas:\n", "  schemas:\n" + altered))
+                result = subprocess.run(
+                    [node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(source)],
+                    cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                compiled = json.loads(result.stdout)
+                projected = compiled["generation_input"]["components"]["schemas"]["LayoutProbe"]
+                self.assertNotIn("allOf", projected)
+                self.assertEqual(list(projected["properties"]), ["payload", "position", "note"])
+                self.assertEqual(projected["required"], ["position", "payload"])
+                self.assertEqual(len(compiled["schemas"]["LayoutProbe"]["allOf"]), 2)
 
 
 if __name__ == "__main__":

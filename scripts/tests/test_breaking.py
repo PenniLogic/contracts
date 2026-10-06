@@ -376,7 +376,7 @@ class EnumResponseRegressionTest(unittest.TestCase):
             findings, _ = cbc.compare(base, specs.write(narrowed, "narrowed.yaml"), tools["oasdiff"])
             self.assertTrue(findings, declaration)
 
-    def test_actual_accepted_enum_description_delta_is_proven_but_new_safe_branch_stays_unproved(self) -> None:
+    def test_actual_accepted_enum_delta_and_source_backed_branch_preserve_diff_only_red_history(self) -> None:
         specs = SpecDir()
         self.addCleanup(specs.cleanup)
         accepted = subprocess.run(
@@ -396,11 +396,15 @@ class EnumResponseRegressionTest(unittest.TestCase):
         response = diff["components"]["responses"]["modified"]["ServiceProblem"]
         self.assertTrue(cbc._only_additive_response_schema(response))
         self.assertFalse(cbc._only_optional_property_additions(response["content"]["modified"]["application/problem+json"]["schema"]))
-        findings, _ = cbc.compare(base, SPEC, tools["oasdiff"])
+        actual_diff = cbc.oasdiff_json(tools["oasdiff"], "diff", base, SPEC)
+        findings = cbc.component_findings(actual_diff)
+        self.assertEqual(len(findings), 7, "the preserved diff-only classifier has no authority to waive these records")
         self.assertIn(("component-schema-allof-added", "components/schemas/ServiceProblemDetail"),
                       {finding.key() for finding in findings})
         self.assertIn(("component-responses-changed", "components/responses/ServiceProblem"),
                       {finding.key() for finding in findings})
+        findings, _ = cbc.compare(base, SPEC, tools["oasdiff"])
+        self.assertEqual(findings, [], "complete sources and exact records, not an acknowledgement, prove this expansion")
 
 
 if __name__ == "__main__":

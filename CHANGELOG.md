@@ -20,8 +20,17 @@
   three-language mock transport controls. Canonical generation alone updates the goldens.
 - Keep one global `ProblemCode` and a positive catalogue-derived service field subset with the
   old 14 codes plus `egress_denied`. Preserve its actual generated public type and fixed safe
-  diagnostics. Prove only the narrow enum/description response delta; the new fixed allOf branch
-  and its nested/shared uses remain a genuine accepted-base compatibility HOLD, not a waiver.
+  diagnostics. Preserve the genuine `1ce4acd5` seven-finding RED comparison as historical evidence.
+- Restore total TypeScript service-policy lookup typing and Kotlin's published primary
+  constructor/copy/component order through canonical generation. Preserve the old inline
+  helper exports and all 22 accepted primary signatures without weakening strict validation.
+- Add a generic bounded full-source proof for exact new-tag conditional expansions, including
+  complete diff/dependency binding and unchanged response metadata. The genuine accepted-base
+  comparison now passes without an acknowledgement; malformed, unsupported, negative-position
+  and ordinary breaking changes remain blocked. Old enum readers are not claimed to accept
+  new values, and no consumer migration or binary ABI certification is asserted.
+- Refuse source numeric precision loss before comparison, including an author-reproduced
+  exclusive-bound counterexample that would otherwise be rounded into a false compatibility pass.
 - Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
   retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
   validation diagnostics; add actual three-language root-null and Python error-path controls.

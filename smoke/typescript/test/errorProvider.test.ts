@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { ProblemCode, ProblemCodeFromJSON, ClientState, IdempotencyTreatment, AiRefusalFromJSON, AiRefusalToJSON } from '../../../build/generated/typescript/src/index.js';
-import { AUTHENTICATION_POLICIES, ERROR_POLICIES, authenticationPolicy, errorPolicy, newCorrelationId } from '../../../build/generated/typescript/src/errorCatalogue.js';
+import { AUTHENTICATION_POLICIES, ERROR_POLICIES, authenticationPolicy, errorPolicy, newCorrelationId, type ErrorPolicy, type ServiceProblemCode } from '../../../build/generated/typescript/src/errorCatalogue.js';
 import { ServiceProblemDetailFromJSON, ServiceProblemDetailToJSON } from '../../../build/generated/typescript/src/models/ServiceProblemDetail.js';
 import { AllocationMismatchDirection, ValidationIssueFromJSON } from '../../../build/generated/typescript/src/index.js';
 import { JSONApiResponse } from '../../../build/generated/typescript/src/runtime.js';
@@ -84,6 +84,17 @@ test('service policies retain typed state and retry keys while authentication is
     assert.equal(errorPolicy(ProblemCode.DependencyUnavailable).state, ClientState.Error);
     assert.equal(errorPolicy(ProblemCode.IdempotencyPayloadMismatch).retryable, false);
     assert.equal(errorPolicy(ProblemCode.IdempotencyPayloadMismatch).idempotency, IdempotencyTreatment.NeverReplaceToEscapeMismatch);
+});
+
+test('published service-key lookups remain total without inventing authentication policies', () => {
+    const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.RequestFailed];
+    const status: number = ERROR_POLICIES[ProblemCode.RequestFailed].status;
+    const total: Readonly<Record<ServiceProblemCode, ErrorPolicy>> = ERROR_POLICIES;
+    assert.equal(policy, errorPolicy(ProblemCode.RequestFailed));
+    assert.equal(status, 503);
+    assert.equal(total[ProblemCode.EgressDenied].status, 403);
+    assert.equal(ERROR_POLICIES[ProblemCode.AuthenticationRequired], undefined);
+    assert.equal(ERROR_POLICIES[ProblemCode.StepUpRequired], undefined);
 });
 
 test('every error example decodes typed codes and round-trips through the actual seam', () => {

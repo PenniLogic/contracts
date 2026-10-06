@@ -364,10 +364,10 @@ the first publication defines the baseline. Acknowledging a break and the expand
 protocol are described in [publication.md](publication.md#breaking-changes).
 
 Dereferenced `allOf` inheritance and response schemas can repeat a base component's optional
-property addition. The guard recognises only proven optional-addition diffs there as additive;
-removed/required/narrowed/conditional/unknown changes and response metadata changes still fail.
-Adding an `allOf` constraint also fails. The composition and partial/stale/blanket acknowledgement
-regressions prevent this source-provider inheritance fix from becoming a bypass.
+property addition. The diff-only guard recognises proven optional additions and the separately
+bounded enum/description response case; arbitrary added `allOf` constraints still fail.
+Removed/required/narrowed/unknown changes and response metadata changes remain findings.
+The composition and partial/stale/blanket acknowledgement regressions remain in place.
 
 The optional-inheritance proof is fail-closed at every record boundary: modified
 records have exactly base/revision/diff, matching well-formed member identities,
@@ -377,6 +377,25 @@ Direct malformed-record cases and real pinned-oasdiff paired documents cover bot
 the positive inheritance seam and retained removal/required/narrowing/response
 metadata failures. An absent published baseline is still explicitly not a release
 compatibility result.
+
+The additional [source-backed conditional proof](publication.md#bounded-source-backed-conditional-expansion)
+parses both complete documents with the existing pinned Spectral parser, rejecting duplicate
+source mapping names and numeric precision loss before either detector runs. Exact AST numeric
+spans are checked with standard-library decimal arithmetic; no parser or dependency pin changes.
+It binds full use-site and dependency records, resolves only bounded local
+references and unconditional allOf intersections, and proves new fixed-scalar branches cannot
+apply to any old required finite discriminator value. Old conditional/negative-position
+closures and all other constraints must stay unchanged. The implementation is capped at
+64 levels, 16,384 work steps per proof and 256 finite members; cached closures retain depth and
+cycle checks. Unsupported cases stay RED rather than receiving an acknowledgement.
+
+The generic paired fixtures retain the actual operations, root security, shared responses and
+version. Actual pinned comparisons, malformed-record/source controls, old/new AJV witnesses,
+all 14 old service examples and the import two-code intersection exercise the shipped checker.
+Separate generated-public-API regressions compile total TypeScript service-key lookups and the
+old positional Kotlin constructor/copy/component consumer; a golden-bound snapshot covers all
+22 accepted model primary signatures. These are source/native checks, not external consumer
+adoption or binary compatibility certification.
 
 ## Smoke consumers and conformance vectors
 

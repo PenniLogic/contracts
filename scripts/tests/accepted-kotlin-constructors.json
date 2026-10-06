@@ -1,0 +1,29 @@
+{
+  "accepted_commit": "5b41d4580c85be3cc1617074c0f3052b1f7b02cd",
+  "generator_version": "7.25.0",
+  "description": "Primary parameters, order and defaults read from actual accepted golden-bound Kotlin models; not a binary ABI claim.",
+  "constructors": {
+    "AiRefusal": ["code: AiRefusalCode", "message: AiRefusalMessage", "correlationId: kotlin.String"],
+    "Allowance": ["limit: kotlin.Int", "unit: AllowanceUnit", "window: AllowanceWindow", "resetsAt: java.time.OffsetDateTime? = null"],
+    "DedupEnrichment": ["`field`: DedupEnrichedField", "source: DedupSource", "sourceRecordId: kotlin.String"],
+    "DedupOutcome": ["groupVersion: ImportGroupVersion", "outcome: DedupOutcomeKind", "matchedRecordId: kotlin.String? = null", "matchBasis: DedupMatchBasis? = null", "precedence: DedupPrecedence? = null", "confidenceBand: ConfidenceBand? = null", "window: DedupWindow? = null", "link: DuplicateLink? = null", "enrichment: kotlin.collections.List<DedupEnrichment>? = null"],
+    "DedupPrecedence": ["rule: DedupPrecedenceRule", "userConfirmedPreserved: kotlin.Boolean", "incomingSource: DedupSource? = null", "comparedSource: DedupSource? = null", "survivingSource: DedupSource? = null"],
+    "DuplicateLink": ["linkId: kotlin.String", "suppressedRecordId: kotlin.String", "status: DuplicateSuppressionStatus", "decidedBy: DedupDecidedBy", "canUnmerge: kotlin.Boolean", "reversedAt: java.time.OffsetDateTime? = null"],
+    "EntitlementDenial": ["upgradeAvailable: kotlin.Boolean"],
+    "ImportColumnBinding": ["columnIndex: kotlin.Int", "target: ImportColumnTarget"],
+    "ImportColumnMapping": ["columnCount: kotlin.Int", "detectedColumns: kotlin.collections.List<ImportColumnBinding>", "userOverrides: kotlin.collections.List<ImportColumnBinding>", "unmappedColumns: kotlin.collections.Set<kotlin.Int>", "institutionPreset: kotlin.String? = null"],
+    "ImportCommitCounts": ["rowCount: kotlin.Int", "createdCount: kotlin.Int", "skippedCount: kotlin.Int", "rejectedCount: kotlin.Int"],
+    "ImportCommitRequest": ["groupVersion: ImportGroupVersion", "previewRef: kotlin.String"],
+    "ImportCommitResult": ["groupVersion: ImportGroupVersion", "previewRef: kotlin.String", "completedAt: java.time.OffsetDateTime", "correlationId: kotlin.String", "rows: kotlin.collections.List<ImportCommitRow>", "counts: ImportCommitCounts"],
+    "ImportCommitRow": ["sourceRow: kotlin.Int", "action: ImportCommitAction", "reason: ImportRowReason", "createdRecordId: kotlin.String? = null", "dedupOutcome: DedupOutcome? = null", "rowError: ImportRowError? = null"],
+    "ImportPreview": ["groupVersion: ImportGroupVersion", "previewRef: kotlin.String", "createdAt: java.time.OffsetDateTime", "expiresAt: java.time.OffsetDateTime", "correlationId: kotlin.String", "mapping: ImportColumnMapping", "rows: kotlin.collections.List<ImportPreviewRow>", "counts: ImportPreviewCounts"],
+    "ImportPreviewCounts": ["rowCount: kotlin.Int", "createCount: kotlin.Int", "skipCount: kotlin.Int", "rejectCount: kotlin.Int", "reviewCount: kotlin.Int"],
+    "ImportPreviewRow": ["sourceRow: kotlin.Int", "action: ImportRowAction", "reason: ImportRowReason", "confidenceBand: ConfidenceBand? = null", "dedupOutcome: DedupOutcome? = null", "rowError: ImportRowError? = null"],
+    "ImportRowError": ["problem: ServiceProblemDetail", "sourceRow: kotlin.Int", "columnIndex: kotlin.Int? = null"],
+    "ImportRowErrorAllOfProblem": ["code: ImportRowErrorAllOfProblem.Code? = null"],
+    "InlineObject": ["groupVersion: ImportGroupVersion", "outcome: kotlin.Any?", "matchedRecordId: kotlin.String? = null", "matchBasis: DedupMatchBasis? = null", "precedence: DedupPrecedence? = null", "confidenceBand: ConfidenceBand? = null", "window: DedupWindow? = null", "link: DuplicateLink? = null", "enrichment: kotlin.collections.List<DedupEnrichment>? = null"],
+    "ProblemDetail": ["type: kotlin.String", "title: kotlin.String", "status: kotlin.Int", "detail: kotlin.String? = null", "instance: kotlin.String? = null", "code: kotlin.String? = null", "correlationId: kotlin.String? = null", "`field`: kotlin.String? = null", "reason: kotlin.String? = null"],
+    "ServiceProblemDetail": ["type: String", "title: String", "status: Int", "detail: String", "code: ProblemCode", "correlationId: String", "instance: String? = null", "field: ProblemField? = null", "reason: ValidationReason? = null", "direction: AllocationMismatchDirection? = null", "validationErrors: Set<ValidationIssue>? = null", "idempotencyKey: String? = null", "retryAfterSeconds: Int? = null", "allowance: Allowance? = null", "entitlement: EntitlementDenial? = null"],
+    "ValidationIssue": ["field: ProblemField", "reason: ValidationReason", "direction: AllocationMismatchDirection? = null"]
+  }
+}

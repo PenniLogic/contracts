@@ -94,12 +94,22 @@ codes. Its fixed diagnostics apply to that new code too. The egress-aware operat
 requires the typed reason, so an ordinary reason-free service body cannot replace a destination
 refusal. The actual generated public field type remains `ProblemCode` in all three languages.
 
+TypeScript's `ERROR_POLICIES` remains total for `ServiceProblemCode`, a type-level union derived
+from this same catalogue, intersected with a partial global-code record. All 14 old service-key
+lookups retain nonoptional `ErrorPolicy` typing and their unchanged runtime rows. Authentication
+codes have no invented service policy and the helper still rejects them. Kotlin retains
+`ImportRowError(problem, sourceRow, columnIndex)`, positional `copy`, and `component1/2/3`;
+the other accepted primary signatures and generator-owned inline helper exports are preserved.
+The generic layout projection retains only unconditional scalar-enum object refinements for
+those helpers; deeper constraints stay in the registered validator, not lossy field flattening.
+
 Current AA8/5b source consumers stay pinned unchanged. Adoption of the local `0.3.0` source needs
 real consumer regeneration and correct authentication routing before any new code is emitted;
 old consumer pins must not receive new codes. No old shape is removed, no consumer migration is
 asserted and no contract-stage acknowledgement or publication is authorized. The accepted-base
-check still holds the new fixed allOf branch and its nested/shared response uses for review,
-even though the isolated enum/description-only change is proved additive. See
+check now proves the bounded fixed new-tag expansion from complete sources and exact records;
+the earlier seven RED findings and public-API failures remain preserved evidence. Final-head
+independent review, hosted CI and integration are still required. See
 [the exact compatibility boundary](custom-destinations.md#generated-consumers-and-preserved-failure-history).
 
 **AI refusal is successful content**, as the accepted taxonomy explicitly says.

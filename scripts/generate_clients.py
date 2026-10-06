@@ -223,6 +223,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
         def symbol(value: str) -> str:
             return "".join(word.capitalize() for word in value.split("_"))
 
+        service_keys = " | ".join(f'ProblemCode.{symbol(entry["code"])}' for entry in entries)
         rows = "".join(
             f'    [ProblemCode.{symbol(entry["code"])}]: Object.freeze({{ status: {entry["status"]}, '
             f'title: {json.dumps(entry["title"])}, detail: {json.dumps(entry["detail"])}, '
@@ -251,7 +252,8 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "    readonly retryClass: RetryClass;\n    readonly idempotency: IdempotencyTreatment;\n}\n\n"
             "export interface AuthenticationPolicy {\n    readonly status: number;\n    readonly title: string;\n"
             "    readonly detail: string;\n    readonly condition: string;\n    readonly flow: string;\n    readonly state: null;\n}\n\n"
-            f"export const ERROR_POLICIES: Readonly<Partial<Record<ProblemCode, ErrorPolicy>>> = Object.freeze({{\n{rows}}});\n"
+            f"export type ServiceProblemCode = {service_keys};\n\n"
+            f"export const ERROR_POLICIES: Readonly<Record<ServiceProblemCode, ErrorPolicy> & Partial<Record<ProblemCode, ErrorPolicy>>> = Object.freeze({{\n{rows}}});\n"
             f"export const AUTHENTICATION_POLICIES: Readonly<Partial<Record<ProblemCode, AuthenticationPolicy>>> = Object.freeze({{\n{authentication_rows}}});\n"
             f"export const EGRESS_CODES: Readonly<Record<EgressDenialReason, ProblemCode>> = Object.freeze({{\n{egress_rows}}});\n\n"
             "export function errorPolicy(code: ProblemCode): ErrorPolicy {\n"

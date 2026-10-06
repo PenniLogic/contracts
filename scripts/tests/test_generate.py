@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -518,6 +519,66 @@ class DeterminismTest(unittest.TestCase):
         completed = run_script("generate_clients.py", "--verify")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("byte-identical double generation", completed.stdout)
+
+
+class PublishedApiCompatibilityTest(unittest.TestCase):
+    def test_all_accepted_kotlin_primary_parameters_defaults_and_order_are_preserved(self) -> None:
+        fixture = json.loads((ROOT / "scripts" / "tests" / "accepted-kotlin-constructors.json").read_bytes())
+        self.assertEqual(fixture["generator_version"], pl_contracts.versions()["openapi_generator"]["version"])
+        self.assertEqual(len(fixture["constructors"]), 22)
+        models = ROOT / "build" / "generated" / "kotlin" / "src" / "main" / "kotlin" / "com" / "pennilogic" / "contracts" / "models"
+        for name, expected in fixture["constructors"].items():
+            with self.subTest(model=name):
+                source = (models / f"{name}.kt").read_text(encoding="utf-8")
+                match = re.search(r"data class " + re.escape(name) + r"\s*\((.*?)\n\)", source, re.S)
+                self.assertIsNotNone(match)
+                body = re.sub(r"/\*.*?\*/", "", match[1], flags=re.S)
+                actual = [field.rstrip(",").strip() for field in re.findall(r"\bval ([^\n]+)", body)]
+                self.assertEqual(actual, expected)
+
+    def test_old_service_policies_and_total_key_typing_with_authentication_excluded(self) -> None:
+        accepted = json.loads(subprocess.run(
+            ["git", "show", "5b41d4580c85be3cc1617074c0f3052b1f7b02cd:spec/error-catalogue.v1.json"],
+            cwd=ROOT, capture_output=True, check=True,
+        ).stdout)
+        current = json.loads((ROOT / "spec" / "error-catalogue.v1.json").read_bytes())
+        current_rows = {entry["code"]: entry for entry in current["codes"]}
+        self.assertEqual(len(accepted["codes"]), 14)
+        for entry in accepted["codes"]:
+            self.assertEqual(current_rows[entry["code"]], entry)
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.path / "consumer.ts"
+        config = spec.path / "tsconfig.json"
+        (spec.path / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
+        config.write_text(json.dumps({
+            "compilerOptions": {
+                "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+                "strict": True, "noEmit": True, "skipLibCheck": False,
+                "paths": {"@contract/*": [str(ROOT / "build" / "generated" / "typescript" / "src" / "*")]},
+            },
+            "files": [str(source)],
+        }), encoding="utf-8")
+        imports = ('import { ERROR_POLICIES, type ErrorPolicy } from "@contract/errorCatalogue.js";\n'
+                   'import { ProblemCode } from "@contract/models/ProblemCode.js";\n')
+        source.write_text(imports +
+            "const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.RequestFailed];\n"
+            "const status: number = ERROR_POLICIES[ProblemCode.RequestFailed].status;\n"
+            "export { policy, status };\n" +
+            "".join(f'const old{index}: ErrorPolicy = ERROR_POLICIES[ProblemCode.'
+                    f'{"".join(word.capitalize() for word in entry["code"].split("_"))}];\n'
+                    for index, entry in enumerate(accepted["codes"])), encoding="utf-8")
+        command = [pl_contracts.node_executable(), str(ROOT / "node_modules" / "typescript" / "bin" / "tsc"),
+                   "--project", str(config)]
+        positive = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(positive.returncode, 0, positive.stdout + positive.stderr)
+        for entry in current["authentication_codes"]:
+            name = "".join(word.capitalize() for word in entry["code"].split("_"))
+            source.write_text(imports + f"const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.{name}];\n",
+                              encoding="utf-8")
+            negative = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(negative.returncode, 1, negative.stdout + negative.stderr)
+            self.assertIn("TS2322", negative.stdout)
 
 
 if __name__ == "__main__":

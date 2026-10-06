@@ -86,7 +86,7 @@ from it with the contracts-provided script, one invocation per language:
 ```text
 git clone --branch vX.Y.Z --depth 1 https://github.com/PenniLogic/contracts.git
 cd contracts
-npm ci --no-audit --no-fund          # only needed for lint; generation needs Python 3.14 and a JDK 21
+npm ci --no-audit --no-fund          # integrity-pinned parser and lint dependencies
 python scripts/toolchain.py install  # downloads and verifies the pinned generator
 python scripts/generate_clients.py --language kotlin      # or typescript / python
 ```
@@ -106,11 +106,14 @@ and correct authentication-versus-service routing before new codes are emitted. 
 pins must not receive those new codes. No old wire shape has been removed, so no contract-stage
 acknowledgement is authorized or claimed.
 
-The genuine accepted-provider comparison still holds the new fixed `egress_denied` allOf
-branch, its nested import uses and shared response for review. The scalar-enum/description-only
-response proof does not waive conditional or composition changes. Until that exact finding is
-resolved through the owning review/integration process, source and native conformance passes
-are not full compatibility or publication acceptance.
+The `1ce4acd5` freeze's seven accepted-provider comparison findings and generated-public-API
+failures remain historical evidence. The correction restores total TypeScript service-policy
+lookups and the accepted Kotlin primary constructor/copy/component order and inline helper
+exports. A separate bounded source proof now demonstrates that the new fixed `egress_denied`
+branch, its nested import uses and shared response preserve the old domain. The genuine
+accepted-`5b41d458` comparison passes without an acknowledgement; the diff-only detector still
+reports all seven findings. This is not proof that old enum readers accept new values, binary
+ABI certification, consumer migration, independent final-head review or publication acceptance.
 
 ## Rollback
 
@@ -171,6 +174,37 @@ and inert description changes through otherwise unchanged properties/items and i
 members. Deleted/replaced values, new enum constraints, partial/malformed/unknown records,
 requiredness, type/ref/pattern changes, conditionals/`not`, changed compositions and response
 metadata remain unproved or breaking. Structured enum-value changes are also kept for review.
+
+### Bounded source-backed conditional expansion
+
+An appended `allOf` branch is not inherently additive. The additional proof in
+`scripts/schema_compatibility.py` uses both complete OpenAPI 3.1.0 documents and the exact pinned
+oasdiff records, including changed reference dependencies. It requires an unconditional object
+with a required finite, nonempty string discriminator, unchanged old constraints and composition
+prefix, and only exact `if`/`then` additions guarded by disjoint new tags outside the old upper
+bound. Consequences contain only fixed scalar `const`/`enum` property assertions. A positive
+enum intersection may retain the global public type while excluding unrelated new values.
+Every old permitted value and every other scalar constraint and reference identity is retained.
+
+The proof separately checks response envelope, media, metadata and metadata-reference closure.
+Unknown or partial records, duplicate values/identities, unsupported dialects or schema keywords,
+external/cyclic/dynamic references, evaluation-sensitive constructs and changes propagated
+through old `if`/`not`/unions do not qualify. Existing conditional constraints may remain only
+with their complete reference closures unchanged. Bounded-work/depth refusals remain findings;
+there is no component-name/code-value allowlist or blanket composition exemption.
+
+Before either detector runs, numeric source spans from the pinned parser's AST are compared
+exactly with its serialized numeric values using standard-library decimal arithmetic. Inputs
+whose precision, finiteness or numeric spelling cannot be preserved are refused rather than
+silently rounded into an apparently unchanged constraint. This is source-parse validation,
+not a runtime money codec or a request/JCS canonicalization implementation. Only JSON numeric
+spellings qualify in either JSON or YAML input; YAML-only forms such as hexadecimal and
+leading-zero numerals remain outside the cross-parser proof.
+
+This is a limited old-domain preservation proof, not a general JSON Schema implication engine
+or an assertion that every new branch is usable. Actual schema/native positive and negative
+controls remain necessary. No new operation-level oasdiff finding is waived, and the existing
+acknowledgement, version-bump and adoption rules are unchanged.
 
 ## Compatibility of the check itself
 

@@ -293,14 +293,49 @@ function compile(document) {
   const result = { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
   const projection = JSON.parse(JSON.stringify(document));
   const projectedModels = [];
+  function layoutPropertyNames(model) {
+    const inherited = model.$ref === undefined ? [] : layoutPropertyNames(resolveLocalRef(model.$ref, document));
+    return [...new Set([
+      ...inherited, ...(model.allOf || []).flatMap(layoutPropertyNames), ...Object.keys(model.properties || {}),
+    ])];
+  }
   function projectLayout(model) {
     let changed = false;
+    const objectRefinements = (model.allOf || []).filter((branch) =>
+      Object.keys(branch).length === 1 && branch.properties &&
+      Object.keys(branch.properties).length > 0 && Object.entries(branch.properties).every(([name, refinement]) => {
+        const field = model.properties?.[name];
+        const target = field?.$ref && resolveLocalRef(field.$ref, document);
+        return target?.type === "object" && Object.keys(refinement).length === 1 &&
+          refinement.properties && Object.keys(refinement.properties).length > 0 &&
+          Object.entries(refinement.properties).every(([property, constraint]) => {
+            const declared = target.properties?.[property];
+            const scalar = declared?.$ref ? resolveLocalRef(declared.$ref, document) : declared;
+            return scalar?.type === "string" && Object.keys(constraint).length === 1 &&
+              Array.isArray(constraint.enum) && constraint.enum.length > 0 &&
+              constraint.enum.every((value) => typeof value === "string");
+          });
+      }));
+    if (model.properties) {
+      // The pinned generator visits unconditional allOf fields before local fields. Preserve that
+      // positional API order without importing branch-only fields, types or requiredness.
+      const names = layoutPropertyNames(model).filter((name) => Object.hasOwn(model.properties, name));
+      changed = names.some((name, index) => name !== Object.keys(model.properties)[index]);
+      model.properties = Object.fromEntries(names.map((name) => [name, model.properties[name]]));
+    }
     if (model.$ref !== undefined && Object.hasOwn(model, "enum")) {
       delete model.enum;
       changed = true;
     }
     for (const key of ["allOf", "anyOf", "oneOf", "if", "then", "else", "not", "const"]) {
       if (!Object.hasOwn(model, key)) continue;
+      if (key === "allOf" && objectRefinements.length) {
+        // Scalar enum-only referenced-object refinements also publish inline helper models.
+        // Deeper constraints stay exclusively in the full validator, never the layout projection.
+        if (objectRefinements.length !== model.allOf.length) changed = true;
+        model.allOf = objectRefinements;
+        continue;
+      }
       delete model[key];
       changed = true;
     }

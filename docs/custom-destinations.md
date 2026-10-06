@@ -221,6 +221,7 @@ are retained as failed evidence rather than rewritten as passes:
 | Python generated API/model | The combined baseline retained 32 API typing errors plus enum/UUID/strict-wire failures. Canonical templates, typed UUID conversion and marked validation repair those paths; the raw-error masking failure is separately preserved. |
 | Shared problem detail | The open AA8 scaffold was insufficient. Accepted provider source plus Root's explicit group-1.1.0 decision now supplies the shared auth/service-egress families above, one global code enum and unchanged validation reasons. |
 | Shared pipeline tests | The old empty-path/version/text-fragment assumptions failed on the real composition. Named additive helpers now preserve genuine operations, security, responses and version, and breaking probes retain valid references. |
+| Generated public APIs at `1ce4acd5` | The identical old TypeScript service-policy lookup compiled against accepted 5b but failed with TS2322/TS2532 against 1ce4. The old positional Kotlin import consumer also failed native compilation. Canonical service-key typing and generic layout ordering now preserve those APIs, all 22 accepted model primary signatures and old model/helper exports; no emitted-file patch or caller migration is used. |
 | Proof / step-up runtime | Still not supplied: per-send signer, raw duplicate-name/IJSON parser, JCS implementation, issuer, freshness verifier or atomic single use. These are future runtime obligations, not gateway/admin/tool-group additions to issue27's source acceptance criteria. |
 
 The shared transport inventory retains all 19 accepted provider entries and adds these six
@@ -231,13 +232,16 @@ its ordinary deserializer can bypass the model, including actual 401/403 error r
 explicit Optional and legacy/no-content controls remain. Actual API argument-type failures
 hide input in normal diagnostics. These are not proof-signature or server-admission checks.
 
-**Compatibility HOLD:** the genuine accepted-`5b41d458` comparison still reports the new fixed
-`egress_denied` allOf branch on `ServiceProblemDetail`, its five nested import usages and the
-shared `ServiceProblem` response. The narrow classifier recognizes only complete scalar-enum
-additions and inert description changes within otherwise unchanged response schema structure.
-It does not waive this conditional/composition change. The original negative-partition finding
-and the positive-partition findings remain failed evidence, not acknowledgements or proof of
-full nonbreaking compatibility.
+**Local compatibility correction, integration still held:** a bounded source-backed proof now
+passes the genuine accepted-`5b41d458` comparison without an acknowledgement. It binds the exact
+oasdiff records and complete reference closures, proves the required finite discriminator's old
+domain is excluded from each new guard, preserves the old constraints/prefix and separately
+checks response metadata. Generic paired controls retain refusals for unsupported constraints,
+malformed/partial records, changed reference identities and enum changes in old negative
+positions. The original negative-partition finding, all seven `1ce4acd5` positive-partition RED
+findings and both public-API failures remain failed historical evidence. The diff-only detector
+still reports those seven findings; no allOf blanket waiver, consumer migration or binary ABI
+certification is claimed. See [the bounded proof](publication.md#bounded-source-backed-conditional-expansion).
 
 AA8/5b source consumers remain pinned unchanged. Future adoption of `0.3.0` requires actual
 consumer regeneration and correct auth-versus-service routing; new codes must not be emitted
