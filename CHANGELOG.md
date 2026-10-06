@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased initial core contract 0.4.0
+
+- Add original contracts#1's authentication, accounts, transactions and categories, including
+  mutations, canonical Money and both transaction instants, closed synthetic request fixtures,
+  bounded cursors/filters/stable sorts and declared financial P30D/P14D idempotency.
+- Reuse accepted ADR-019 DPoP/session/recovery and Root's exact `step-up-request@1` binding.
+  Mirror the complete accepted authentication parameters; retain unbound owner inputs.
+  Keep mature-passkey and one-shot recovering-device credential grants separate.
+- Extend the original #16 catalogue to `1.2.0` with the six contextual authentication codes.
+  Isolate them in the canonical `AuthenticationContextProblemDetail` family and new core
+  responses; preserve the actual legacy authentication/custom-destination wire domains.
+- Generate Kotlin, TypeScript and Python through the pinned generator, with declaration-driven
+  null/presence handling, canonical temporal query seams and typed distinct success statuses.
+  SDK carriers do not change the resource/dedup wire bodies. No issuer, verifier or retry signer
+  is implemented by these contracts.
+- Record exact component changes in the versioned OpenAPI `x-contract-changelog`, separate
+  from this prose. Declare deprecation/sunset headers and immutable version re-pinning.
+- Copy the exact protected-accepted API `fd58da679672a4de7aabee2562644bed3799e614`
+  `category-seed.v1.json` bytes; derive the shared key/icon/colour enums and typed immutable
+  localized defaults in all three clients, with explicit en-IN fallback. Bind the source
+  SHA256/size/Git blob and publication companions; do not implement seed materialisation.
+- Preserve the complete accepted source-test scheduling/raw-byte/error/cleanup controls from
+  `2c4a1f1545599949f1a6ac1e061c7219fb841c8e`, all earlier failures and every retained corpus.
+  Bounded source proofs check request/response variance, actual reachable legacy domains and
+  exact diff/reference records without an acknowledgement or increased proof budget.
+
+LOCAL PREPARATION ONLY: no release/artifact publication, backend real-response acceptance,
+consumer rollout, independent review, protected integration or original #1/Infra #22 closure
+is asserted. Category source acceptance is not API9 runtime completion or released client
+publication. See [the core contract](docs/core-contract.md).
+
 ## Unreleased pipeline timing correction
 
 - Correct the initial `8d3e199` asynchronous helper's separate per-stream buffer allowance.

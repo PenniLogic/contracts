@@ -1,0 +1,1 @@
+{{#isArray}}{{#isList}}kotlin.collections.{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}List{{/uniqueItems}}{{/isList}}{{^isList}}kotlin.Array{{/isList}}<{{#items}}{{>provider_type}}{{/items}}>{{#isNullable}}?{{/isNullable}}{{/isArray}}{{^isArray}}{{{dataType}}}?{{/isArray}}

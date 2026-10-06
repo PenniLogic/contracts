@@ -1,0 +1,31 @@
+{{#vendorExtensions.x-pennilogic-null-presence}}
+    @SerialName(value = "{{{vendorExtensions.x-base-name-literal}}}")
+    {{>modelMutable}} {{{name}}}: com.pennilogic.contracts.serialization.ProviderPresence<{{#isArray}}{{#isList}}kotlin.collections.{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}List{{/uniqueItems}}{{/isList}}{{^isList}}kotlin.Array{{/isList}}<{{#vendorExtensions.x-pennilogic-nullable-enum-items}}{{#items}}{{>provider_type}}{{/items}}{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{^vendorExtensions.x-pennilogic-nullable-enum-items}}{{^items.isEnum}}{{^items.isPrimitiveType}}{{^items.isModel}}@Contextual {{/items.isModel}}{{/items.isPrimitiveType}}{{{items.dataType}}}{{/items.isEnum}}{{#items.isEnum}}{{classname}}.{{{nameInPascalCase}}}{{/items.isEnum}}{{#items.isNullable}}?{{/items.isNullable}}{{/vendorExtensions.x-pennilogic-nullable-enum-items}}>{{/isArray}}{{^isArray}}{{^isEnum}}{{^isPrimitiveType}}{{^isModel}}@Contextual {{/isModel}}{{/isPrimitiveType}}{{{dataType}}}{{/isEnum}}{{#isEnum}}{{classname}}.{{{nameInPascalCase}}}{{/isEnum}}{{/isArray}}?> = com.pennilogic.contracts.serialization.ProviderPresence.Absent
+{{/vendorExtensions.x-pennilogic-null-presence}}
+{{^vendorExtensions.x-pennilogic-null-presence}}
+{{#description}}
+    /* {{{.}}} */
+{{/description}}
+    {{^multiplatform}}
+    {{#moshi}}
+    @Json(name = "{{{vendorExtensions.x-base-name-literal}}}")
+    {{/moshi}}
+    {{#gson}}
+    @SerializedName("{{{vendorExtensions.x-base-name-literal}}}")
+    {{/gson}}
+    {{#jackson}}
+    @param:JsonProperty("{{{vendorExtensions.x-base-name-literal}}}")
+    @get:JsonProperty("{{{vendorExtensions.x-base-name-literal}}}")
+    {{/jackson}}
+    {{#kotlinx_serialization}}
+    {{^isEnum}}{{^isArray}}{{^isPrimitiveType}}{{^isModel}}@Contextual {{/isModel}}{{/isPrimitiveType}}{{/isArray}}{{/isEnum}}@SerialName(value = "{{{vendorExtensions.x-base-name-literal}}}")
+    {{/kotlinx_serialization}}
+    {{/multiplatform}}
+    {{#vendorExtensions.x-field-extra-annotation}}
+    {{{.}}}
+    {{/vendorExtensions.x-field-extra-annotation}}
+    {{#deprecated}}
+    @Deprecated(message = "This property is deprecated.")
+    {{/deprecated}}
+    {{#multiplatform}}@SerialName(value = "{{{vendorExtensions.x-base-name-literal}}}") {{/multiplatform}}{{#isInherited}}override {{/isInherited}}{{>modelMutable}} {{{name}}}: {{#isArray}}{{#isList}}kotlin.collections.{{#modelMutable}}Mutable{{/modelMutable}}{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}List{{/uniqueItems}}{{/isList}}{{^isList}}kotlin.Array{{/isList}}<{{#vendorExtensions.x-pennilogic-nullable-enum-items}}{{#items}}{{>provider_type}}{{/items}}{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{^vendorExtensions.x-pennilogic-nullable-enum-items}}{{^items.isEnum}}{{^items.isPrimitiveType}}{{^items.isModel}}{{#kotlinx_serialization}}@Contextual {{/kotlinx_serialization}}{{/items.isModel}}{{/items.isPrimitiveType}}{{{items.dataType}}}{{/items.isEnum}}{{#items.isEnum}}{{classname}}.{{{nameInPascalCase}}}{{/items.isEnum}}{{#items.isNullable}}?{{/items.isNullable}}{{/vendorExtensions.x-pennilogic-nullable-enum-items}}>{{/isArray}}{{^isEnum}}{{^isArray}}{{{dataType}}}{{/isArray}}{{/isEnum}}{{#isEnum}}{{^isArray}}{{classname}}.{{{nameInPascalCase}}}{{/isArray}}{{/isEnum}}? = {{^defaultValue}}null{{/defaultValue}}{{#defaultValue}}{{^isNumber}}{{{defaultValue}}}{{/isNumber}}{{#isNumber}}{{^multiplatform}}{{{dataType}}}("{{{defaultValue}}}"){{/multiplatform}}{{#multiplatform}}({{{defaultValue}}}).toDouble(){{/multiplatform}}{{/isNumber}}{{/defaultValue}}
+{{/vendorExtensions.x-pennilogic-null-presence}}

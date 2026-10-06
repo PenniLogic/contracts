@@ -1,16 +1,16 @@
 openapi: 3.1.0
 info:
   title: PenniLogic API contract
-  version: 0.3.0
-  summary: Shared money/time, error/import providers and custom-destination enrollment source contracts.
+  version: 0.4.0
+  summary: Authentication, accounts, transactions and categories with the accepted shared providers.
   description: |
     Single source of truth for the PenniLogic API. The shared components that ADR-015 (money wire
     format, time and idempotency conventions) binds on every service and generated client are
     preserved with the accepted T-CON-12 error and T-CON-10 import/dedup providers.
     The additive CustomDestinations group is the contracts#27 source contract, not
     a deployed gateway, a published release or permission to enable AI. Its closed generated
-    boundaries compose the shared error and authentication families. Other endpoints are added by
-    their contract expansion tickets (the skeleton by PenniLogic/contracts#1); every mutating operation
+    boundaries compose the shared error and authentication families. Original contracts#1 adds
+    authentication, accounts, transactions and categories; every mutating operation
     must reference the `IdempotencyKey` parameter or carry a reasoned `x-idempotency` extension, and
     every monetary field must reference `Money`. The committed lint ruleset (`spec/.spectral.yaml`)
     enforces those rules. All examples are synthetic.
@@ -32,7 +32,7 @@ x-pennilogic-contract-metadata:
   idempotency_key_lifetime: P30D
   client_retry_horizon: P14D
   error_catalogue: error-catalogue.v1.json
-  error_group_version: 1.1.0
+  error_group_version: 1.2.0
   client_state_bindings: client-state-bindings.v1.json
   import_group: import-group.v1.json
   import_group_version: 1.0.0
@@ -80,7 +80,109 @@ x-step-up-request-binding:
   verifier: recompute-from-actual-operation-target-and-body
   issuer: validate-and-bind-the-same-intent
   evidenceScope: finite-contract-vectors-not-an-issuer-or-JCS-runtime
+x-core-contract:
+  owner: PenniLogic/contracts#1
+  decisions: [ADR-015, ADR-016, ADR-017, ADR-018, ADR-019]
+  fixtures: fixtures/core-endpoints.v1.json
+  apiVersion: v1
+  pagination:
+    defaultPageSize: 20
+    maximumPageSize: 100
+    cursorLifetime: PT24H
+    cursorBinding: verified-principal-operation-filters-sort-snapshot
+    ordering: declared-sort-followed-by-unique-id
+    queryPolicy: reject-unknown-repeated-malformed-and-scope-changing-selectors
+  compatibility:
+    additive: MINOR
+    breaking: expand-migrate-contract
+    minimumDeprecationNotice: P90D
+    retiredVersion: validation_rejected-request-not_available
+    immutableRollback: re-pin-prior-published-version
+    deprecationHeader: '#/components/headers/CoreDeprecation'
+    sunsetHeader: '#/components/headers/CoreSunset'
+    contractVersionHeader: '#/components/headers/CoreContractVersion'
+  runtimeAcceptance: false
+x-category-seed-source:
+  repository: PenniLogic/api
+  commit: fd58da679672a4de7aabee2562644bed3799e614
+  path: data/categories/category-seed.v1.json
+  gitBlob: 16b70af7b527bfd617539d9bd413ba78738f8f05
+  sha256: 3fcf568abcfc7da7409e463ea6bbda9d952af739cfa9ef42a8e9fe90b993390c
+  size: 14237
+  localFile: category-seed.v1.json
+x-contract-changelog:
+  schema_version: 1
+  format: pennilogic-component-changelog@1
+  entries:
+    - version: 0.4.0
+      previous_version: 0.3.0
+      publication: unreleased
+      summary: Initial authentication, accounts, transactions and categories contract with three first-class clients.
+      components:
+        schemas:
+          added: [
+            Account, AccountPage, AccountSystemRole, AccountType, ApplicationProblemDetail,
+            AuthAccessTokenValue, AuthAssertionOptions, AuthAssertionResponse, AuthAssertionResultRequest,
+            AuthAttestation, AuthAttestationResponse, AuthAuthenticationOptionsRequest, AuthAuthenticatorSelection,
+            AuthBinaryValue, AuthBrowserRefreshRequest, AuthBrowserTokenSet, AuthChallengeValue,
+            AuthChannel, AuthChannelInput, AuthChannelList, AuthChannelProofRequest, AuthCreationExtensions,
+            AuthCreationOptions, AuthCredential, AuthCredentialAlgorithm, AuthCredentialDescriptor,
+            AuthCredentialList, AuthCredentialNameRequest, AuthCredentialTransport, AuthDevice,
+            AuthDeviceChallenge, AuthDeviceInput, AuthDeviceList, AuthDeviceRegistrationRequest,
+            AuthDeviceTrust, AuthEmailAddress, AuthEnrollmentAccepted, AuthEnrollmentRequest,
+            AuthEnrollmentVerified, AuthOpaqueValue, AuthPasskeyUser, AuthPlatform, AuthProfile,
+            AuthPublicKey, AuthRecoveryAccepted, AuthRecoveryActionRequest, AuthRecoveryCodeCount,
+            AuthRecoveryCodeSet, AuthRecoveryCompletion, AuthRecoveryCredentialRequest, AuthRecoveryProgress,
+            AuthRecoveryRoute, AuthRecoveryStartRequest, AuthRecoveryState, AuthRecoveryVerifyRequest,
+            AuthRefreshRequest, AuthRefreshTokenValue, AuthRegistrationGrant, AuthRegistrationOptionsRequest,
+            AuthRegistrationResultRequest, AuthRelyingParty, AuthRevocationReason, AuthSession,
+            AuthSessionList, AuthStepUpGrant, AuthStepUpIntent, AuthStepUpIntentBody, AuthStepUpIntentTarget,
+            AuthStepUpResultRequest,             AuthTokenSet, AuthenticationChallengeProblemDetail, AuthenticationContextProblemDetail, AuthenticationParameters,
+            Categorisation, CategorisationView, CategorisationViewMode, Category, CategoryAllocationLine,
+            CategoryAssignmentReason, CategoryAssignmentRequest, CategoryAssignmentSource, CategoryEntryAssignmentInput,
+            CategoryExactLineInput, CategoryIcon, CategoryColour, CategoryKind, CategoryNature, CategoryPage, CategoryProvenanceRef,
+            CategoryRedirect, CategorySystemKey, CategoryWeightedLineInput, CorrectTransactionRequest,
+            CreateAccountRequest, CreateCategoryRequest, CursorPage, LedgerEntry, LedgerEntryInput,
+            OpeningBalanceRequest, PostTransactionRequest, RedirectCategoryRequest, ResourceId,
+            ReverseTransactionRequest, SessionRevokedProblemDetail, SourceEventId, Transaction,
+            TransactionCorrection, TransactionKind, TransactionPage, TransactionStatus, UpdateAccountRequest,
+            UpdateCategoryRequest]
+          changed: [IdempotencyTreatment, ProblemCode]
+          removed: []
+        parameters:
+          added: [
+            AccountId, AccountTypeFilter, ArchivedFilter, CategorisationAsOf, CategorisationMode,
+            CategoryId, CategoryNatureFilter, CategoryParentFilter, CategoryRedirectId, ChannelId,
+            CoreApiVersion, CoreCreatedSort, CoreCursor, CorePageSize, CredentialId, DeviceId,
+            EnrollmentId, OccurredBefore, OccurredFrom, RecoveryId, RecoveryProof, SessionId,
+            TransactionAccountFilter, TransactionCategoryFilter, TransactionId, TransactionSort]
+          changed: []
+          removed: []
+        headers:
+          added: [CoreContractVersion, CoreDeprecation, CoreNoStore, CoreSunset]
+          changed: []
+          removed: []
+        responses:
+          added: [AuthNoContent, AuthTokens, CoreDPoPChallenge, CoreProblem, CoreTransactionCreated]
+          changed: []
+          removed: []
+        requestBodies:
+          added: []
+          changed: []
+          removed: []
+        securitySchemes:
+          added: [BrowserRefreshCookie, DPoPBootstrap]
+          changed: []
+          removed: []
 tags:
+  - name: Auth
+    description: ADR-019 passkey, device-bound session and recovery contracts; no password or SMS-login fallback.
+  - name: Accounts
+    description: Own financial accounts; balances are derived, never writable columns or client authority.
+  - name: Transactions
+    description: Own append-only balanced ledger facts; corrections reverse and re-post rather than editing entries.
+  - name: Categories
+    description: ADR-016 reporting dimension, not ledger accounts; assignments and redirect history are append-only.
   - name: CustomDestinations
     description: |
       Owner-only custom destination enrollment through the authenticated core API, never direct
@@ -89,6 +191,1265 @@ tags:
       applicable T1-T20 gate must pass before exposure. Operators cannot register or promote
       destinations through this group; administrative abuse controls use their separate authority.
 paths:
+  /auth/enrollments:
+    post:
+      operationId: startEnrollment
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Email proof and enrollment ceremonies use single-use bounded challenges, not financial response replay.
+      description: |
+        Begin consent/age-eligible enrollment on a passkey-capable client with a fresh DPoP key
+        proof, before an access token exists. Verify the eligibility receipt server-side, then
+        send the single-use email verification instrument only when the owner-approved provider
+        is available. Account existence, sends/limiting and timing are indistinguishable to callers.
+        Nothing here creates an account, password, SMS login or active session.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthEnrollmentRequest'}
+      responses:
+        '202':
+          description: Identical enrollment verification receipt; delivery is not account creation.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthEnrollmentAccepted'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/enrollments/{enrollmentId}/verify:
+    parameters: [{$ref: '#/components/parameters/EnrollmentId'}]
+    post:
+      operationId: verifyEnrollmentChannel
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: A channel instrument is verified/consumed once under its ceremony and key, with its own lifetime.
+      description: |
+        Verify the six-digit code or link within 600 seconds and five attempts per send under the
+        original enrollment/key. Never infer ownership from an email or client boolean. Issue a
+        one-use passkey registration grant only after proof; an existing-account route is communicated
+        through the verified inbox, never an anonymous lookup. No raw email body is accepted.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannelProofRequest'}}}
+      responses:
+        '200':
+          description: Verified, key-bound one-time registration grant.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthEnrollmentVerified'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/passkeys/registration/options:
+    post:
+      operationId: registrationOptions
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Registration options are single-use ceremony challenges, never thirty-day replayed credentials.
+      description: |
+        Consume only an enrollment/credential-add grant issued for the current verified key/intent.
+        Return the accepted resident-key/UV-required, attestation-none options with all three
+        algorithms, random handle and 32-byte challenge. The challenge expires in 300 seconds.
+        RP/origin/domain inputs must be bound before real registration; no placeholder is accepted
+        as production authorization. Existing credentials are excluded; the limit is ten.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRegistrationOptionsRequest'}}}
+      responses:
+        '200':
+          description: Single-use WebAuthn creation options.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthCreationOptions'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/passkeys/registration/result:
+    post:
+      operationId: registrationResult
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Signature/challenge consumption and credential/session issuance have the ADR-019 ceremony lifecycle.
+      description: |
+        Verify type/origin/RP/challenge, credential key, UV, user handle, grant/DPoP ownership and
+        account credential limit before atomic creation. For initial enrollment, create the profile
+        with its required IANA zone only after channel proof plus passkey success; no password/OTP
+        fallback. Verify key attestation when available without identifier extensions and discard
+        the chain. An unattested device remains usable with the prescribed step-up restrictions.
+        For credential-add, the established/recovering-device grant retains its one-shot and young-
+        credential rules. Issue only minimal DPoP-bound tokens; no PII/token internals in diagnostics.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRegistrationResultRequest'}}}
+      responses:
+        '201': {$ref: '#/components/responses/AuthTokens'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/passkeys/authentication/options:
+    post:
+      operationId: authenticationOptions
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Username-less options create a bounded single-use challenge and reveal no account lookup result.
+      description: |
+        Begin a discoverable, username-less passkey assertion bound to the proving device key.
+        No email/password/SMS-login credential or account selector is accepted. Client-only
+        authenticator_unavailable remains local-only and is not emitted as a server problem code.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthAuthenticationOptionsRequest'}}}
+      responses:
+        '200':
+          description: Fresh UV-required assertion challenge.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthAssertionOptions'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/passkeys/authentication/result:
+    post:
+      operationId: authenticationResult
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: The assertion is consumed once; session issuance is not a financial idempotency receipt.
+      description: |
+        Verify the discoverable assertion, origin/RP/challenge/UV/signature/counter and DPoP key.
+        Counter regression marks clone_suspected, requires another credential and notifies channels;
+        it is not ignored for convenience. Register a device/family under the verified owner and
+        notify existing channels/devices without persisting approximate network location.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthAssertionResultRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/AuthTokens'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/token:
+    post:
+      operationId: refreshSession
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Refresh rotates one bound family; its inclusive thirty-second grace is not a P30D financial replay.
+      description: |
+        Android refresh with grant_type=refresh_token and the same device key, including a server
+        nonce in the newly signed DPoP proof. Serialize rotation per family. Within exactly 30.000
+        seconds of recorded rotation, return the same newly minted pair; outside grace or after
+        family revocation, revoke the family, notify and return session_revoked. Binding mismatch
+        also revokes. Sliding lifetime is 30 days; absolute family lifetime 90 days requires a fresh
+        passkey assertion. Authentication, nonce/signature and family checks occur before issuance.
+        The first-party JSON transport is explicit; it does not claim a public OAuth authorization server.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRefreshRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/AuthTokens'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/token/browser:
+    post:
+      operationId: refreshBrowserSession
+      tags: [Auth]
+      security: [{DPoPBootstrap: [], BrowserRefreshCookie: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: The HttpOnly refresh cookie uses the same rotation/grace/revocation semantics, never financial replay.
+      description: |
+        Web refresh under same-site/origin protections with the HttpOnly refresh cookie and fresh
+        DPoP proof/nonce. Apply the same 30-second inclusive grace, 30-day sliding and 90-day absolute
+        family bounds as Android. Never return a refresh token in web-script JSON or store access
+        in persistent script-readable storage. Losing the non-extractable key ends the session.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthBrowserRefreshRequest'}}}
+      responses:
+        '200':
+          description: Access token only in JSON; rotate only the HttpOnly/Secure/SameSite=Strict refresh cookie.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}, DPoP-Nonce: {$ref: '#/components/headers/DPoPNonce'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthBrowserTokenSet'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/profile:
+    get:
+      operationId: getProfile
+      tags: [Auth]
+      description: Own private profile, including the canonical IANA calendar zone, under a live device-bound session.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Own personal settings, never token/telemetry attributes.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthProfile'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    put:
+      operationId: updateProfile
+      tags: [Auth]
+      description: |
+        Set own display name and tzdb-validated/canonicalized IANA zone. Re-derive calendar reports
+        from stored immutable instants; never rewrite occurred_at/booked_at or infer a zone from an
+        offset. No channel, owner, credential or entitlement field is accepted.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthProfile'}}}
+      responses:
+        '200':
+          description: Own updated metadata; ledger instants/history remain unchanged.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}, Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthProfile'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/credentials:
+    get:
+      operationId: listCredentials
+      tags: [Auth]
+      description: List the owner's at-most-ten passkeys; never return secret credential material or another owner's identifiers.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Own passkey security metadata.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthCredentialList'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: addCredential
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: A single-use mature-passkey grant authorizes one credential-add ceremony, not financial replay.
+      description: |
+        Obtain a bounded credential-add registration grant under fresh step-up bound to this
+        operation/name/session/key. The separate addRecoveryCredential operation carries the
+        ADR-019 one-shot recovering-device exception; this operation never accepts recovery
+        proof instead of its required step-up. A new passkey retains its 24-hour maturity rule.
+        Registration/result still verify the ceremony before a credential exists; notify all channels.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthCredentialNameRequest'}}}
+      responses:
+        '201':
+          description: One-use registration grant, not a created passkey.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRegistrationGrant'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/credentials/{credentialId}:
+    parameters: [{$ref: '#/components/parameters/CredentialId'}]
+    patch:
+      operationId: renameCredential
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Exact-target single-use credential-management grant; no replay of secret responses.
+      description: Rename only the owner's exact credential with fresh mature-passkey UV step-up and operation/target/body binding.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthCredentialNameRequest'}}}
+      responses:
+        '200':
+          description: Updated own passkey name; channels/devices are notified.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthCredential'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    delete:
+      operationId: removeCredential
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Exact credential revocation uses its single-use authorization/lifecycle, not a financial receipt.
+      description: |
+        Remove only the exact own credential under fresh bound mature-passkey step-up. Verify
+        target/session/key and single use before execution; a token for another credential is
+        invalid. Notify channels/devices and use the platform Signal API when supported.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/sessions:
+    get:
+      operationId: listSessions
+      tags: [Auth]
+      description: Owner-only active sessions; no token/family hash or other-owner visibility.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Bounded own session metadata.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthSessionList'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/sessions/{sessionId}:
+    parameters: [{$ref: '#/components/parameters/SessionId'}]
+    delete:
+      operationId: revokeSession
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Protective own-session revocation is terminal/auth lifecycle, with no credential replay body.
+      description: |
+        Revoke the own session/family, including the current one if named, without fresh step-up.
+        Apply live per-sid revocation within 60 seconds. Unknown/foreign references have the same
+        safe refusal; no family internals are disclosed.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/sessions/revoke-all:
+    post:
+      operationId: revokeAllSessions
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Protective sign-out-everywhere revokes every family/device including the executing session.
+      description: |
+        Sign out everywhere without step-up; revoke all own families/devices INCLUDING current,
+        within the accepted 60-second propagation bound. A stolen session cannot evict the owner
+        while keeping itself. The next sign-in is a passkey assertion.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/devices:
+    get:
+      operationId: listDevices
+      tags: [Auth]
+      description: Own device names, trust/attestation classes and server times; no identifier-attestation chain is retained or returned.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Bounded owner device metadata.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthDeviceList'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: registerDevice
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Device/key attestation uses a single-use server challenge and session binding, not financial replay.
+      description: |
+        Register the current verified session's device/proof key after a bound server challenge.
+        The public key must match the proof/session thumbprint; another device signs in by its own
+        passkey assertion rather than moving a token. Verify Android roots/package/signing digest
+        without device-properties/ID extensions; discard chain and store only derived hardware/
+        software/none evidence and trust. No supplied trust/attestation verdict is accepted.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthDeviceRegistrationRequest'}}}
+      responses:
+        '201':
+          description: Verified own device, not an attestation or authorization claim by a client.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthDevice'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/devices/challenge:
+    post:
+      operationId: deviceChallenge
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: The server issues a bounded single-use key-attestation challenge, never a financial receipt.
+      description: Issue a fresh session/current-key-bound Android attestation challenge; no network permission, device identifier or new trust is granted.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Single-use challenge and expiry.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthDeviceChallenge'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/devices/{deviceId}:
+    parameters: [{$ref: '#/components/parameters/DeviceId'}]
+    delete:
+      operationId: removeDevice
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: One exact bound device-removal grant revokes its families; no credential response replay.
+      description: Remove only the own target device under fresh mature-passkey step-up; revoke its sessions/families within 60 seconds.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/channels:
+    get:
+      operationId: listChannels
+      tags: [Auth]
+      description: Own opaque verification/maturity/suspect metadata; a suspect channel receives event/time-only notices and no recovery/action links.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Bounded own channel metadata.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannelList'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: addChannel
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Owner/key-bound single-use channel-add/verification ceremony, not replayed credentials.
+      description: |
+        Add a mandatory-type email under exact-intent mature-passkey step-up; verify before it can
+        replace another channel and wait seven days before recovery maturity. Send values live
+        only in the encrypted channel class. Phone needs the unresolved provider and OI-4b approval,
+        so no phone or SMS-login field/provider call is silently enabled by this contract.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannelInput'}}}
+      responses:
+        '202':
+          description: Own unverified channel metadata; no maturity/verification is implied by delivery.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannel'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/channels/{channelId}/verify:
+    parameters: [{$ref: '#/components/parameters/ChannelId'}]
+    post:
+      operationId: verifyChannel
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Verification consumes a bounded channel instrument and exact-target step-up grant.
+      description: |
+        Verify/reverify the exact own channel under fresh step-up; six-digit code or link expires
+        at 600 seconds and five attempts per send. Reverification clears suspect only after proof
+        and notifies all channels/devices. Maturity is seven days, not an inferred offset/timer
+        allowing an unverified or suspect channel to recover.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannelProofRequest'}}}
+      responses:
+        '200':
+          description: Verified own channel and server-computed maturity instant.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthChannel'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/channels/{channelId}:
+    parameters: [{$ref: '#/components/parameters/ChannelId'}]
+    delete:
+      operationId: removeChannel
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Single-use exact-channel removal/reversal window follows ADR-019, not financial replay.
+      description: |
+        Remove only an own channel with fresh step-up; refuse the last verified email unless a
+        replacement is already verified (maturity is recommended, not required). Removal immediately
+        ends veto/links and cancels recoveries proven by that channel without charging them.
+        First removal has one 24-hour restoration link; restoration flags suspect and a second
+        removal is final. Purge the stored value after the permitted window, restore-safe.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/channels/{channelId}/restore:
+    parameters: [{$ref: '#/components/parameters/ChannelId'}]
+    post:
+      operationId: restoreRemovedChannel
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: The delivered single-use restoration instrument has the accepted bounded channel lifecycle.
+      description: |
+        Use only the first-removal link during its 24-hour window to restore this channel flagged
+        suspect. It cannot cancel/complete recoveries, restore revoked links or replace passkey
+        step-up; notify all channels/devices. No link is available after the final second removal.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryActionRequest'}}}
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recovery-codes:
+    get:
+      operationId: recoveryCodeStatus
+      tags: [Auth]
+      description: Return only the count of unused codes, never retrieve a previous secret set; no step-up for this count.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '200':
+          description: Own unused-code count.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryCodeCount'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: regenerateRecoveryCodes
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Fresh bound step-up regenerates a one-time secret set and deletes the old one; never replay it for thirty days.
+      description: |
+        With fresh mature-passkey step-up, atomically delete the old code set and issue ten new
+        CSPRNG Crockford slot/secret codes for a single secure-window display. Store only the
+        accepted Argon2id hashes/salts, notify all channels/devices, exclude backup/autofill/logs.
+        A lost response requires reconciliation and another authorized regeneration, not secret replay.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/StepUpToken'}]
+      responses:
+        '201':
+          description: One-time new recovery code set; never available from GET.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryCodeSet'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries:
+    post:
+      operationId: startRecovery
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: An unproven recovery has its own proof/rate/window lifecycle and no financial replay record.
+      description: |
+        Initiate only from a passkey-capable client. Exactly two routes are supported. Before
+        proof, unknown account/channel/code and per-source limiting have identical accepted-and-
+        dropped body/status/timing; never spend an account recovery budget or fan out notices.
+        Only the proving channel may receive the verification instrument. A limiter is not a
+        rate_limited error or an existence oracle; no password/zero-proof fallback.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryStartRequest'}}}
+      responses:
+        '202':
+          description: Identical unproven handle/state whether accepted or silently dropped.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryAccepted'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/verify:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: verifyRecovery
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Proof, per-account serialization and recovery window attachment follow ADR-019, not a key replay store.
+      description: |
+        Verify one code slot with capped Argon2id work or a mature, nonsuspect channel. Failed/
+        unknown/limited anonymous proof attempts retain the same accepted-and-dropped shape;
+        only a proven flow receives lock/window/notification context. A valid code clears its
+        lock. Do not start cooling-off until a notification is accepted: return explicit null
+        window_ends_at and retry delay while notification_pending. Code route holds 24 hours,
+        channel route 72 hours. Same credential/device attaches; another prover must explicitly
+        cancel_and_restart. Per-account locking serializes all recovery/channel transitions.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryVerifyRequest'}}}
+      responses:
+        '202':
+          description: Unproven or proven recovery progress; identity proof gates any additional context.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryProgress'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    get:
+      operationId: recoveryProgress
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      description: Read only a proven own key-bound flow with its recovery proof; an opaque ID alone reveals no status or window.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}, {$ref: '#/components/parameters/RecoveryProof'}]
+      responses:
+        '200':
+          description: Proven own recovery progress; server-assigned absolute windows only.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryProgress'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/cancel:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: cancelRecovery
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Single-use recovery/channel instrument cancellation has the accepted uncharged/bounded lifecycle.
+      description: |
+        Cancel with the bound recovery or delivered channel instrument. Cancellation never
+        counts against the owner's initiation budget. Link-veto uses are bounded per channel
+        and refunded to the proving credential except self-cancellation; excess anonymous uses
+        are accepted-and-dropped identically. A removed/suspect channel's link cannot act.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryActionRequest'}}}
+      responses:
+        '202':
+          description: Safe cancellation receipt, never an account-existence or limiter signal.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryAccepted'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/cancel-from-session:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: cancelRecoveryFromSession
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Protective own-session cancellation is uncharged and never replays a credential response.
+      description: Cancel the own pending recovery from an established verified session without new step-up; never count it against recovery budget.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      responses:
+        '204': {$ref: '#/components/responses/AuthNoContent'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/complete:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: completeRecovery
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Completion consumes the proven key-bound recovery once and revokes old authority; no financial receipt.
+      description: |
+        Complete only the proving device's live flow after its accepted-notification cooling-off
+        window. Dispatch completion/not-me notifications to preexisting channels/devices BEFORE
+        revocation, retain their push reachability for the 24-hour not-me window, then revoke all
+        old sessions/families/devices and suspend stored provider credentials. Register only the
+        recovering device with recovering trust. Keep existing passkeys. Issue a restricted own-
+        read session with the one-shot first-credential rule; no timer/route supplies full authority.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryActionRequest'}}}
+      responses:
+        '200':
+          description: Restricted new device-bound session and server recovery-window metadata.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryCompletion'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/not-me:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: reverseRecovery
+      tags: [Auth]
+      security: [{DPoPBootstrap: []}]
+      x-auth-mode: preauthentication-dpop
+      x-idempotency: auth
+      x-idempotency-reason: Protective one-shot not-me is uncharged and binds the delivered notification instrument.
+      description: |
+        During the server's 24-hour not-me window, reverse recovery using the delivered instrument;
+        never require the attacker's new session/step-up or silently drop this protective action.
+        Revoke recovering authority, remove the code set for a code-route recovery and notify all
+        channels/devices. No prior secret/key/AI ON state is resurrected.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryActionRequest'}}}
+      responses:
+        '202':
+          description: Indistinguishable protective recovery instrument receipt.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryAccepted'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/recoveries/{recoveryId}/credential-grant:
+    parameters: [{$ref: '#/components/parameters/RecoveryId'}]
+    post:
+      operationId: addRecoveryCredential
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: ADR-019 permits one proven recovering-device credential ceremony during restriction, without a mature-passkey step-up or financial replay.
+      x-auth-recovery-exception:
+        maximumAdds: 1
+        recoveringDeviceOnly: true
+        restrictedPeriodOnly: true
+        hybridAllowed: false
+        proof: verified-recovery-and-current-session-key
+      description: |
+        Obtain exactly one credential-add registration grant during the post-recovery restricted
+        period using the proven recovery instrument and its SAME recovering device/session/DPoP
+        key. Serialize and consume the one-shot allowance per recovery; another device, hybrid
+        transfer, expired window or second add refuses. This exception never grants channel,
+        export, provider-key or other step-up actions. Registration options/result still verify
+        a new passkey; its 24-hour maturity starts at creation. No timer alone grants authority.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthRecoveryCredentialRequest'}}}
+      responses:
+        '201':
+          description: One-use recovering-key-bound registration grant; no credential exists until registration succeeds.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthRegistrationGrant'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/step-up/options:
+    post:
+      operationId: stepUpOptions
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Intent-bound UV challenge is a short-lived ceremony, not thirty-day secret replay.
+      description: |
+        Validate the exact registered operation/target/body and Root's step-up-request@1 envelope
+        before hashing. Reject unknown query/JSON names, duplicates and non-IJSON. Bind challenge
+        to verified sid/jkt and intent; preserve omissions, insert no defaults and normalize nothing.
+        Require a mature UV-capable passkey, with only the accepted brand-new-account exemption.
+        This source schema is not a JCS implementation, issuer or replay verifier.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthStepUpIntent'}}}
+      responses:
+        '200':
+          description: Fresh intent-bound passkey assertion challenge.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthAssertionOptions'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /auth/step-up/result:
+    post:
+      operationId: stepUpResult
+      tags: [Auth]
+      x-idempotency: auth
+      x-idempotency-reason: Verify/consume the passkey challenge once and issue a bounded one-use intent grant.
+      description: |
+        Verify signature/origin/RP/challenge/UV and credential maturity, recomputing the same
+        validated intent and checking verified sid/jkt. Issue the opaque Step-Up-Token bound to
+        unique operationId and rq, with expiry/UV freshness at most 300 seconds and atomic single
+        use at the target. No token, rq or raw intent is logged. A different target/body cannot
+        reuse the grant; automatic proof/signature or weaker-factor fallback is absent.
+      parameters: [{$ref: '#/components/parameters/DPoPProof'}, {$ref: '#/components/parameters/CoreApiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AuthStepUpResultRequest'}}}
+      responses:
+        '200':
+          description: One-use verified-session/key/operation/intent-bound confirmation grant.
+          headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AuthStepUpGrant'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [Accounts]
+      description: |
+        Return only the verified principal's accounts in a cursor-bound snapshot. Accept only
+        cursor, page_size, sort, type and is_archived; reject unknown/repeated selectors and
+        cursors from another principal, operation, filter set, sort or expired snapshot.
+        The stable unique-id tie breaker is mandatory. No category grant exposes an account balance.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/CoreCursor'
+        - $ref: '#/components/parameters/CorePageSize'
+        - $ref: '#/components/parameters/CoreCreatedSort'
+        - $ref: '#/components/parameters/AccountTypeFilter'
+        - $ref: '#/components/parameters/ArchivedFilter'
+      responses:
+        '200':
+          description: Owner-only accounts and shared cursor metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountPage'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: createAccount
+      tags: [Accounts]
+      description: |
+        Create the authenticated owner's ASSET or LIABILITY account in the admitted INR ledger.
+        Owner, system role, current/initial balance and account numbers cannot be supplied.
+        Currency/type are immutable after creation. Opening balances are a separate balanced posting,
+        never an account column. Refuse every other account type and non-admitted registry currency.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateAccountRequest'}
+      responses:
+        '201':
+          description: Created owner account; no writable balance.
+          headers:
+            API-Contract-Version: {$ref: '#/components/headers/CoreContractVersion'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: getAccount
+      tags: [Accounts]
+      description: |
+        Read the owner's account. Authentication/ownership precede lookup; unknown and foreign
+        IDs receive the identical safe refusal. No shared-category or aggregate grant grants this read.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+      responses:
+        '200':
+          description: Owner account settings.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    patch:
+      operationId: updateAccount
+      tags: [Accounts]
+      description: |
+        Update only name and archive state; require at least one supplied field. Archiving never
+        deletes entries or changes currency/type. A new name is personal metadata, not raw captured
+        content. Ledger deletion, writable balances, arbitrary metadata and owner reassignment are absent.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateAccountRequest'}
+      responses:
+        '200':
+          description: Updated owner account metadata; financial history is unchanged.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /accounts/{accountId}/opening-balances:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      operationId: postOpeningBalance
+      tags: [Accounts]
+      description: |
+        Post a new OPENING_BALANCE transaction against the server-created equity counter-account.
+        The signed amount uses the account currency and is nonzero; value_date is required.
+        The server assigns occurred_at from that date in the profile zone and booked_at from its
+        application clock, truncating to milliseconds before storage/fingerprinting. No existing
+        balance or ledger entry is overwritten. Screen the owner's same-account/same-amount/currency/
+        value-date postings before execution. A suspected duplicate is the shared 202 content decision,
+        never a created transaction or automatic acknowledgement. Recheck Duplicate-Override ownership.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      x-duplicate-screen: {fields: [accountId, amount, value_date], window: same_effective_date, crossRoute: true}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DuplicateOverride'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpeningBalanceRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/CoreTransactionCreated'}
+        '202': {$ref: '#/components/responses/DuplicateSuspected'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags: [Transactions]
+      description: |
+        List posted facts owned by the authenticated principal, including reversed originals and
+        their correction links; never hide or delete history. Support only account_id, category_id,
+        occurred_from (inclusive), occurred_before (exclusive), cursor, page_size and declared stable
+        sort. An empty/reversed time interval, unsupported filter/sort, changed cursor scope or an
+        expired snapshot is validation_rejected. Date filters use canonical UTC instants, not client
+        calendar calculations. Shared views and unposted ingestion candidates have separate contracts.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/CoreCursor'
+        - $ref: '#/components/parameters/CorePageSize'
+        - $ref: '#/components/parameters/TransactionSort'
+        - $ref: '#/components/parameters/TransactionAccountFilter'
+        - $ref: '#/components/parameters/TransactionCategoryFilter'
+        - $ref: '#/components/parameters/OccurredFrom'
+        - $ref: '#/components/parameters/OccurredBefore'
+      responses:
+        '200':
+          description: Owner-only posted ledger facts and cursor metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TransactionPage'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: postTransaction
+      tags: [Transactions]
+      description: |
+        Post a structured manual fact, never a message/file/parser payload. The server resolves all
+        own accounts, checks nonzero signed entries in one admitted currency and an exact zero sum,
+        then atomically posts at least two entries and seals entry_count/booked_at. The request carries
+        a random source_event_id and never a raw digest, client dedupe key or owner ID. Server-computed
+        structured/fuzzy duplicate detection uses accepted T-CON-10 outcomes; no collision silently
+        creates/deletes a second financial fact. A suspected duplicate is 202 with no effect.
+        Initial categorisation is posted atomically under ADR-016; category_id is not a writable
+        transaction property. Authentication and request-size limits precede idempotency lookup.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      x-duplicate-screen: {fields: [entries, currency, occurred_at], window: PT5M, crossRoute: true, serverDedupe: structured}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DuplicateOverride'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PostTransactionRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/CoreTransactionCreated'}
+        '202': {$ref: '#/components/responses/DuplicateSuspected'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /transactions/{transactionId}:
+    parameters:
+      - $ref: '#/components/parameters/TransactionId'
+    get:
+      operationId: getTransaction
+      tags: [Transactions]
+      description: |
+        Read an own posted fact and immutable signed entries using the same public record alias as
+        DedupOutcome.matched_record_id. Unknown and foreign aliases are indistinguishable.
+        Both occurred_at and booked_at are returned; current status is a projection of reversal
+        links, not permission to mutate/delete a historical entry.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+      responses:
+        '200':
+          description: Own ledger fact with immutable entries and correction provenance.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Transaction'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /transactions/{transactionId}/reversals:
+    parameters:
+      - $ref: '#/components/parameters/TransactionId'
+    post:
+      operationId: reverseTransaction
+      tags: [Transactions]
+      description: |
+        Post exactly one terminal reversal, negating every original entry with the same currency,
+        occurred_at and value_date. The server assigns booked_at and correction_id; no client entry
+        amounts or dates are accepted. Never reverse a reversal or an unposted fact; unique reverses
+        protects against expired/lost request keys independently. Preserve the original row and all
+        entries. Unknown/foreign targets receive the same transaction_not_found validation reason.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReverseTransactionRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/CoreTransactionCreated'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /transactions/{transactionId}/corrections:
+    parameters:
+      - $ref: '#/components/parameters/TransactionId'
+    post:
+      operationId: correctTransaction
+      tags: [Transactions]
+      description: |
+        Atomically reverse a posted non-reversal and post one or more replacement facts sharing a
+        server correction_id. A re-correction first reverses all previous live re-posts; never edit
+        entries, currency, occurred_at or value_date in place. Each replacement is balanced and
+        admitted; a dated original requires dated replacements. Serialize target/link checks so
+        another request key cannot duplicate a correction. Screen replacement structured facts
+        before effects; suspected duplicates use the shared decision under 202, never partial posting.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      x-duplicate-screen: {fields: [transactionId, replacements], window: same_local_day, crossRoute: true}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DuplicateOverride'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CorrectTransactionRequest'}
+      responses:
+        '201':
+          description: Immutable atomic correction receipt; replay returns the exact same rows.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TransactionCorrection'}
+        '202': {$ref: '#/components/responses/DuplicateSuspected'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /transactions/{transactionId}/categorisation:
+    parameters: [{$ref: '#/components/parameters/TransactionId'}]
+    get:
+      operationId: getCategorisation
+      tags: [Categories]
+      description: |
+        Read own assignment/projection at CURRENT or AS_RECORDED. CURRENT returns explicit null
+        as_of. AS_RECORDED uses the server's effective/clamped instant, selecting only facts booked
+        by that instant and the assignment/redirect history active then. Unknown/foreign records
+        are indistinguishable; categories are not accounts and no mixed-nature/currency total is
+        inferred. as_of with CURRENT is as_of_not_applicable.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/CategorisationMode'
+        - $ref: '#/components/parameters/CategorisationAsOf'
+      responses:
+        '200':
+          description: Own append-only assignment and the server-selected reporting view.
+          content: {application/json: {schema: {$ref: '#/components/schemas/Categorisation'}}}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: assignCategories
+      tags: [Categories]
+      description: |
+        Append one whole USER/USER_EDIT assignment, never update entries or an earlier assignment.
+        Every categorisable INCOME/EXPENSE entry receives one complete exact or weighted line set
+        in its own sign/currency; other account types are not categorisable. Exact nonzero lines
+        must sum precisely to the entry. Weighted lines use integer weights 1-1000000, at most
+        32 per entry; the server alone allocates by largest remainder, ties in supplied stable
+        position order, removes zero shares and assigns contiguous output positions. No client
+        rounding, AI confidence or caller-selected source/rank/provenance is accepted.
+        Resolve only own same-nature, nonarchived/nonredirected categories; null explicitly means
+        uncategorised. Reject reversed/reversal/unposted transactions. Rank(USER) is five; all
+        earlier sets persist. Serialize sequence allocation; retry a unique-constraint loser once
+        against the new head, then return safe request_failed. Replays return the same receipt.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      x-duplicate-screen: {fields: [transactionId, entries], window: same_local_day, crossRoute: true}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DuplicateOverride'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CategoryAssignmentRequest'}}}
+      responses:
+        '201':
+          description: New immutable USER assignment and current view, not a financial posting.
+          headers: {Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/Categorisation'}}}
+        '202': {$ref: '#/components/responses/DuplicateSuspected'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [Categories]
+      description: |
+        Return only the owner's reporting categories, lazily materializing non-retired accepted
+        seed keys. Support only nature, is_archived, parent_id, cursor, page_size and declared sort.
+        Parent hierarchy is immutable with one child level; categories have no currency/balance.
+        Active redirects are returned as references, never by silently resurrecting a merged source.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/CoreCursor'
+        - $ref: '#/components/parameters/CorePageSize'
+        - $ref: '#/components/parameters/CoreCreatedSort'
+        - $ref: '#/components/parameters/CategoryNatureFilter'
+        - $ref: '#/components/parameters/CategoryParentFilter'
+        - $ref: '#/components/parameters/ArchivedFilter'
+      responses:
+        '200':
+          description: Owner categories and shared cursor metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CategoryPage'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    post:
+      operationId: createCategory
+      tags: [Categories]
+      description: |
+        Create an owner USER category, never a ledger/system account or a client-selected SYSTEM
+        key. Nature/parent are immutable; a parent must be an own root of the same nature. Check
+        decrypted-name uniqueness within owner/parent without a new blind index. Unknown/foreign
+        parents receive the same category_not_found refusal. Category creation moves no money.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCategoryRequest'}
+      responses:
+        '201':
+          description: Created owner reporting category.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Category'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /categories/{categoryId}:
+    parameters:
+      - $ref: '#/components/parameters/CategoryId'
+    get:
+      operationId: getCategory
+      tags: [Categories]
+      description: |
+        Read the owner's reporting category, including archive state and redirect reference.
+        Unknown and foreign IDs share the safe category_not_found refusal. No balance, currency,
+        raw content or other principal's category name is returned through a sharing grant.
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+      responses:
+        '200':
+          description: Own reporting category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Category'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+    patch:
+      operationId: updateCategory
+      tags: [Categories]
+      description: |
+        Change only the owner's personal label and archive state. Parent, nature, kind and seed
+        key are immutable. No hard-delete is offered: existing assignment/redirect history remains.
+        Archived/redirected categories cannot receive new allocation lines. This metadata update
+        is not a financial correction or a replacement of historical assignment sets.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateCategoryRequest'}
+      responses:
+        '200':
+          description: Current category metadata; assignment and ledger history remain intact.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Category'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /categories/{categoryId}/redirects:
+    parameters:
+      - $ref: '#/components/parameters/CategoryId'
+    post:
+      operationId: redirectCategory
+      tags: [Categories]
+      description: |
+        Append a same-owner/same-nature redirect to a terminal category; never re-point entries,
+        historical assignment lines or sharing grant rows. Refuse self-targets, a nonterminal
+        target, an existing active redirect, depth over eight or a parent redirected to a child.
+        Resolve committed state under ADR-016's ordered locks and READ COMMITTED constraints.
+        Confirmation must disclose that source grants become inert and target grantees gain the
+        resolved category's transactions; this contract does not expand any grant.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RedirectCategoryRequest'}
+      responses:
+        '201':
+          description: Immutable redirect fact, not deletion or silent grant mutation.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CategoryRedirect'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
+  /categories/{categoryId}/redirects/{redirectId}/retract:
+    parameters:
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/CategoryRedirectId'
+    post:
+      operationId: retractCategoryRedirect
+      tags: [Categories]
+      description: |
+        End the own redirect once by recording retracted_at; retain the row and never reactivate
+        it. Unknown/foreign references receive the same safe refusal. Confirmation names the
+        reverse sharing effect: live source grants resume and target grantees lose the source's
+        transactions, without rewriting any grant or historical allocation.
+      x-idempotency-policy: {scope: [principal, method, path_template, key], lifetime: P30D, retryHorizon: P14D}
+      parameters:
+        - $ref: '#/components/parameters/DPoPProof'
+        - $ref: '#/components/parameters/CoreApiVersion'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Original redirect with its immutable retraction instant.
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CategoryRedirect'}
+        '401': {$ref: '#/components/responses/CoreDPoPChallenge'}
+        default: {$ref: '#/components/responses/CoreProblem'}
   /ai/custom-destinations:
     get:
       operationId: listCustomDestinations
@@ -278,6 +1639,239 @@ paths:
           $ref: '#/components/responses/CustomDestinationProblem'
 components:
   schemas:
+    AuthenticationParameters:
+      type: string
+      const: adr-019-auth-parameters@1
+      description: |
+        Identity of the COMPLETE accepted ADR-019 section-15 artifact mirrored below as source
+        metadata, not an endpoint payload or issuer configuration. All unbound owner inputs and
+        placeholders are preserved; they do not qualify origins, providers or runtime adoption.
+      x-adr-source:
+        repository: PenniLogic/docs
+        commit: a700e639585c61a4610e7b99dbd02b2dab28bdcc
+        path: adr/ADR-019.md
+        section: 15
+        canonicalJsonSha256: 84ca3e5ecebbdaed4df90ebe6b6f847ac8f2d68d70536e82e735ec8dc5258300
+      x-adr-019-auth-parameters:
+        {
+          "artifact": "adr-019-auth-parameters",
+          "schema_version": 1,
+          "adr": "ADR-019",
+          "owner_inputs": {
+            "product_domain": null,
+            "staging_domain": null,
+            "android_app_signing_cert_sha256": null,
+            "android_upload_cert_sha256": null,
+            "email_provider_approved": false,
+            "sms_provider_approved": false,
+            "phone_as_recovery_channel": {
+              "owner_decision_id": "OI-4b",
+              "decided": false,
+              "default": false,
+              "effect_when_false": "phone value stored as HMAC blind index only (trial-abuse check); no ciphertext retained; phone is not a recovery or notification channel",
+              "effect_when_true": "phone value stored under ADR-018's blind-indexed class (ciphertext plus index); phone may become a recovery channel after 7-day maturity"
+            }
+          },
+          "relying_party": {
+            "rp_id_rule": "registrable domain (eTLD+1) of the canonical customer web origin",
+            "rp_id": "{product_domain}",
+            "rp_name": "PenniLogic",
+            "web_origins": ["https://{product_domain}"],
+            "optional_web_origins": ["https://app.{product_domain}"],
+            "android_package_name": "com.pennilogic.android",
+            "android_debug_package_name": "com.pennilogic.android.debug",
+            "android_origins": [
+              "android:apk-key-hash:{base64url(sha256(android_app_signing_cert))}",
+              "android:apk-key-hash:{base64url(sha256(android_upload_cert))}"
+            ],
+            "android_origin_encoding": "base64url-nopad",
+            "assetlinks_url": "https://{product_domain}/.well-known/assetlinks.json",
+            "assetlinks_relations": [
+              "delegate_permission/common.get_login_creds",
+              "delegate_permission/common.handle_all_urls"
+            ],
+            "related_origins_url": "https://{product_domain}/.well-known/webauthn",
+            "related_origins": [],
+            "related_origin_label_limit": 5,
+            "over_limit_fallback": "redirect-to-canonical sign-in on the RP ID host; otherwise a separate RP ID with separate credentials",
+            "admin_shares_rp_id": false
+          },
+          "passkeys": {
+            "mvp_primary_credential": true,
+            "passwords": false,
+            "sms_otp_login": false,
+            "resident_key": "required",
+            "user_verification": "required",
+            "attestation_conveyance": "none",
+            "pub_key_cred_params": [-7, -8, -257],
+            "challenge_bytes": 32,
+            "challenge_ttl_seconds": 300,
+            "user_handle_bytes": 32,
+            "max_credentials_per_account": 10,
+            "backup_eligible_accepted": true,
+            "signature_counter_regression": "mark clone_suspected, force step-up with another credential, notify all channels",
+            "email_verification_ttl_seconds": 600,
+            "min_android_api": 28
+          },
+          "tokens": {
+            "access_token_type": "at+jwt",
+            "access_token_alg": "ES256",
+            "access_token_ttl_seconds": 900,
+            "access_token_audience": "pennilogic-api",
+            "revocation_propagation_seconds": 60,
+            "refresh_token_bytes": 32,
+            "refresh_token_storage": "sha256",
+            "refresh_sliding_ttl_seconds": 2592000,
+            "session_absolute_lifetime_seconds": 7776000,
+            "refresh_grace_window_seconds": 30,
+            "refresh_grace_window_boundary": "inclusive at 30.000 s; server clock; rotated_at of the previous token to server receipt of its second presentation",
+            "reuse_detection": "revoke-family",
+            "device_binding": "dpop-rfc9449",
+            "dpop_proof_max_skew_seconds": 60,
+            "dpop_jti_replay_window_seconds": 300,
+            "dpop_nonce_required_at_token_endpoint": true,
+            "dpop_nonce_on_resource": "on_skew_or_replay",
+            "android_key_attestation": "required-when-available",
+            "attestation_request_extensions": "none (no device-properties, no ID attestation)",
+            "attestation_chain_retained": false,
+            "step_up_freshness_seconds": 300,
+            "step_up_binding": ["sid", "jkt", "op", "rq"],
+            "young_credential_seconds": 86400
+          },
+          "token_claims": {
+            "at+jwt": ["iss", "sub", "aud", "exp", "iat", "jti", "sid", "dev", "cnf.jkt", "amr", "acr", "auth_time", "scope"],
+            "wl+jwt": ["iss", "aud", "exp", "iat", "jti"],
+            "dlg+jwt": ["iss", "sub", "aud", "exp", "iat", "jti", "act.sub", "azp", "sid", "scope", "acr", "rq"],
+            "step_up": ["sid", "jkt", "op", "rq", "exp", "jti"],
+            "operator_delegation": "claim set owned by ADR-020 \u00a77 / \u00a710 item 5: sub, sid, iss, aud=pennilogic-api-admin, act.sub=admin, acr (ADR-020 values), iat, exp; replay bounds owned here: unique jti, exp <= 120 s, admin sid revocation check"
+          },
+          "enums": {
+            "amr": ["passkey", "recovery_code", "channel"],
+            "acr": ["trusted", "recovering", "unattested"],
+            "acr_scope": "customer identity domain only; administrative acr values are defined by ADR-020",
+            "attestation": ["hardware", "software", "none"],
+            "trust": ["trusted", "recovering", "unattested"],
+            "revocation_reason": ["reuse_detected", "binding_mismatch", "signout", "signout_all", "absolute_expiry", "recovery", "not_me", "admin"],
+            "recovery_state": ["unproven", "notification_pending", "cooling_off", "pending_elsewhere", "cancelled", "completed", "restricted_after_recovery", "reversed"],
+            "credential_flags": ["clone_suspected"],
+            "channel_type": ["email", "phone"],
+            "channel_flags": ["suspect"]
+          },
+          "client_conditions": {
+            "server_owned_by_T-AUTH-01": ["session_revoked", "step_up_required", "step_up_credential_too_new", "restricted_after_recovery", "recovery_locked", "recovery_notification_pending", "recovery_pending_elsewhere"],
+            "client_owned_by_T-AND-01_T-WEB-01": ["authenticator_unavailable"]
+          },
+          "audit_events": [
+            "auth.passkey.register", "auth.passkey.assert", "auth.rp.origin_rejected",
+            "auth.refresh.rotate", "auth.refresh.grace_resolved", "auth.refresh.reuse_detected", "auth.binding_mismatch",
+            "auth.dpop.replay", "auth.dpop.nonce_challenge", "auth.device.registered",
+            "auth.stepup.required", "auth.stepup.satisfied", "auth.stepup.replayed", "auth.stepup.young_credential_refused",
+            "auth.recovery.initiated", "auth.recovery.proven", "auth.recovery.cancelled", "auth.recovery.completed", "auth.recovery.not_me",
+            "auth.recovery.first_credential", "auth.recovery_code.attempt", "auth.recovery.locked",
+            "auth.channel.verified", "auth.channel.matured", "auth.channel.suspect", "auth.channel.removed",
+            "auth.token.type_mismatch", "auth.workload.rejected", "auth.delegation.rejected",
+            "auth.rp.dal_check", "auth.rp.ror_label_count", "auth.session.signout_all"
+          ],
+          "recovery": {
+            "routes": ["recovery_code", "channel_reverification"],
+            "recovery_code_count": 10,
+            "recovery_code_format": "S-XXXXX-XXXX: 1 Crockford slot character + 9 Crockford base32 secret characters",
+            "recovery_code_secret_bits": 45,
+            "recovery_code_normalisation": ["uppercase", "strip hyphens and whitespace", "O->0", "I->1", "L->1"],
+            "recovery_code_hash": "argon2id",
+            "recovery_code_hash_params": {"memory_kib": 65536, "iterations": 3, "parallelism": 1, "salt_bytes": 16},
+            "recovery_code_hashes_per_attempt": 1,
+            "recovery_code_attempt_limit_per_source_24h": 10,
+            "recovery_code_attempt_limit_per_account_24h": 5,
+            "recovery_code_account_attribution": "attempt attributable to an account only after that account's channel is proven or a valid code for it was presented in this request, or inside a proven channel_reverification flow; anonymous attempts are per-source only",
+            "recovery_lock_seconds": 86400,
+            "recovery_lock_liftable_by_proven_channel": true,
+            "counted_initiation_limit_per_account_7d": 3,
+            "initiation_counts_when": ["pending", "completed_unreversed"],
+            "initiation_does_not_count_when": ["unproven", "cancelled_by_link", "cancelled_from_session", "cancelled_in_app", "reversed_by_not_me"],
+            "unproven_initiation_limit": "per source only (address, DPoP key); value owned by api#57",
+            "notification_after_proof": true,
+            "notification_required_before_window_starts": true,
+            "cooling_off_seconds": {"recovery_code": 86400, "channel_reverification": 259200},
+            "post_recovery_restriction_seconds": 86400,
+            "post_recovery_credential_add": "once, by recovery proof, recovering device only, during the restricted period; young-credential rule applies from creation; hybrid flow not accepted",
+            "recovery_initiation_requires_passkey_capable_client": true,
+            "credential_change_restriction_seconds": 86400,
+            "channel_removal_reversal_seconds": 86400,
+            "channel_removal_reversal_effect": "restored channel flagged suspect; all channels and devices notified; second removal of the same channel is final",
+            "sole_email_replacement": "removal of an email allowed once a replacement email is verified (maturity recommended, not required); account may lack a mature recovery channel for at most 7 days; a suspect channel receives no recovery links",
+            "proof_limit_per_credential_7d": 3,
+            "proof_limit_scope": "per proving channel or code set, regardless of outcome; excess proofs accepted-and-dropped and never notify",
+            "link_cancellation_limit_per_channel_7d": 3,
+            "link_cancellation_charging": "charged as one proof-equivalent use of the delivering channel; a fourth is accepted-and-dropped; the cancelled owner proof is refunded to the owner's credential unless the link was delivered to the proving channel itself",
+            "link_cancellation_refund_excludes_self_channel": true,
+            "not_me_and_cancel_and_restart_uncharged": true,
+            "suspect_channel_notification_content": "event type and time only; no device model, location, route or channel details, no links",
+            "valid_code_clears_lock": true,
+            "single_pending_initiation": {
+              "max_pending_per_account": 1,
+              "recovering_device": "the single device (DPoP key) that made the proven initiation",
+              "same_credential_same_device": "attaches (retry): same window, same recovering device, one 'another attempt' line to every channel, counted under auth.recovery.proven with attribute retry",
+              "different_credential_or_device": "never attaches: surfaces the pending request, may cancel it (uncounted), then starts its own window and recovering device",
+              "second_prover_state": "pending_elsewhere",
+              "second_prover_action": "cancel_and_restart",
+              "serialisation": "per-account lock over initiation, retry, cancellation, not_me, completion, channel removal"
+            },
+            "residual_risk_proof_suspension": "a credential holder who spends its 3 proofs per 7 days passively suspends recovery through that credential for the rest of the period; other credentials unaffected; link cancellations by a channel holder are bounded separately and refunded to the owner (except self-cancels); mirror case: a link-only owner who spends 3 link cancellations is inert for the week and relies on the uncharged not_me or on proving from a capable device",
+            "not_me_window_seconds": 86400,
+            "not_me_code_route_effect": "delete entire current code set and any set created since initiation",
+            "regeneration_effect": "delete previous set",
+            "channel_maturity_seconds": 604800,
+            "mandatory_channel": "email",
+            "minimum_verified_emails": 1,
+            "optional_channels": ["phone"],
+            "otp_digits": 6,
+            "otp_ttl_seconds": 600,
+            "otp_attempt_limit": 5,
+            "send_limits": "per address and per source; values owned by api#57",
+            "step_up_operations": [
+              "export", "delete_account", "sharing_invite", "sharing_accept", "grant_change",
+              "credential_add", "credential_remove", "credential_rename",
+              "recovery_codes_regenerate", "channel_add", "channel_remove", "channel_verify",
+              "provider_key_add", "provider_key_replace", "custom_endpoint_change", "device_remove"
+            ],
+            "window_restricted_operations": "step_up_operations minus the one-shot post-recovery credential_add, plus shared_detail_read",
+            "timeline_phases": ["unproven", "notification_pending", "cooling_off", "restricted_after_recovery", "young_credential", "full_function"],
+            "time_to_full_function_hours": {"min": 48, "max": 120},
+            "time_to_restricted_session_hours": {"min": 24, "max": 72}
+          },
+          "lifecycle": {
+            "refresh_tokens_purge_after_revocation_or_expiry_seconds": 2592000,
+            "devices_and_sessions_purge_when_no_live_family": true,
+            "recovery_requests_purge_after_window_end_seconds": 2592000,
+            "step_up_assertions_purge_after_expiry_seconds": 86400,
+            "removed_channel_value_purge_after_reversal_window": true,
+            "superseded_recovery_code_sets": "deleted on regeneration or not-me",
+            "attestation_chain_retention_seconds": 0,
+            "events_live_in": "T-SEC-03 audit store under the T-CMP-04 retention profile",
+            "purges_restore_safe_per": "T-SEC-07"
+          },
+          "workload_identity": {
+            "workload_token_type": "wl+jwt",
+            "workload_token_ttl_seconds": 300,
+            "delegation_token_type": "dlg+jwt",
+            "delegation_token_ttl_seconds": 120,
+            "audiences": {
+              "api_customer": "pennilogic-api",
+              "api_tools": "pennilogic-api-tools",
+              "ai_service": "pennilogic-ai-service",
+              "api_admin": "pennilogic-api-admin"
+            },
+            "verifier_dispatch": "typ and key class first; customer endpoints at+jwt with cnf only; tool endpoints dlg+jwt plus presenter wl+jwt; workload verification wl+jwt only",
+            "administrative_registrations": "additional service audiences and workload identities for the administrative boundary are registered by ADR-020 under this dispatch rule; never accepted on customer endpoints; no values listed here",
+            "delegation_minters": ["api"],
+            "operator_delegation_minter": "admin identity domain (ADR-020)",
+            "key_rotation_days": 90,
+            "key_overlap_hours": 24,
+            "jwks_cache_seconds": 60,
+            "jti_replay_window_seconds": 300
+          }
+        }
     Money:
       type: object
       additionalProperties: false
@@ -645,9 +2239,15 @@ components:
         - import_preview_unavailable
         - quota_exhausted
         - rate_limited
+        - recovery_locked
+        - recovery_notification_pending
+        - recovery_pending_elsewhere
         - request_failed
         - request_malformed
+        - restricted_after_recovery
         - role_capability_denied
+        - session_revoked
+        - step_up_credential_too_new
         - step_up_required
         - validation_rejected
     ClientState:
@@ -661,7 +2261,7 @@ components:
     IdempotencyTreatment:
       type: string
       description: Applies only to operations requiring ADR-015 keys; authentication flows retain ADR-019's separate lifecycle.
-      enum: [reuse_unchanged, new_after_edit, new_after_body_edit_reuse_for_override, repair_missing_or_malformed, never_replace_to_escape_mismatch, new_preview_new_key]
+      enum: [reuse_unchanged, new_after_edit, new_after_body_edit_reuse_for_override, repair_missing_or_malformed, never_replace_to_escape_mismatch, new_preview_new_key, authentication_lifecycle]
     ProblemField:
       type: string
       description: Registered field tokens only; never a dynamic JSON pointer, account identifier or offending property name. Use request for unregistered fields.
@@ -1157,6 +2757,94 @@ components:
               title: {const: Confirmation required}
               status: {const: 403}
               detail: {const: Fresh authentication confirmation is required.}
+    AuthenticationContextProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: Canonical T-CON-12 ADR-019 context family for new core operations; legacy AuthenticationProblemDetail and custom-destination response domains stay unchanged.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          type: string
+          enum: [session_revoked, step_up_credential_too_new, restricted_after_recovery, recovery_notification_pending, recovery_locked, recovery_pending_elsewhere]
+        correlation_id: {$ref: '#/components/schemas/PublicCorrelationId'}
+        instance: {$ref: '#/components/schemas/PublicProblemInstance'}
+        revocation_reason: {$ref: '#/components/schemas/AuthRevocationReason'}
+        matures_at: {$ref: '#/components/schemas/Instant'}
+        restricted_until: {$ref: '#/components/schemas/Instant'}
+        not_me_until: {$ref: '#/components/schemas/Instant'}
+        window_ends_at: {anyOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        retry_after_seconds: {type: integer, minimum: 1, maximum: 86400}
+        locked_until: {$ref: '#/components/schemas/Instant'}
+        pending_route: {$ref: '#/components/schemas/AuthRecoveryRoute'}
+        action: {type: string, const: cancel_and_restart}
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - if: {properties: {code: {const: session_revoked}}, required: [code]}
+          then:
+            required: [revocation_reason]
+            properties:
+              type: {const: 'urn:pennilogic:problem:session_revoked'}
+              title: {const: Session ended}
+              status: {const: 401}
+              detail: {const: Authenticate again to continue.}
+          else: {not: {required: [revocation_reason]}}
+        - if: {properties: {code: {const: step_up_credential_too_new}}, required: [code]}
+          then:
+            required: [matures_at]
+            properties:
+              type: {const: 'urn:pennilogic:problem:step_up_credential_too_new'}
+              title: {const: Credential confirmation unavailable}
+              status: {const: 403}
+              detail: {const: Use a mature credential or wait for the stated time.}
+          else: {not: {required: [matures_at]}}
+        - if: {properties: {code: {const: restricted_after_recovery}}, required: [code]}
+          then:
+            required: [restricted_until, not_me_until]
+            properties:
+              type: {const: 'urn:pennilogic:problem:restricted_after_recovery'}
+              title: {const: Recovery restrictions active}
+              status: {const: 403}
+              detail: {const: This action is not available during the stated recovery period.}
+          else: {not: {anyOf: [{required: [restricted_until]}, {required: [not_me_until]}]}}
+        - if: {properties: {code: {const: recovery_notification_pending}}, required: [code]}
+          then:
+            required: [window_ends_at, retry_after_seconds]
+            properties:
+              type: {const: 'urn:pennilogic:problem:recovery_notification_pending'}
+              title: {const: Recovery notification pending}
+              status: {const: 409}
+              detail: {const: Wait before checking this proven recovery request.}
+              window_ends_at: {type: 'null'}
+          else: {not: {required: [retry_after_seconds]}}
+        - if: {properties: {code: {const: recovery_locked}}, required: [code]}
+          then:
+            required: [locked_until]
+            properties:
+              type: {const: 'urn:pennilogic:problem:recovery_locked'}
+              title: {const: Recovery temporarily locked}
+              status: {const: 403}
+              detail: {const: Use a proven recovery route or wait for the stated time.}
+          else: {not: {required: [locked_until]}}
+        - if: {properties: {code: {const: recovery_pending_elsewhere}}, required: [code]}
+          then:
+            required: [pending_route, window_ends_at, action]
+            properties:
+              type: {const: 'urn:pennilogic:problem:recovery_pending_elsewhere'}
+              title: {const: Recovery already pending}
+              status: {const: 409}
+              detail: {const: Confirm whether to stop the pending recovery and start here.}
+              window_ends_at: {$ref: '#/components/schemas/Instant'}
+          else: {not: {anyOf: [{required: [pending_route]}, {required: [action]}]}}
+        - if:
+            properties: {code: {not: {enum: [recovery_notification_pending, recovery_pending_elsewhere]}}}
+            required: [code]
+          then: {not: {required: [window_ends_at]}}
     AuthenticationRequiredProblemDetail:
       type: object
       x-pennilogic-strict-provider: true
@@ -1865,7 +3553,1303 @@ components:
             $ref: '#/components/schemas/ImportCommitRow'
         counts:
           $ref: '#/components/schemas/ImportCommitCounts'
+    ApplicationProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      description: Shared T-CON-12 non-egress application transport family; code-specific semantics remain in the canonical service/authentication providers.
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string, maxLength: 2000}
+        code: {$ref: '#/components/schemas/ProblemCode'}
+        correlation_id: {$ref: '#/components/schemas/PublicCorrelationId'}
+        instance: {$ref: '#/components/schemas/PublicProblemInstance'}
+        field: {$ref: '#/components/schemas/ProblemField'}
+        reason: {$ref: '#/components/schemas/ValidationReason'}
+        direction: {$ref: '#/components/schemas/AllocationMismatchDirection'}
+        validation_errors: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/ValidationIssue'}}
+        idempotency_key: {$ref: '#/components/schemas/IdempotencyKeyValue'}
+        retry_after_seconds: {type: integer, minimum: 1, maximum: 86400}
+        allowance: {$ref: '#/components/schemas/Allowance'}
+        entitlement: {$ref: '#/components/schemas/EntitlementDenial'}
+        revocation_reason: {$ref: '#/components/schemas/AuthRevocationReason'}
+        matures_at: {$ref: '#/components/schemas/Instant'}
+        restricted_until: {$ref: '#/components/schemas/Instant'}
+        not_me_until: {$ref: '#/components/schemas/Instant'}
+        window_ends_at: {anyOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        locked_until: {$ref: '#/components/schemas/Instant'}
+        pending_route: {$ref: '#/components/schemas/AuthRecoveryRoute'}
+        action: {type: string, const: cancel_and_restart}
+      allOf:
+        - oneOf:
+            - $ref: '#/components/schemas/ServiceProblemDetail'
+            - $ref: '#/components/schemas/AuthenticationProblemDetail'
+            - $ref: '#/components/schemas/AuthenticationContextProblemDetail'
+    AuthenticationChallengeProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, const: 401}
+        detail: {type: string, maxLength: 2000}
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+          anyOf: [{const: authentication_required}, {const: session_revoked}]
+        correlation_id: {$ref: '#/components/schemas/PublicCorrelationId'}
+        instance: {$ref: '#/components/schemas/PublicProblemInstance'}
+        revocation_reason: {$ref: '#/components/schemas/AuthRevocationReason'}
+      allOf:
+        - oneOf:
+            - $ref: '#/components/schemas/AuthenticationRequiredProblemDetail'
+            - $ref: '#/components/schemas/SessionRevokedProblemDetail'
+    AuthOpaqueValue:
+      type: string
+      minLength: 1
+      maxLength: 4096
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: Opaque authenticated ceremony/flow value; never log, derive from personal data or treat possession as subject authority.
+    AuthBinaryValue:
+      type: string
+      minLength: 1
+      maxLength: 16384
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: Bounded unpadded base64url WebAuthn/attestation bytes, not a message, URL or arbitrary JSON extension.
+    AuthChallengeValue:
+      type: string
+      minLength: 43
+      maxLength: 43
+      pattern: '^[A-Za-z0-9_-]{43}$'
+      description: Server-CSPRNG 32-byte challenge/user handle encoded as unpadded base64url; verify exact decoded length.
+    AuthAccessTokenValue:
+      type: string
+      minLength: 5
+      maxLength: 8192
+      pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+      description: ADR-019 ES256 at+jwt; claims/signature/audience/expiry/session/key binding are verified by the server, not this lexical schema.
+    AuthRefreshTokenValue:
+      type: string
+      minLength: 43
+      maxLength: 43
+      pattern: '^[A-Za-z0-9_-]{43}$'
+      description: 32 CSPRNG bytes; rotating family, SHA-256-only storage, no logs or persistent web-script storage.
+    AuthEmailAddress:
+      type: string
+      minLength: 3
+      maxLength: 254
+      pattern: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+      description: Verification channel address, NOT email content. Personal encrypted channel data; excluded from tokens, errors and logs.
+    AuthPlatform:
+      type: string
+      enum: [android, web]
+    AuthDeviceTrust:
+      type: string
+      enum: [trusted, recovering, unattested]
+    AuthAttestation:
+      type: string
+      enum: [hardware, software, none]
+    AuthCredentialTransport:
+      type: string
+      enum: [usb, nfc, ble, internal, hybrid, smart-card]
+    AuthPublicKey:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [kty, crv, x, y]
+      properties:
+        kty: {type: string, const: EC}
+        crv: {type: string, const: P-256}
+        x: {$ref: '#/components/schemas/AuthChallengeValue'}
+        y: {$ref: '#/components/schemas/AuthChallengeValue'}
+      description: Public DPoP P-256 key only; no d/private-key field. Verify key/proof/attestation binding server-side.
+    AuthDeviceInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [platform, name, public_key]
+      properties:
+        platform: {$ref: '#/components/schemas/AuthPlatform'}
+        name: {type: string, minLength: 1, maxLength: 80}
+        public_key: {$ref: '#/components/schemas/AuthPublicKey'}
+        attestation_chain: {type: array, minItems: 1, maxItems: 8, items: {$ref: '#/components/schemas/AuthBinaryValue'}}
+      description: |
+        No device-properties/ID-attestation extension or caller-selected trust/security level.
+        Verify a server challenge, package/signing digest and roots; discard the chain immediately.
+        Missing/unavailable hardware attestation remains a software/none unattested fallback, not account refusal.
+    AuthEnrollmentRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [email, display_name, time_zone, eligibility_receipt]
+      properties:
+        email: {$ref: '#/components/schemas/AuthEmailAddress'}
+        display_name: {type: string, minLength: 1, maxLength: 120}
+        time_zone: {$ref: '#/components/schemas/TimeZone'}
+        eligibility_receipt: {$ref: '#/components/schemas/AuthOpaqueValue'}
+      description: |
+        Consume a verified server-owned consent/age-eligibility receipt before email verification.
+        Never infer eligibility from a client boolean or date of birth; do not create the account
+        before channel proof and passkey registration. Validate/canonicalize IANA zone against tzdb.
+    AuthEnrollmentAccepted:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [enrollment_id, expires_at]
+      properties:
+        enrollment_id: {$ref: '#/components/schemas/ResourceId'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+      description: Same body/status/timing whether the email already has an account; only the inbox learns the truth.
+    AuthChannelProofRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        code: {type: string, pattern: '^[0-9]{6}$'}
+        link_token: {$ref: '#/components/schemas/AuthOpaqueValue'}
+      oneOf: [{required: [code], not: {required: [link_token]}}, {required: [link_token], not: {required: [code]}}]
+      description: Single-use code/link, 600-second TTL and five attempts per send; no raw channel message.
+    AuthEnrollmentVerified:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [enrollment_id, registration_grant, expires_at]
+      properties:
+        enrollment_id: {$ref: '#/components/schemas/ResourceId'}
+        registration_grant: {$ref: '#/components/schemas/AuthOpaqueValue'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+      description: One verified enrollment bound to the proving DPoP key; not a reusable access token.
+    AuthCredentialDescriptor:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: {type: string, const: public-key}
+        id: {$ref: '#/components/schemas/AuthBinaryValue'}
+        transports: {type: array, maxItems: 6, uniqueItems: true, items: {$ref: '#/components/schemas/AuthCredentialTransport'}}
+    AuthCredentialAlgorithm:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, alg]
+      properties:
+        type: {type: string, const: public-key}
+        alg: {type: integer, format: int32, anyOf: [{const: -7}, {const: -8}, {const: -257}]}
+    AuthRelyingParty:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 253}
+        name: {type: string, const: PenniLogic}
+      description: Actual owner-bound production/staging RP ID and origin allowlist require ADR-019 owner inputs; no placeholder is a deployment approval.
+    AuthPasskeyUser:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [id, name, displayName]
+      properties:
+        id: {$ref: '#/components/schemas/AuthChallengeValue'}
+        name: {$ref: '#/components/schemas/AuthEmailAddress'}
+        displayName: {type: string, minLength: 1, maxLength: 120}
+      description: Enrollment-only WebAuthn user; random handle, verified-email name and chosen display name never enter tokens.
+    AuthAuthenticatorSelection:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [residentKey, userVerification]
+      properties:
+        residentKey: {type: string, const: required}
+        userVerification: {type: string, const: required}
+    AuthCreationExtensions:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [credProps]
+      properties:
+        credProps: {type: boolean, const: true}
+    AuthCreationOptions:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [ceremony_id, challenge, rp, user, pubKeyCredParams, authenticatorSelection, attestation, timeout, excludeCredentials, extensions]
+      properties:
+        ceremony_id: {$ref: '#/components/schemas/ResourceId'}
+        challenge: {$ref: '#/components/schemas/AuthChallengeValue'}
+        rp: {$ref: '#/components/schemas/AuthRelyingParty'}
+        user: {$ref: '#/components/schemas/AuthPasskeyUser'}
+        pubKeyCredParams: {type: array, minItems: 3, maxItems: 3, uniqueItems: true, items: {$ref: '#/components/schemas/AuthCredentialAlgorithm'}}
+        authenticatorSelection: {$ref: '#/components/schemas/AuthAuthenticatorSelection'}
+        attestation: {type: string, const: none}
+        timeout: {type: integer, const: 300000}
+        excludeCredentials: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/AuthCredentialDescriptor'}}
+        extensions: {$ref: '#/components/schemas/AuthCreationExtensions'}
+      description: All three algorithm choices are required exactly once; server verifies 32-byte challenge, origin/RP, UV and ceremony lifetime.
+    AuthRegistrationOptionsRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [registration_grant]
+      properties:
+        registration_grant: {$ref: '#/components/schemas/AuthOpaqueValue'}
+      description: Verified enrollment or server-issued credential-add grant, bound to current session/device/intent.
+    AuthAttestationResponse:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [clientDataJSON, attestationObject]
+      properties:
+        clientDataJSON: {$ref: '#/components/schemas/AuthBinaryValue'}
+        attestationObject: {$ref: '#/components/schemas/AuthBinaryValue'}
+        transports: {type: array, maxItems: 6, uniqueItems: true, items: {$ref: '#/components/schemas/AuthCredentialTransport'}}
+    AuthRegistrationResultRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [ceremony_id, id, rawId, type, response, name, device]
+      properties:
+        ceremony_id: {$ref: '#/components/schemas/ResourceId'}
+        id: {$ref: '#/components/schemas/AuthBinaryValue'}
+        rawId: {$ref: '#/components/schemas/AuthBinaryValue'}
+        type: {type: string, const: public-key}
+        response: {$ref: '#/components/schemas/AuthAttestationResponse'}
+        name: {type: string, minLength: 1, maxLength: 80}
+        device: {$ref: '#/components/schemas/AuthDeviceInput'}
+      description: WebAuthn registration result; origin, challenge, credential, UV and DPoP bindings are verified, never trusted from these fields.
+    AuthAuthenticationOptionsRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [mediation]
+      properties:
+        mediation: {type: string, enum: [conditional, optional]}
+      description: Username-less discoverable passkey ceremony; UI mediation is not account or authorization authority.
+    AuthAssertionOptions:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [ceremony_id, challenge, rpId, timeout, userVerification]
+      properties:
+        ceremony_id: {$ref: '#/components/schemas/ResourceId'}
+        challenge: {$ref: '#/components/schemas/AuthChallengeValue'}
+        rpId: {type: string, minLength: 1, maxLength: 253}
+        timeout: {type: integer, const: 300000}
+        userVerification: {type: string, const: required}
+      description: Fresh single-use passkey assertion options; never an email/user lookup or an OTP-login path.
+    AuthAssertionResponse:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [clientDataJSON, authenticatorData, signature, userHandle]
+      properties:
+        clientDataJSON: {$ref: '#/components/schemas/AuthBinaryValue'}
+        authenticatorData: {$ref: '#/components/schemas/AuthBinaryValue'}
+        signature: {$ref: '#/components/schemas/AuthBinaryValue'}
+        userHandle: {$ref: '#/components/schemas/AuthChallengeValue'}
+      description: Discoverable credential assertion with its 32-byte handle; verify origin/RP/challenge/UV/signature and counter server-side.
+    AuthAssertionResultRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [ceremony_id, id, rawId, type, response, device]
+      properties:
+        ceremony_id: {$ref: '#/components/schemas/ResourceId'}
+        id: {$ref: '#/components/schemas/AuthBinaryValue'}
+        rawId: {$ref: '#/components/schemas/AuthBinaryValue'}
+        type: {type: string, const: public-key}
+        response: {$ref: '#/components/schemas/AuthAssertionResponse'}
+        device: {$ref: '#/components/schemas/AuthDeviceInput'}
+    AuthTokenSet:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [access_token, token_type, expires_in, session_id, device_id, trust]
+      properties:
+        access_token: {$ref: '#/components/schemas/AuthAccessTokenValue'}
+        token_type: {type: string, const: DPoP}
+        expires_in: {type: integer, const: 900}
+        refresh_token: {$ref: '#/components/schemas/AuthRefreshTokenValue'}
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        device_id: {$ref: '#/components/schemas/ResourceId'}
+        trust: {$ref: '#/components/schemas/AuthDeviceTrust'}
+      description: |
+        No PII/token claims are returned as extra fields. Android receives the rotating refresh
+        token; web receives it only in an HttpOnly/Secure/SameSite=Strict cookie and keeps access
+        in script memory. No credential response is persisted in the financial idempotency store.
+    AuthBrowserTokenSet:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [access_token, token_type, expires_in, session_id, device_id, trust]
+      properties:
+        access_token: {$ref: '#/components/schemas/AuthAccessTokenValue'}
+        token_type: {type: string, const: DPoP}
+        expires_in: {type: integer, const: 900}
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        device_id: {$ref: '#/components/schemas/ResourceId'}
+        trust: {$ref: '#/components/schemas/AuthDeviceTrust'}
+      allOf:
+        - $ref: '#/components/schemas/AuthTokenSet'
+      description: The web JSON envelope structurally cannot carry a refresh token; the browser handles its HttpOnly cookie.
+    AuthRefreshRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [grant_type, refresh_token]
+      properties:
+        grant_type: {type: string, const: refresh_token}
+        refresh_token: {$ref: '#/components/schemas/AuthRefreshTokenValue'}
+    AuthBrowserRefreshRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [grant_type]
+      properties:
+        grant_type: {type: string, const: refresh_token}
+      description: Refresh value is an HttpOnly cookie, never a web-script request-body or storage field.
+    AuthProfile:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [display_name, time_zone]
+      properties:
+        display_name: {type: string, minLength: 1, maxLength: 120}
+        time_zone: {$ref: '#/components/schemas/TimeZone'}
+      description: Private profile time zone is IANA/tzdb-canonical, not an offset, token claim or log/signal field.
+    AuthCredential:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [credential_id, name, created_at, backup_eligible, backed_up, clone_suspected]
+      properties:
+        credential_id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string, minLength: 1, maxLength: 80}
+        created_at: {$ref: '#/components/schemas/Instant'}
+        last_used_at: {$ref: '#/components/schemas/Instant'}
+        backup_eligible: {type: boolean}
+        backed_up: {type: boolean}
+        clone_suspected: {type: boolean}
+      description: Owner security view; never return public-key internals, signature counters, secret codes or a full channel address.
+    AuthCredentialList:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [credentials]
+      properties:
+        credentials: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/AuthCredential'}}
+    AuthCredentialNameRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+    AuthSession:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [session_id, device_id, created_at, is_current]
+      properties:
+        session_id: {$ref: '#/components/schemas/ResourceId'}
+        device_id: {$ref: '#/components/schemas/ResourceId'}
+        created_at: {$ref: '#/components/schemas/Instant'}
+        is_current: {type: boolean}
+    AuthSessionList:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [sessions]
+      properties:
+        sessions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AuthSession'}}
+    AuthDevice:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [device_id, name, platform, trust, attestation, created_at]
+      properties:
+        device_id: {$ref: '#/components/schemas/ResourceId'}
+        name: {type: string, minLength: 1, maxLength: 80}
+        platform: {$ref: '#/components/schemas/AuthPlatform'}
+        trust: {$ref: '#/components/schemas/AuthDeviceTrust'}
+        attestation: {$ref: '#/components/schemas/AuthAttestation'}
+        created_at: {$ref: '#/components/schemas/Instant'}
+    AuthDeviceList:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AuthDevice'}}
+    AuthChannelInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type: {type: string, const: email}
+        value: {$ref: '#/components/schemas/AuthEmailAddress'}
+      description: Only the mandatory email channel while phone provider/recovery approval remains unbound; no SMS login or hidden spend.
+    AuthChannel:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [channel_id, type, verified, suspect]
+      properties:
+        channel_id: {$ref: '#/components/schemas/ResourceId'}
+        type: {type: string, const: email}
+        verified: {type: boolean}
+        suspect: {type: boolean}
+        verified_at: {$ref: '#/components/schemas/Instant'}
+        matures_at: {$ref: '#/components/schemas/Instant'}
+      description: Opaque own channel reference and server times; no address/existence probe or recovery link for suspect channels.
+    AuthChannelList:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [channels]
+      properties:
+        channels: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AuthChannel'}}
+    AuthRecoveryCodeCount:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [unused_count]
+      properties:
+        unused_count: {type: integer, minimum: 0, maximum: 10}
+      description: Count only; there is no read-existing-secret-codes operation.
+    AuthRecoveryCodeSet:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [codes]
+      properties:
+        codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          uniqueItems: true
+          items: {type: string, pattern: '^[0-9]-[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{4}$'}
+      description: One-time CSPRNG secure-window display only; replace/delete the old set atomically, never log/cache/backup/autofill.
+    AuthRecoveryStartRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [route, email]
+      properties:
+        route: {$ref: '#/components/schemas/AuthRecoveryRoute'}
+        email: {$ref: '#/components/schemas/AuthEmailAddress'}
+      description: |
+        Only a passkey-capable client may initiate. Anonymous per-source limits are accepted-and-
+        dropped identically; no account counters, fan-out or window until proof. No account lookup result.
+    AuthRecoveryAccepted:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [recovery_id, state]
+      properties:
+        recovery_id: {$ref: '#/components/schemas/ResourceId'}
+        state: {type: string, const: unproven}
+      description: Identical opaque synthetic/provenance-free handle and status whether the channel/account exists or a limiter drops it.
+    AuthRecoveryVerifyRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        recovery_code: {type: string, minLength: 10, maxLength: 64}
+        channel_proof: {$ref: '#/components/schemas/AuthChannelProofRequest'}
+      oneOf: [{required: [recovery_code], not: {required: [channel_proof]}}, {required: [channel_proof], not: {required: [recovery_code]}}]
+      description: Normalize Crockford input before one capped Argon2id slot check; unknown channels/codes remain identical before proof.
+    AuthRecoveryState:
+      type: string
+      enum: [unproven, notification_pending, cooling_off, pending_elsewhere, cancelled, completed, restricted_after_recovery, reversed]
+    AuthRecoveryProgress:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [recovery_id, state]
+      properties:
+        recovery_id: {$ref: '#/components/schemas/ResourceId'}
+        state: {$ref: '#/components/schemas/AuthRecoveryState'}
+        recovery_proof: {$ref: '#/components/schemas/AuthOpaqueValue'}
+        window_ends_at: {anyOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        retry_after_seconds: {type: integer, minimum: 1, maximum: 86400}
+        restricted_until: {$ref: '#/components/schemas/Instant'}
+        not_me_until: {$ref: '#/components/schemas/Instant'}
+        pending_route: {$ref: '#/components/schemas/AuthRecoveryRoute'}
+        action: {type: string, const: cancel_and_restart}
+      allOf:
+        - if: {properties: {state: {const: unproven}}, required: [state]}
+          then: {not: {anyOf: [{required: [recovery_proof]}, {required: [window_ends_at]}, {required: [retry_after_seconds]}, {required: [restricted_until]}, {required: [not_me_until]}, {required: [pending_route]}, {required: [action]}]}}
+        - if: {properties: {state: {enum: [notification_pending, cooling_off, pending_elsewhere, restricted_after_recovery]}}, required: [state]}
+          then: {required: [recovery_proof]}
+        - if: {properties: {state: {const: notification_pending}}, required: [state]}
+          then: {required: [window_ends_at, retry_after_seconds], properties: {window_ends_at: {type: 'null'}}}
+          else: {not: {required: [retry_after_seconds]}}
+        - if: {properties: {state: {enum: [cooling_off, pending_elsewhere]}}, required: [state]}
+          then: {required: [window_ends_at], properties: {window_ends_at: {$ref: '#/components/schemas/Instant'}}}
+        - if: {properties: {state: {const: pending_elsewhere}}, required: [state]}
+          then: {required: [pending_route, action]}
+          else: {not: {anyOf: [{required: [pending_route]}, {required: [action]}]}}
+        - if: {properties: {state: {const: restricted_after_recovery}}, required: [state]}
+          then: {required: [restricted_until, not_me_until]}
+          else: {not: {anyOf: [{required: [restricted_until]}, {required: [not_me_until]}]}}
+      description: |
+        Window/lock/context is returned only after account proof under the bound device.
+        notification_pending MUST preserve explicit null (no window started). One pending request
+        per account; same credential/device attaches, another prover explicitly cancel-and-restarts.
+        Proven active flows return the bounded recovery instrument needed for subsequent actions;
+        completion issues the restricted-period instrument, never a reused single-use action token.
+        An unproven receipt cannot contain any account/window/proof context.
+        All calendar/window instants are server-owned; no timer alone grants access.
+    AuthRecoveryActionRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof: {$ref: '#/components/schemas/AuthOpaqueValue'}
+      description: Bound recovery or single-use notification instrument; server verifies route, owner, device and permitted action.
+    AuthRecoveryCredentialRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [proof, name]
+      properties:
+        proof: {$ref: '#/components/schemas/AuthOpaqueValue'}
+        name: {type: string, minLength: 1, maxLength: 80}
+      description: Bound one-shot recovery instrument and user label only; no target device, caller trust or session-owner override.
+    AuthRegistrationGrant:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [registration_grant, expires_at]
+      properties:
+        registration_grant: {$ref: '#/components/schemas/AuthOpaqueValue'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+    AuthDeviceChallenge:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [challenge_id, challenge, expires_at]
+      properties:
+        challenge_id: {$ref: '#/components/schemas/ResourceId'}
+        challenge: {$ref: '#/components/schemas/AuthChallengeValue'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+    AuthDeviceRegistrationRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [challenge_id, device]
+      properties:
+        challenge_id: {$ref: '#/components/schemas/ResourceId'}
+        device: {$ref: '#/components/schemas/AuthDeviceInput'}
+    AuthRecoveryCompletion:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [tokens, recovery]
+      properties:
+        tokens: {$ref: '#/components/schemas/AuthTokenSet'}
+        recovery: {$ref: '#/components/schemas/AuthRecoveryProgress'}
+      allOf:
+        - properties:
+            tokens: {properties: {trust: {const: recovering}}}
+            recovery: {properties: {state: {const: restricted_after_recovery}}}
+    AuthStepUpIntentTarget:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        credentialId: {$ref: '#/components/schemas/ResourceId'}
+        deviceId: {$ref: '#/components/schemas/ResourceId'}
+        channelId: {$ref: '#/components/schemas/ResourceId'}
+        destinationId: {$ref: '#/components/schemas/CustomDestinationId'}
+      description: Closed exact path-parameter object; AuthStepUpIntent requires only the registered operation's complete target.
+    AuthStepUpIntentBody:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        type: {type: string, const: email}
+        value: {$ref: '#/components/schemas/AuthEmailAddress'}
+        code: {type: string, pattern: '^[0-9]{6}$'}
+        link_token: {$ref: '#/components/schemas/AuthOpaqueValue'}
+        host: {$ref: '#/components/schemas/CustomDestinationHost'}
+        pathPrefix: {$ref: '#/components/schemas/CustomDestinationPathPrefix'}
+        credentialHeader: {$ref: '#/components/schemas/CredentialHeader'}
+        providerKeyRef: {$ref: '#/components/schemas/CustomDestinationProviderKeyRef'}
+        models: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: {$ref: '#/components/schemas/CustomDestinationModelName'}}
+        version: {$ref: '#/components/schemas/CustomDestinationVersion'}
+      description: Strict named converter for the unchanged wire object; AuthStepUpIntent selects the exact registered endpoint schema without inserting defaults.
+    AuthStepUpIntent:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [version, operation, method, target, body]
+      properties:
+        version: {type: string, const: 'step-up-request@1'}
+        operation:
+          type: string
+          enum: [addCredential, renameCredential, removeCredential, removeDevice, addChannel, verifyChannel, removeChannel, regenerateRecoveryCodes, registerCustomDestination, activateCustomDestination]
+        method: {type: string, enum: [POST, PATCH, DELETE]}
+        target: {$ref: '#/components/schemas/AuthStepUpIntentTarget'}
+        body: {$ref: '#/components/schemas/AuthStepUpIntentBody'}
+      allOf:
+        - if: {properties: {operation: {const: addCredential}}, required: [operation]}
+          then: {properties: {method: {const: POST}, body: {$ref: '#/components/schemas/AuthCredentialNameRequest'}}}
+        - if: {properties: {operation: {const: renameCredential}}, required: [operation]}
+          then:
+            properties:
+              method: {const: PATCH}
+              target: {required: [credentialId], not: {anyOf: [{required: [deviceId]}, {required: [channelId]}, {required: [destinationId]}]}}
+              body: {$ref: '#/components/schemas/AuthCredentialNameRequest'}
+        - if: {properties: {operation: {enum: [removeCredential, removeDevice, removeChannel]}}, required: [operation]}
+          then: {properties: {method: {const: DELETE}, body: {not: {anyOf: [{required: [name]}, {required: [type]}, {required: [value]}, {required: [code]}, {required: [link_token]}, {required: [host]}, {required: [pathPrefix]}, {required: [credentialHeader]}, {required: [providerKeyRef]}, {required: [models]}, {required: [version]}]}}}}
+        - if: {properties: {operation: {const: removeCredential}}, required: [operation]}
+          then: {properties: {target: {required: [credentialId]}}}
+        - if: {properties: {operation: {const: removeDevice}}, required: [operation]}
+          then: {properties: {target: {required: [deviceId]}}}
+        - if: {properties: {operation: {const: removeChannel}}, required: [operation]}
+          then: {properties: {target: {required: [channelId]}}}
+        - if: {properties: {operation: {const: addChannel}}, required: [operation]}
+          then: {properties: {method: {const: POST}, body: {$ref: '#/components/schemas/AuthChannelInput'}}}
+        - if: {properties: {operation: {const: verifyChannel}}, required: [operation]}
+          then: {properties: {method: {const: POST}, target: {required: [channelId]}, body: {$ref: '#/components/schemas/AuthChannelProofRequest'}}}
+        - if: {properties: {operation: {const: registerCustomDestination}}, required: [operation]}
+          then: {properties: {method: {const: POST}, body: {$ref: '#/components/schemas/CustomDestinationRegistrationRequest'}, target: {not: {anyOf: [{required: [credentialId]}, {required: [deviceId]}, {required: [channelId]}, {required: [destinationId]}]}}}}
+        - if: {properties: {operation: {const: activateCustomDestination}}, required: [operation]}
+          then: {properties: {method: {const: POST}, target: {required: [destinationId]}, body: {$ref: '#/components/schemas/CustomDestinationLifecycleRequest'}}}
+        - if: {properties: {operation: {const: regenerateRecoveryCodes}}, required: [operation]}
+          then: {properties: {method: {const: POST}, body: {not: {anyOf: [{required: [name]}, {required: [type]}, {required: [value]}, {required: [code]}, {required: [link_token]}, {required: [host]}, {required: [pathPrefix]}, {required: [credentialHeader]}, {required: [providerKeyRef]}, {required: [models]}, {required: [version]}]}}}}
+        - if: {properties: {operation: {not: {enum: [renameCredential, removeCredential]}}}, required: [operation]}
+          then: {properties: {target: {not: {required: [credentialId]}}}}
+        - if: {properties: {operation: {not: {const: removeDevice}}}, required: [operation]}
+          then: {properties: {target: {not: {required: [deviceId]}}}}
+        - if: {properties: {operation: {not: {enum: [verifyChannel, removeChannel]}}}, required: [operation]}
+          then: {properties: {target: {not: {required: [channelId]}}}}
+        - if: {properties: {operation: {not: {const: activateCustomDestination}}}, required: [operation]}
+          then: {properties: {target: {not: {required: [destinationId]}}}}
+      description: |
+        Exact Root-selected step-up-request@1 envelope, not caller authority. The issuer validates
+        each registered operation's complete path/body schema, absence of unknown query selectors,
+        duplicate JSON names and non-IJSON values before JCS hashing. Preserve omissions and model
+        ordering; do not insert defaults or normalize inputs. Other contract groups must register
+        their exact operations additively before this issuer may grant them. No raw intent/rq logging.
+    AuthStepUpResultRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [ceremony_id, response]
+      properties:
+        ceremony_id: {$ref: '#/components/schemas/ResourceId'}
+        response: {$ref: '#/components/schemas/AuthAssertionResultRequest'}
+    AuthStepUpGrant:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [step_up_token, expires_at]
+      properties:
+        step_up_token: {$ref: '#/components/schemas/StepUpTokenValue'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+      description: Opaque single-use sid/jkt/op/rq-bound grant; UV freshness at most 300 seconds, verified expiry and atomic consumption.
+    AuthRecoveryRoute:
+      type: string
+      enum: [recovery_code, channel_reverification]
+      description: Exactly the two accepted ADR-019 recovery routes; no password, SMS-login or zero-proof fallback.
+    AuthRevocationReason:
+      type: string
+      enum: [reuse_detected, binding_mismatch, signout, signout_all, absolute_expiry, recovery, not_me, admin]
+      description: Accepted session-family reason class, never token or account internals.
+    SessionRevokedProblemDetail:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, title, status, detail, code, correlation_id, revocation_reason]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer, const: 401}
+        detail: {type: string, maxLength: 2000}
+        code: {$ref: '#/components/schemas/ProblemCode', const: session_revoked}
+        correlation_id: {$ref: '#/components/schemas/PublicCorrelationId'}
+        instance: {$ref: '#/components/schemas/PublicProblemInstance'}
+        revocation_reason: {$ref: '#/components/schemas/AuthRevocationReason'}
+      allOf:
+        - $ref: '#/components/schemas/AuthenticationContextProblemDetail'
+      description: Shared authentication-only ended-session variant; never an account-existence or token disclosure.
+    ResourceId:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Server-issued lowercase UUIDv7 for an own resource; possession never confers authority.
+    SourceEventId:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      description: Random device event identity persisted before enqueue, never derived from raw content or a dedupe fingerprint.
+    CursorPage:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [page_size, has_more]
+      properties:
+        page_size: {type: integer, minimum: 1, maximum: 100}
+        has_more: {type: boolean}
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: '^[A-Za-z0-9_-]+$'
+      allOf:
+        - if: {properties: {has_more: {const: true}}, required: [has_more]}
+          then: {required: [cursor]}
+          else: {not: {required: [cursor]}}
+      description: |
+        Shared bounded cursor envelope. cursor is the next-page token and exists iff has_more.
+        The server binds it to verified principal, operation, full filter/sort set and a stable
+        snapshot expiring after PT24H. page_size is the applied limit, not a total/hidden-row count.
+    AccountType:
+      type: string
+      enum: [ASSET, LIABILITY, INCOME, EXPENSE, EQUITY, CLEARING]
+      description: ADR-017 account types; only ASSET and LIABILITY are client-creatable.
+    AccountSystemRole:
+      type: string
+      enum: [OPENING_BALANCE, RECONCILIATION, FX_CLEARING, FX_FEE, INCOME, EXPENSE]
+      description: Server-only ADR-016/017 role; at most one account per owner/role/currency.
+    CreateAccountRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [type, currency, name]
+      properties:
+        type: {$ref: '#/components/schemas/AccountType', type: string, enum: [ASSET, LIABILITY]}
+        currency: {$ref: '#/components/schemas/CurrencyCode', type: string, enum: [INR]}
+        name: {type: string, minLength: 1, maxLength: 120}
+      description: No initial balance, system role, owner, raw message or full account identifier.
+    UpdateAccountRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        is_archived: {type: boolean}
+      anyOf: [{required: [name]}, {required: [is_archived]}]
+    Account:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [account_id, type, currency, name, is_archived, created_at]
+      properties:
+        account_id: {$ref: '#/components/schemas/ResourceId'}
+        type: {$ref: '#/components/schemas/AccountType'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        is_archived: {type: boolean}
+        created_at: {$ref: '#/components/schemas/Instant'}
+        system_role: {$ref: '#/components/schemas/AccountSystemRole'}
+      description: Financial account settings, not a stored/writable balance or category.
+    AccountPage:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [accounts, page]
+      properties:
+        accounts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Account'}}
+        page: {$ref: '#/components/schemas/CursorPage'}
+    OpeningBalanceRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [amount, value_date]
+      properties:
+        amount: {$ref: '#/components/schemas/Money'}
+        value_date: {$ref: '#/components/schemas/LocalDate'}
+      description: Nonzero signed opening fact in the account's admitted currency; validated by the server, never rounded.
+    LedgerEntryInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [account_id, amount]
+      properties:
+        account_id: {$ref: '#/components/schemas/ResourceId'}
+        amount: {$ref: '#/components/schemas/Money'}
+      description: Own account and nonzero signed debit-positive amount; currency must match the account and transaction.
+    LedgerEntry:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [entry_id, account_id, amount]
+      properties:
+        entry_id: {$ref: '#/components/schemas/ResourceId'}
+        account_id: {$ref: '#/components/schemas/ResourceId'}
+        amount: {$ref: '#/components/schemas/Money'}
+      description: Immutable posted ledger entry; no PATCH/DELETE entry operation exists.
+    PostTransactionRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [source_event_id, occurred_at, currency, entries]
+      properties:
+        source_event_id: {$ref: '#/components/schemas/SourceEventId'}
+        occurred_at: {$ref: '#/components/schemas/Instant'}
+        currency: {$ref: '#/components/schemas/CurrencyCode', type: string, enum: [INR]}
+        entries:
+          type: array
+          minItems: 2
+          maxItems: 64
+          items: {$ref: '#/components/schemas/LedgerEntryInput'}
+        value_date: {$ref: '#/components/schemas/LocalDate'}
+        description: {type: string, maxLength: 280}
+      description: |
+        Structured manual fact only. Money scale/range and exact zero-sum/account ownership are
+        server obligations. Source is MANUAL; no caller-supplied source precedence, booked_at,
+        dedupe key, raw digest, category projection, arbitrary metadata or client rounding.
+    TransactionKind:
+      type: string
+      enum: [STANDARD, OPENING_BALANCE, REVERSAL, REPOST, RECONCILIATION_ADJUSTMENT, EXCHANGE_LEG]
+      description: ADR-017 kind vocabulary; EXCHANGE_LEG is reserved and no exchange write is exposed by this group.
+    TransactionStatus:
+      type: string
+      enum: [posted, reversed]
+      description: Posted-ledger projection only; unposted candidate/clarification contracts are owned separately.
+    Transaction:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [transaction_id, kind, status, occurred_at, booked_at, currency, entry_count, entries]
+      properties:
+        transaction_id: {$ref: '#/components/schemas/DedupRecordId'}
+        kind: {$ref: '#/components/schemas/TransactionKind'}
+        status: {$ref: '#/components/schemas/TransactionStatus'}
+        occurred_at: {$ref: '#/components/schemas/Instant'}
+        booked_at: {$ref: '#/components/schemas/Instant'}
+        value_date: {$ref: '#/components/schemas/LocalDate'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        entry_count: {type: integer, minimum: 2, maximum: 64}
+        entries: {type: array, minItems: 2, maxItems: 64, items: {$ref: '#/components/schemas/LedgerEntry'}}
+        source_event_id: {$ref: '#/components/schemas/SourceEventId'}
+        description: {type: string, maxLength: 280}
+        reverses: {$ref: '#/components/schemas/DedupRecordId'}
+        replaces: {$ref: '#/components/schemas/DedupRecordId'}
+        correction_id: {$ref: '#/components/schemas/ResourceId'}
+        category_id:
+          $ref: '#/components/schemas/ResourceId'
+          description: Read-only single-category projection; never accepted by a transaction write.
+      allOf:
+        - if: {properties: {kind: {const: REVERSAL}}, required: [kind]}
+          then: {required: [reverses, correction_id], not: {required: [replaces]}}
+          else: {not: {required: [reverses]}}
+        - if: {properties: {kind: {const: REPOST}}, required: [kind]}
+          then: {required: [replaces, correction_id]}
+          else: {not: {required: [replaces]}}
+        - if: {properties: {kind: {enum: [OPENING_BALANCE, RECONCILIATION_ADJUSTMENT]}}, required: [kind]}
+          then: {required: [value_date]}
+      description: |
+        A posted fact carries both effective and application-assigned posting instants. The
+        server computes calendar boundaries from the profile time zone; the client never invents
+        booked_at or recomputes authoritative balances. Entries, dates and correction links are immutable.
+    TransactionPage:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [transactions, page]
+      properties:
+        transactions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Transaction'}}
+        page: {$ref: '#/components/schemas/CursorPage'}
+    ReverseTransactionRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        reason_note: {type: string, maxLength: 280}
+      description: USER_CORRECTION reason is server-fixed; optional personal note never enters errors, logs or an idempotency store payload.
+    CorrectTransactionRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [replacements]
+      properties:
+        replacements: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/PostTransactionRequest'}}
+        reason_note: {type: string, maxLength: 280}
+      description: All replacement facts and the exact reversal commit atomically; no partial or in-place correction.
+    TransactionCorrection:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [correction_id, reversal, replacements]
+      properties:
+        correction_id: {$ref: '#/components/schemas/ResourceId'}
+        reversal: {$ref: '#/components/schemas/Transaction'}
+        replacements: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/Transaction'}}
+      description: Server receipt of one atomic correction; every row shares the same correction_id.
+    CategorisationViewMode:
+      type: string
+      enum: [CURRENT, AS_RECORDED]
+    CategorisationView:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [mode, as_of]
+      properties:
+        mode: {$ref: '#/components/schemas/CategorisationViewMode'}
+        as_of: {anyOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+      allOf:
+        - if: {properties: {mode: {const: CURRENT}}, required: [mode]}
+          then: {properties: {as_of: {type: 'null'}}}
+          else: {properties: {as_of: {$ref: '#/components/schemas/Instant'}}}
+      description: Exact ADR-016 mode/effective instant; CURRENT always emits explicit null and AS_RECORDED emits the server-used UTC instant.
+    CategoryAssignmentSource:
+      type: string
+      enum: [USER, RULE, IMPORT, AI, SYSTEM]
+      description: ADR-016 rank order five through one; source is server-selected, not an input or a confidence band.
+    CategoryAssignmentReason:
+      type: string
+      enum: [USER_EDIT, USER_CONFIRMATION, RULE_APPLIED, IMPORT_COLUMN, AI_APPLIED, POSTING_DEFAULT, REVERSAL_MIRROR, REPOST_CARRY, DUPLICATE_CARRY, REFUND_LINK, RULE_ROLLBACK]
+    CategoryProvenanceRef:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: ADR-016 opaque UUID referent selected by reason, not a public transaction alias, raw evidence or caller authority; verify exact same-owner referent server-side.
+    CategoryAllocationLine:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [entry_id, position, category_id, system_key, nature, amount]
+      properties:
+        entry_id: {$ref: '#/components/schemas/ResourceId'}
+        position: {type: integer, minimum: 0, maximum: 31}
+        category_id: {anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]}
+        system_key: {anyOf: [{$ref: '#/components/schemas/CategorySystemKey'}, {type: 'null'}]}
+        nature: {$ref: '#/components/schemas/CategoryNature'}
+        amount: {$ref: '#/components/schemas/Money'}
+      allOf:
+        - if: {properties: {category_id: {type: 'null'}}, required: [category_id]}
+          then: {properties: {system_key: {type: 'null'}}}
+      description: Nonzero raw ledger-sign allocation with currency inherited from its entry; null category/key are explicit uncategorised markers.
+    CategoryExactLineInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [category_id, amount]
+      properties:
+        category_id: {anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]}
+        amount: {$ref: '#/components/schemas/Money'}
+    CategoryWeightedLineInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [category_id, weight]
+      properties:
+        category_id: {anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]}
+        weight: {type: integer, minimum: 1, maximum: 1000000}
+    CategoryEntryAssignmentInput:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [entry_id, mode]
+      properties:
+        entry_id: {$ref: '#/components/schemas/ResourceId'}
+        mode: {type: string, enum: [exact, weighted]}
+        exact_lines: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/CategoryExactLineInput'}}
+        weighted_lines: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/CategoryWeightedLineInput'}}
+      allOf:
+        - if: {properties: {mode: {const: exact}}, required: [mode]}
+          then: {required: [exact_lines], not: {required: [weighted_lines]}}
+          else: {required: [weighted_lines], not: {required: [exact_lines]}}
+      description: One form per entry; input array order is the stable remainder tie-breaker, not a client-calculated share.
+    CategoryAssignmentRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries: {type: array, minItems: 1, maxItems: 64, items: {$ref: '#/components/schemas/CategoryEntryAssignmentInput'}}
+      description: Whole assignment set for each own categorisable entry; no partial patch, source, confidence, seq or client posting authority.
+    Categorisation:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [view, category_id, allocations, assignment_id, source, reason, assigned_at]
+      properties:
+        view: {$ref: '#/components/schemas/CategorisationView'}
+        category_id: {anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]}
+        allocations: {type: array, minItems: 1, maxItems: 2048, items: {$ref: '#/components/schemas/CategoryAllocationLine'}}
+        assignment_id: {$ref: '#/components/schemas/ResourceId'}
+        source: {$ref: '#/components/schemas/CategoryAssignmentSource'}
+        reason: {$ref: '#/components/schemas/CategoryAssignmentReason'}
+        provenance_ref: {$ref: '#/components/schemas/CategoryProvenanceRef'}
+        assigned_at: {$ref: '#/components/schemas/Instant'}
+      allOf:
+        - if: {properties: {reason: {const: USER_EDIT}}, required: [reason]}
+          then: {properties: {source: {const: USER}}, not: {required: [provenance_ref]}}
+        - if: {properties: {reason: {const: USER_CONFIRMATION}}, required: [reason]}
+          then: {properties: {source: {const: USER}}}
+        - if: {properties: {reason: {const: POSTING_DEFAULT}}, required: [reason]}
+          then: {properties: {source: {const: SYSTEM}}, not: {required: [provenance_ref]}}
+        - if: {properties: {reason: {const: RULE_APPLIED}}, required: [reason]}
+          then: {required: [provenance_ref], properties: {source: {const: RULE}}}
+        - if: {properties: {reason: {const: IMPORT_COLUMN}}, required: [reason]}
+          then: {required: [provenance_ref], properties: {source: {const: IMPORT}}}
+        - if: {properties: {reason: {const: AI_APPLIED}}, required: [reason]}
+          then: {required: [provenance_ref], properties: {source: {const: AI}}}
+        - if: {properties: {reason: {enum: [REVERSAL_MIRROR, REFUND_LINK]}}, required: [reason]}
+          then: {required: [provenance_ref], properties: {source: {const: SYSTEM}}}
+        - if: {properties: {reason: {enum: [REPOST_CARRY, DUPLICATE_CARRY, RULE_ROLLBACK]}}, required: [reason]}
+          then: {required: [provenance_ref]}
+      description: |
+        category_id is the read-only view projection, null for split/uncategorised/unexplained
+        facts, never the stored current projection under AS_RECORDED. Allocations are immutable
+        whole-set facts; every source/reason pair and sum/sign/position rule is server-validated.
+        USER_EDIT and POSTING_DEFAULT omit provenance; USER_CONFIRMATION may name its clarification;
+        each other reason requires its exact same-owner rule/import/inference/carried assignment
+        UUID under ADR-016 section 4.2. A reference is not the underlying personal evidence.
+    CategoryNature:
+      type: string
+      enum: [EXPENSE, INCOME]
+    CategoryKind:
+      type: string
+      enum: [SYSTEM, USER]
+    CategorySystemKey:
+      type: string
+      enum: ["food","food.groceries","food.eating_out","housing","housing.rent","housing.maintenance","utilities","utilities.electricity","utilities.water","utilities.cooking_gas","utilities.mobile_recharge","utilities.internet","transport","transport.fuel","transport.public_transport","transport.taxi_auto","transport.rail_travel","transport.air_travel","transport.vehicle_maintenance","transport.parking_tolls","household","household.supplies","household.appliances","household.domestic_help","shopping","shopping.clothing","shopping.footwear","shopping.electronics","health","health.medicines","health.care","education","education.fees","education.books_supplies","personal","personal.care","personal.fitness","leisure","leisure.entertainment","leisure.subscriptions","leisure.accommodation","giving","giving.gifts","giving.donations","insurance","taxes","debt","debt.interest","debt.fees","fees","fees.banking","fees.foreign_exchange","income","income.salary","income.self_employment","income.interest","income.pension","income.rent","income.gifts"]
+      pattern: '^[a-z][a-z0-9_]{1,30}(\.[a-z][a-z0-9_]{1,30})?$'
+      maxLength: 63
+      description: ADR-016 stable accepted seed key, not a user-supplied category kind or a ledger account.
+    CategoryIcon:
+      type: string
+      enum: ["debt","education","fees","food","giving","health","household","housing","income","insurance","leisure","personal","shopping","taxes","transport","utilities"]
+      pattern: '^[a-z][a-z0-9_]{1,30}$'
+      description: Exact icon ID derived from the accepted seed's Unicode-scalar registry, never caller artwork or a URL.
+    CategoryColour:
+      type: string
+      enum: ["blue","brown","gray","green","orange","purple","red","teal"]
+      pattern: '^[a-z][a-z0-9_]{1,30}$'
+      description: Exact colour ID derived from the accepted seed's sRGB8 registry, never free-form CSS/hex or an arbitrary external reference.
+    CreateCategoryRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [name, nature, icon, colour]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        nature: {$ref: '#/components/schemas/CategoryNature'}
+        icon: {$ref: '#/components/schemas/CategoryIcon'}
+        colour: {$ref: '#/components/schemas/CategoryColour'}
+        parent_id: {$ref: '#/components/schemas/ResourceId'}
+      description: USER category; same-owner root parent and one-child-level rule are validated server-side.
+    UpdateCategoryRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        is_archived: {type: boolean}
+        icon: {$ref: '#/components/schemas/CategoryIcon'}
+        colour: {$ref: '#/components/schemas/CategoryColour'}
+      anyOf: [{required: [name]}, {required: [is_archived]}, {required: [icon]}, {required: [colour]}]
+    Category:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [category_id, kind, nature, icon, colour, is_archived, created_at]
+      properties:
+        category_id: {$ref: '#/components/schemas/ResourceId'}
+        kind: {$ref: '#/components/schemas/CategoryKind'}
+        nature: {$ref: '#/components/schemas/CategoryNature'}
+        icon: {$ref: '#/components/schemas/CategoryIcon'}
+        colour: {$ref: '#/components/schemas/CategoryColour'}
+        system_key: {$ref: '#/components/schemas/CategorySystemKey'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        parent_id: {$ref: '#/components/schemas/ResourceId'}
+        is_archived: {type: boolean}
+        created_at: {$ref: '#/components/schemas/Instant'}
+        active_redirect_id: {$ref: '#/components/schemas/ResourceId'}
+      allOf:
+        - if: {properties: {kind: {const: SYSTEM}}, required: [kind]}
+          then: {required: [system_key]}
+          else: {required: [name], not: {required: [system_key]}}
+      description: |
+        Owner reporting label; no currency, balance or account. Omitted parent means root, omitted
+        SYSTEM name means the client renders the accepted seed label. Personal names remain protected.
+    CategoryPage:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [categories, page]
+      properties:
+        categories: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Category'}}
+        page: {$ref: '#/components/schemas/CursorPage'}
+    RedirectCategoryRequest:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [target_category_id]
+      properties:
+        target_category_id: {$ref: '#/components/schemas/ResourceId'}
+    CategoryRedirect:
+      type: object
+      x-pennilogic-strict-provider: true
+      additionalProperties: false
+      required: [redirect_id, source_category_id, target_category_id, created_at]
+      properties:
+        redirect_id: {$ref: '#/components/schemas/ResourceId'}
+        source_category_id: {$ref: '#/components/schemas/ResourceId'}
+        target_category_id: {$ref: '#/components/schemas/ResourceId'}
+        created_at: {$ref: '#/components/schemas/Instant'}
+        retracted_at: {$ref: '#/components/schemas/Instant'}
+      description: Immutable same-owner redirect with optional one-time retraction, never hard deletion or reactivation.
   parameters:
+    EnrollmentId:
+      name: enrollmentId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Opaque enrollment handle; verify ceremony and proving-key binding before account effects.
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Exact own credential bound into the step-up request.
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own session reference, not a token or refresh-family identifier.
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Exact own device; possession is not authorization.
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Exact own channel handle, never its email/phone value.
+    RecoveryId:
+      name: recoveryId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Opaque flow handle; no account/status/window is disclosed before proof.
+    RecoveryProof:
+      name: Recovery-Proof
+      in: header
+      required: true
+      schema: {$ref: '#/components/schemas/AuthOpaqueValue'}
+      description: Proven own-flow/key-bound capability, never a substitute for DPoP or an arbitrary session owner claim.
+    CoreApiVersion:
+      name: API-Version
+      in: header
+      schema: {type: string, enum: [v1]}
+      description: |
+        Explicit major API selection; omission selects the configured /v1 route. Unknown/retired
+        versions fail as validation_rejected, field request, reason not_available. Never silently
+        route a write to another version. This is separate from the contract's semantic version.
+    CoreCursor:
+      name: cursor
+      in: query
+      schema: {type: string, minLength: 1, maxLength: 2048, pattern: '^[A-Za-z0-9_-]+$'}
+      description: Opaque next cursor, bound to principal/operation/filters/sort/snapshot; expired or changed scope fails.
+    CorePageSize:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      description: Applied page limit; no zero, negative, floating-point or oversized page.
+    CoreCreatedSort:
+      name: sort
+      in: query
+      schema: {type: string, enum: ['created_at.asc,id.asc', 'created_at.desc,id.desc']}
+      description: Closed stable order with unique-id tie breaker; no unstable or arbitrary SQL expression.
+    TransactionSort:
+      name: sort
+      in: query
+      schema: {type: string, enum: ['occurred_at.desc,transaction_id.desc', 'occurred_at.asc,transaction_id.asc']}
+      description: Stable effective-instant order and public-record tie breaker, fixed for the cursor lifetime.
+    ArchivedFilter:
+      name: is_archived
+      in: query
+      schema: {type: boolean}
+      description: Only a canonical boolean selector; unknown/repeated query parameters are refused.
+    AccountTypeFilter:
+      name: type
+      in: query
+      schema: {$ref: '#/components/schemas/AccountType'}
+      description: Own account-type filter; never expands visibility.
+    TransactionAccountFilter:
+      name: account_id
+      in: query
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own account only; foreign and unknown scope receive the same safe refusal.
+    TransactionCategoryFilter:
+      name: category_id
+      in: query
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Owner category filter resolved under ADR-016's current redirect view; not a grant.
+    CategoryNatureFilter:
+      name: nature
+      in: query
+      schema: {$ref: '#/components/schemas/CategoryNature'}
+      description: Single-nature reporting category filter.
+    CategoryParentFilter:
+      name: parent_id
+      in: query
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own root parent only; hierarchy depth is bounded by ADR-016.
+    OccurredFrom:
+      name: occurred_from
+      in: query
+      schema: {$ref: '#/components/schemas/Instant'}
+      description: Inclusive UTC effective-instant boundary; reject an empty/reversed interval.
+    OccurredBefore:
+      name: occurred_before
+      in: query
+      schema: {$ref: '#/components/schemas/Instant'}
+      description: Exclusive UTC effective-instant boundary, strictly after occurred_from when both are present.
+    CategorisationMode:
+      name: view
+      in: query
+      schema: {$ref: '#/components/schemas/CategorisationViewMode'}
+      description: CURRENT by omission or AS_RECORDED explicitly; no stored server preference is mutated by a read.
+    CategorisationAsOf:
+      name: as_of
+      in: query
+      schema: {$ref: '#/components/schemas/Instant'}
+      description: AS_RECORDED effective bound; server supplies a default and clamps a future instant to request time, echoing it. Invalid with CURRENT.
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own financial account, never a caller-supplied owner claim.
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/DedupRecordId'}
+      description: The SAME public alias used by DedupOutcome and DuplicateOverride, never an internal fingerprint.
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own category; possession is not authority.
+    CategoryRedirectId:
+      name: redirectId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/ResourceId'}
+      description: Own redirect fact for this exact source category.
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1913,6 +4897,27 @@ components:
         $ref: '#/components/schemas/DedupRecordId'
       description: Current matched surviving-record identifier from DedupOutcome. Explicit different-fact decision, never consent or an ownership bypass; retain the same key/bytes. Unknown/foreign IDs receive identical 400 validation_rejected with no effect. A changed/additional match returns DuplicateSuspected again.
   headers:
+    CoreNoStore:
+      required: true
+      schema: {type: string, const: no-store}
+      description: Private profile, credentials, tokens and proven recovery state must not be cached.
+    CoreContractVersion:
+      description: Semantic version of the source that produced the response, separate from the selected major API-Version.
+      schema: {type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'}
+    CoreDeprecation:
+      description: |
+        RFC9745 structured date (@ followed by epoch seconds) at which a deprecated interface
+        was announced. A deprecated operation requires this header on each response. It is not
+        an access/session expiry, an instant JSON codec or authorization.
+      schema: {type: string, pattern: '^@[0-9]{1,12}$'}
+    CoreSunset:
+      description: |
+        RFC8594 Sunset HTTP-date, at least P90D after the deprecation notice; server calendar/
+        clock validation is required. A missing or malformed notice never permits retirement.
+        No operation in this source is retired or deprecated.
+      schema:
+        type: string
+        pattern: '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$'
     IdempotentReplayed:
       schema: { type: boolean }
       description: Present and true when the response was served from the idempotency store.
@@ -1957,6 +4962,49 @@ components:
           schema:
             $ref: '#/components/schemas/CustomDestinationLifecycleRequest'
   responses:
+    AuthNoContent:
+      description: Completed own authentication lifecycle effect; no credential or private receipt body.
+      headers: {Cache-Control: {$ref: '#/components/headers/CoreNoStore'}}
+    AuthTokens:
+      description: |
+        DPoP-bound session token response. Web sets only the HttpOnly/Secure/SameSite=Strict refresh
+        cookie and omits refresh_token from JSON; Android receives it in this no-store envelope.
+      headers:
+        Cache-Control: {$ref: '#/components/headers/CoreNoStore'}
+        DPoP-Nonce: {$ref: '#/components/headers/DPoPNonce'}
+      content: {application/json: {schema: {$ref: '#/components/schemas/AuthTokenSet'}}}
+    CoreDPoPChallenge:
+      description: |
+        Shared authentication-required or ended-session 401. For proof skew/replay, return the
+        exact DPoP nonce challenge and fresh DPoP-Nonce; every resend signs a fresh proof.
+      x-response-status: 401
+      x-dpop-nonce-challenge: {authenticate: 'DPoP error="use_dpop_nonce"', required-header: DPoP-Nonce}
+      headers:
+        DPoP-Nonce: {$ref: '#/components/headers/DPoPNonce'}
+        WWW-Authenticate: {$ref: '#/components/headers/DPoPAuthenticate'}
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/AuthenticationChallengeProblemDetail'
+    CoreProblem:
+      description: |
+        Shared safe RFC 9457 service/authentication families; no endpoint-local error catalogue.
+        Match HTTP status to the typed code, honour challenge/delay headers, never echo raw input,
+        financial values or hidden-resource identifiers. Proof/authorization and runtime validation
+        are server duties, not claims made by generated schemas.
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApplicationProblemDetail'
+    CoreTransactionCreated:
+      description: Immutable committed ledger fact; idempotent replay returns exactly the original receipt, not current state.
+      headers:
+        Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Transaction'}
     ServiceProblem:
       description: Published safe problem detail; the HTTP status equals the catalogue status for its typed code.
       content:
@@ -2023,6 +5071,27 @@ components:
           schema:
             $ref: '#/components/schemas/OperationProblemDetail'
   securitySchemes:
+    BrowserRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: pennilogic_refresh
+      description: |
+        Browser-carried HttpOnly/Secure/SameSite=Strict refresh cookie. It is a security requirement,
+        never a script-readable operation argument. Browser fetch uses credentials include; actual
+        cookie, origin, CSRF, family and device-proof verification remain server/browser duties.
+    DPoPBootstrap:
+      type: apiKey
+      in: header
+      name: DPoP
+      x-pennilogic-per-call-proof: true
+      description: |
+        Explicit pre-access-token authentication-ceremony/device-proof requirement, not anonymous
+        default access, Bearer or session authority. Every operation still requires the per-send
+        DPoPProof parameter. Use a separate bootstrap client with this API-key slot UNSET; never
+        configure or persist a reusable global proof. Verify htm/htu/iat/jti/key and the operation's
+        channel/ceremony/recovery/refresh instrument server-side; ath is required only once an
+        access token is used on a resource request. This raw-header source mapping is not a signer,
+        preauthentication verifier, nonce engine or qualified client adoption.
     DPoP:
       type: apiKey
       in: header

@@ -1,0 +1,11 @@
+{{#isDateTime}}
+            queryParameters['{{baseName}}'] = {{dataType}}ToJSON(requestParameters['{{paramName}}']);
+{{/isDateTime}}
+{{^isDateTime}}
+{{#isDate}}
+            queryParameters['{{baseName}}'] = {{dataType}}ToJSON(requestParameters['{{paramName}}']);
+{{/isDate}}
+{{^isDate}}
+            queryParameters['{{baseName}}'] = requestParameters['{{paramName}}'];
+{{/isDate}}
+{{/isDateTime}}

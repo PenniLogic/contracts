@@ -67,7 +67,9 @@ class EgressErrorSchemaTest(unittest.TestCase):
         for result in schema_results([{"name": code, "schema": "OperationProblemDetail", "wire": value}
                                       for code, value in error_examples().items()]):
             self.assertTrue(result["valid"], result)
-        self.assertEqual(set(error_examples()) | {case["code"] for case in FIXTURE["cases"] + FIXTURE["authentication"]},
+        from test_authentication_provider import authentication_examples
+        self.assertEqual(set(error_examples()) | set(authentication_examples()) |
+                         {case["code"] for case in FIXTURE["cases"] + FIXTURE["authentication"]},
                          set(ENTRIES))
 
     def test_authentication_is_null_state_and_unrelated_confirmation_needs_no_egress_member(self) -> None:

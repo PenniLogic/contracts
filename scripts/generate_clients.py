@@ -30,6 +30,8 @@ from pl_contracts import (  # noqa: E402
     remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions, node_executable,
 )
 from toolchain import ensure_installed  # noqa: E402
+from render_success import render_success  # noqa: E402
+from render_categories import render_categories  # noqa: E402
 
 MANIFEST_NAME = "contracts-manifest.json"
 GOLDEN = GENERATOR_DIR / "golden.json"
@@ -180,7 +182,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "    if code == ProblemCode.VALIDATION_REJECTED and field == ProblemField.DUPLICATE_OVERRIDE:\n        return 400\n"
             "    return error_policy(code).status\n\n\n"
             "def new_correlation_id() -> str:\n    return 'cor_' + str(uuid4())\n"
-        )
+        ) + render_authentication_retry_policy(language, catalogue)
     if language == "kotlin":
         rows = "".join(
             f'        ProblemCode.{entry["code"].upper()} to ErrorPolicy('
@@ -218,7 +220,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "    fun status(code: ProblemCode, field: ProblemField? = null): Int =\n"
             "        if (code == ProblemCode.VALIDATION_REJECTED && field == ProblemField.DUPLICATE_OVERRIDE) 400 else policy(code).status\n"
             '    fun newCorrelationId(): String = "cor_${UUID.randomUUID()}"\n}\n'
-        )
+        ) + render_authentication_retry_policy(language, catalogue)
     if language == "typescript":
         def symbol(value: str) -> str:
             return "".join(word.capitalize() for word in value.split("_"))
@@ -270,6 +272,66 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "export function errorStatus(code: ProblemCode, field?: ProblemField): number {\n"
             "    return code === ProblemCode.ValidationRejected && field === ProblemField.DuplicateOverride ? 400 : errorPolicy(code).status;\n}\n\n"
             "export function newCorrelationId(): string {\n    return 'cor_' + globalThis.crypto.randomUUID();\n}\n"
+        ) + render_authentication_retry_policy(language, catalogue)
+    raise PipelineError(f"unknown language {language}")
+
+
+def render_authentication_retry_policy(language: str, catalogue: dict) -> str:
+    policies = catalogue["authentication_policies"]
+    if set(policies) != {entry["code"] for entry in catalogue["authentication_codes"]}:
+        raise PipelineError("authentication retry catalogue is incomplete")
+    if language == "python":
+        rows = "".join(
+            f'    ProblemCode.{code.upper()}: AuthenticationRetryPolicy({policy["retryable"]}, '
+            f'RetryClass.{policy["retry_class"].upper()}, IdempotencyTreatment.{policy["idempotency"].upper()}, '
+            f'{repr(tuple(policy["required_context"]))}),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\n@dataclass(frozen=True)\nclass AuthenticationRetryPolicy:\n"
+            "    retryable: bool\n    retry_class: RetryClass\n    idempotency: IdempotencyTreatment\n"
+            "    required_context: tuple[str, ...]\n\n"
+            f"AUTHENTICATION_RETRY_POLICIES: Final[Mapping[ProblemCode, AuthenticationRetryPolicy]] = MappingProxyType({{\n{rows}}})\n\n"
+            "def authentication_retry_policy(code: ProblemCode) -> AuthenticationRetryPolicy:\n"
+            "    if not isinstance(code, ProblemCode) or code not in AUTHENTICATION_RETRY_POLICIES:\n"
+            "        raise TypeError('authentication code rejected')\n"
+            "    return AUTHENTICATION_RETRY_POLICIES[code]\n"
+        )
+    if language == "kotlin":
+        rows = "".join(
+            f'        ProblemCode.{code.upper()} to AuthenticationRetryPolicy({str(policy["retryable"]).lower()}, '
+            f'RetryClass.{policy["retry_class"].upper()}, IdempotencyTreatment.{policy["idempotency"].upper()}, '
+            'listOf(' + ", ".join(json.dumps(name) for name in policy["required_context"]) + ')),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\ndata class AuthenticationRetryPolicy(val retryable: Boolean, val retryClass: RetryClass, "
+            "val idempotency: IdempotencyTreatment, val requiredContext: List<String>)\n\n"
+            "object AuthenticationRetryCatalogue {\n"
+            f"    private val policies = mapOf(\n{rows}    )\n"
+            "    fun policy(code: ProblemCode): AuthenticationRetryPolicy = policies[code]\n"
+            '        ?: throw IllegalArgumentException("authentication code rejected")\n}\n'
+        )
+    if language == "typescript":
+        def symbol(value: str) -> str:
+            return "".join(word.capitalize() for word in value.split("_"))
+        keys = " | ".join(f"ProblemCode.{symbol(code)}" for code in policies)
+        rows = "".join(
+            f'    [ProblemCode.{symbol(code)}]: Object.freeze({{ retryable: {str(policy["retryable"]).lower()}, '
+            f'retryClass: RetryClass.{symbol(policy["retry_class"])}, idempotency: IdempotencyTreatment.{symbol(policy["idempotency"])}, '
+            f'requiredContext: Object.freeze({json.dumps(policy["required_context"])}) }}),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\nexport interface AuthenticationRetryPolicy {\n    readonly retryable: boolean;\n"
+            "    readonly retryClass: RetryClass;\n    readonly idempotency: IdempotencyTreatment;\n"
+            "    readonly requiredContext: readonly string[];\n}\n"
+            f"export type AuthenticationProblemCode = {keys};\n"
+            f"export const AUTHENTICATION_RETRY_POLICIES: Readonly<Record<AuthenticationProblemCode, AuthenticationRetryPolicy> & Partial<Record<ProblemCode, AuthenticationRetryPolicy>>> = Object.freeze({{\n{rows}}});\n"
+            "export function authenticationRetryPolicy(code: ProblemCode): AuthenticationRetryPolicy {\n"
+            "    const policy = AUTHENTICATION_RETRY_POLICIES[code];\n"
+            "    if (!Object.hasOwn(AUTHENTICATION_RETRY_POLICIES, code) || policy === undefined) throw new TypeError('authentication code rejected');\n"
+            "    return policy;\n}\n"
         )
     raise PipelineError(f"unknown language {language}")
 
@@ -459,6 +521,10 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
     if completed.returncode != 0:
         raise PipelineError(f"openapi-generator failed for {language} (exit {completed.returncode}):\n{completed.stdout}\n{completed.stderr}")
     runtime_hash = copy_runtime(language, output)
+    relative, content = render_success(language, declarations.get("success", []))
+    success_target = output / relative
+    success_target.parent.mkdir(parents=True, exist_ok=True)
+    success_target.write_bytes(content.encode("utf-8"))
     if language == "python":
         target = output / "pennilogic_contracts" / "provider_constraint_data.py"
         content = (
@@ -492,6 +558,10 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
     registry_target = output / relative
     registry_target.parent.mkdir(parents=True, exist_ok=True)
     registry_target.write_bytes(content.encode("utf-8"))
+    relative, content = render_categories(language, declarations["category_seed"])
+    category_target = output / relative
+    category_target.parent.mkdir(parents=True, exist_ok=True)
+    category_target.write_bytes(content.encode("utf-8"))
     provider_hashes = {}
     for name in PROVIDER_SOURCE_NAMES:
         source = spec.parent / name

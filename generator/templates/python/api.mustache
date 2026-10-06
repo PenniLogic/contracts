@@ -8,10 +8,15 @@ from typing_extensions import Annotated
 {{#imports}}
 {{import}}
 {{/imports}}
+from {{packageName}}.models.instant import Instant
+from {{packageName}}.models.local_date import LocalDate
 
 from {{packageName}}.api_client import ApiClient, RequestSerialized
 from {{packageName}}.api_response import ApiResponse
 from {{packageName}}.rest import RESTResponseType
+{{#operations}}{{#operation}}{{#vendorExtensions.x-pennilogic-success}}
+from {{packageName}}.success_responses import {{type}}, decode_{{pythonOperation}}
+{{/vendorExtensions.x-pennilogic-success}}{{/operation}}{{/operations}}
 {{#supportHttpxSync}}
 from {{packageName}}.sync_helper import run_sync
 {{/supportHttpxSync}}
@@ -103,7 +108,7 @@ https://github.com/kubernetes-client/python/blob/6cc5456d79dd8c0ccc9e275a0811aeb
 {{/compatibleWithPythonLegacyApi}}
 {{^compatibleWithPythonLegacyApi}}
     @validate_call(config={"hide_input_in_errors": True})
-    {{#async}}async {{/async}}def {{operationId}}{{>partial_api_args}} -> {{{returnType}}}{{^returnType}}None{{/returnType}}:
+    {{#async}}async {{/async}}def {{operationId}}{{>partial_api_args}} -> {{>success_return_type}}:
 {{/compatibleWithPythonLegacyApi}}
 {{>partial_api}}
 {{#compatibleWithPythonLegacyApi}}
@@ -127,7 +132,7 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
             _request_timeout=_request_timeout
         )
         {{#async}}await {{/async}}response_data.read()
-        return ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}].model_validate(self.api_client.response_deserialize(
+        return ApiResponse[{{>success_return_type}}].model_validate(self.api_client.response_deserialize(
             response_data=response_data,
             response_types_map=_response_types_map,
         ), from_attributes=True).data
@@ -139,7 +144,11 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
             _request_timeout=_request_timeout
         )
         {{#async}}await {{/async}}response_data.read()
-        return ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}].model_validate(self.api_client.response_deserialize(
+        {{#vendorExtensions.x-pennilogic-success}}
+        if 200 <= response_data.status < 300:
+            return decode_{{pythonOperation}}(response_data)
+        {{/vendorExtensions.x-pennilogic-success}}
+        return ApiResponse[{{>success_return_type}}].model_validate(self.api_client.response_deserialize(
             response_data=response_data,
             response_types_map=_response_types_map,
         ), from_attributes=True).data
@@ -158,7 +167,7 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
 {{/compatibleWithPythonLegacyApi}}
 {{^compatibleWithPythonLegacyApi}}
     @validate_call(config={"hide_input_in_errors": True})
-    {{#async}}async {{/async}}def {{operationId}}_with_http_info{{>partial_api_args}} -> ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}]:
+    {{#async}}async {{/async}}def {{operationId}}_with_http_info{{>partial_api_args}} -> ApiResponse[{{>success_return_type}}]:
 {{/compatibleWithPythonLegacyApi}}
 {{>partial_api}}
 {{#compatibleWithPythonLegacyApi}}
@@ -178,7 +187,7 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
             _request_timeout=_request_timeout
         )
         {{#async}}await {{/async}}response_data.read()
-        return ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}].model_validate(self.api_client.response_deserialize(
+        return ApiResponse[{{>success_return_type}}].model_validate(self.api_client.response_deserialize(
             response_data=response_data,
             response_types_map=_response_types_map,
         ), from_attributes=True)
@@ -190,7 +199,14 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
             _request_timeout=_request_timeout
         )
         {{#async}}await {{/async}}response_data.read()
-        return ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}].model_validate(self.api_client.response_deserialize(
+        {{#vendorExtensions.x-pennilogic-success}}
+        if 200 <= response_data.status < 300:
+            return ApiResponse[{{type}}](
+                status_code=response_data.status, data=decode_{{pythonOperation}}(response_data),
+                headers=response_data.getheaders(), raw_data=response_data.read(),
+            )
+        {{/vendorExtensions.x-pennilogic-success}}
+        return ApiResponse[{{>success_return_type}}].model_validate(self.api_client.response_deserialize(
             response_data=response_data,
             response_types_map=_response_types_map,
         ), from_attributes=True)
@@ -422,8 +438,10 @@ https://github.com/OpenAPITools/openapi-generator/blob/c84b949df1a9ec04ba75989cb
         {{/hasConsumes}}
 
         # authentication setting
-        _auth_settings: List[str] = [{{#authMethods}}
-            '{{name}}'{{^-last}}, {{/-last}}{{/authMethods}}
+        _auth_settings: List[str] = [
+            {{#authMethods}}{{^vendorExtensions.x-pennilogic-per-call-proof}}
+            '{{name}}',
+            {{/vendorExtensions.x-pennilogic-per-call-proof}}{{/authMethods}}
         ]
 
         return self.api_client.param_serialize(

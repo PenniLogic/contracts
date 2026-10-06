@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import re
@@ -240,6 +241,28 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
         return text.replace(old, new)
 
+    def core_adapter(self, text: str, name: str) -> str:
+        record = json.loads((ROOT / "scripts" / "tests" / "template-adapter-edits.v1.json").read_text(encoding="utf-8"))[name]
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), record["base_sha256"])
+        lines = text.splitlines(keepends=True)
+        for edit in reversed(record["edits"]):
+            self.assertEqual("".join(lines[edit["start"]:edit["end"]]), edit["old"])
+            lines[edit["start"]:edit["end"]] = edit["new"].splitlines(keepends=True)
+        return "".join(lines)
+
+    def nullable_enum_items(self, text: str) -> str:
+        start = text.index("{{^items.isEnum}}")
+        suffix = "{{#items.isNullable}}?{{/items.isNullable}}"
+        end = text.index(suffix, start) + len(suffix)
+        items = text[start:end]
+        return self.replace_once(
+            text, items,
+            "{{#vendorExtensions.x-pennilogic-nullable-enum-items}}{{#items}}{{>provider_type}}{{/items}}"
+            "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}"
+            "{{^vendorExtensions.x-pennilogic-nullable-enum-items}}" + items +
+            "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}",
+        )
+
     def test_python_api_override_adds_precise_types_typed_responses_and_private_diagnostics(self) -> None:
         expected = self.stock("python/api.mustache")
         response_type = "ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}]"
@@ -268,7 +291,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             self.assertEqual(expected.count(old), count, old)
             expected = expected.replace(old, new)
         actual = (ROOT / "generator" / "templates" / "python" / "api.mustache").read_text(encoding="utf-8")
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, self.core_adapter(expected, "python/api.mustache"))
 
     def test_python_api_client_override_types_the_existing_transport_not_string_named_models(self) -> None:
         expected = self.stock("python/api_client.mustache")
@@ -317,7 +340,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         ]:
             expected = self.replace_once(expected, old, new)
         actual = (ROOT / "generator" / "templates" / "python" / "rest.mustache").read_text(encoding="utf-8")
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, self.core_adapter(expected, "python/rest.mustache"))
 
     def test_python_model_override_is_stock_plus_known_edits(self) -> None:
         stock = self.stock("python/model_generic.mustache")
@@ -378,15 +401,81 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         )
         self.assertEqual(override, expected, "generator/templates/kotlin/build.gradle.mustache drifted from the pinned generator's template; re-apply the documented edits")
 
+    def test_status_api_overrides_are_exact_anchored_edits_of_pinned_stock(self) -> None:
+        for name, stock in (
+            ("typescript/apis.mustache", "typescript-fetch/apis.mustache"),
+            ("kotlin/libraries/jvm-ktor/api.mustache", "kotlin-client/libraries/jvm-ktor/api.mustache"),
+        ):
+            with self.subTest(template=name):
+                actual = (ROOT / "generator" / "templates" / name).read_text(encoding="utf-8")
+                self.assertEqual(actual, self.core_adapter(self.stock(stock), name))
+
+    def test_small_null_query_and_return_partials_have_exact_finite_bindings(self) -> None:
+        root = ROOT / "generator" / "templates"
+        optional = (root / "kotlin" / "data_class_opt_var.mustache").read_text(encoding="utf-8")
+        marker = "{{^vendorExtensions.x-pennilogic-null-presence}}\n"
+        self.assertEqual(optional.count(marker), 1)
+        fallback = optional.split(marker, 1)[1].removesuffix("{{/vendorExtensions.x-pennilogic-null-presence}}\n")
+        self.assertEqual(fallback, self.nullable_enum_items(self.stock("kotlin-client/data_class_opt_var.mustache")) + "\n")
+        expected = {
+            "kotlin/data_class_opt_var.mustache": "5691f16143389ce56506592ee7009fad19166fbe73f6770718ce6bac79b4ecdd",
+            "kotlin/provider_type.mustache": "1f62966332688ca916a8422b31dd9a1fdd08a469d234a20b20e061434771c6e6",
+            "python/provider_type.mustache": "5a8fbdab26f3babe49da0985a19c1398605eaccf34327e6dab5cf5931271114b",
+            "typescript/apisAssignQueryParam.mustache": "3bc65469c980da7cecb24b45461c271a4b7f089e035fb7de964ecf67cd47d917",
+            "typescript/provider_type.mustache": "6384986536cbe34f4bcd72c0ff94517529742c59944be92a80e6550d1eda9bb9",
+            "typescript/provider_enum_read.mustache": "a69ab168a5abb26851699082eb5d3f88e3368134def948e142b7f454740091c0",
+            "typescript/provider_enum_write.mustache": "9e2f18dd273b713a12d9ca07461f508ed908800aeb6ec4de96047e460e854719",
+            "typescript/providerField.mustache": "378ee2817d00d90e254c90b66eda4ad6ff0f56a2104b690112f63572249217b3",
+            "python/success_return_type.mustache": "cec162ef157593fd357de58d0240c16a58b44ab67ec99f6bb04ed621264d41d9",
+        }
+        for name, digest in expected.items():
+            text = (root / name).read_text(encoding="utf-8")
+            self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), digest, name)
+        self.assertNotIn("\n", (root / "python" / "success_return_type.mustache").read_text(encoding="utf-8"))
+
+    def test_nullable_enum_partial_overrides_are_exact_edits_of_pinned_stock(self) -> None:
+        for name, stock, old, new in (
+            ("kotlin/data_class_req_var.mustache", "kotlin-client/data_class_req_var.mustache",
+             "{{#isNullable}}?{{/isNullable}}{{#defaultValue}}",
+             "{{#isNullable}}?{{/isNullable}}{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}"
+             "?{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}}{{#defaultValue}}"),
+            ("typescript/modelGenericInterfaces.mustache", "typescript-fetch/modelGenericInterfaces.mustache",
+             "{{#isNullable}} | null{{/isNullable}};",
+             "{{#isNullable}} | null{{/isNullable}}{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}"
+             " | null{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}};"),
+        ):
+            with self.subTest(template=name):
+                expected = self.replace_once(self.stock(stock), old, new)
+                if name.startswith("kotlin/"):
+                    expected = self.nullable_enum_items(expected)
+                else:
+                    expected = self.replace_once(expected, "{{{datatypeWithEnum}}}{{#isNullable}}",
+                        "{{#vendorExtensions.x-pennilogic-nullable-enum-items}}"
+                        "{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}Array{{/uniqueItems}}"
+                        "<{{#items}}{{>provider_type}}{{/items}}>"
+                        "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}"
+                        "{{^vendorExtensions.x-pennilogic-nullable-enum-items}}{{{datatypeWithEnum}}}"
+                        "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{#isNullable}}")
+                actual = (ROOT / "generator" / "templates" / name).read_text(encoding="utf-8")
+                self.assertEqual(actual, expected + "\n")
+
     def test_no_other_template_is_overridden(self) -> None:
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
         self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
+                                    "kotlin/data_class_opt_var.mustache",
+                                    "kotlin/data_class_req_var.mustache",
+                                    "kotlin/libraries/jvm-ktor/api.mustache",
                                     "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "kotlin/provider_type.mustache",
                                     "python/api.mustache", "python/api_client.mustache",
                                     "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
+                                    "python/provider_type.mustache",
                                     "python/rest.mustache",
-                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache",
-                                    "typescript/providerField.mustache"])
+                                    "python/success_return_type.mustache",
+                                    "typescript/apis.mustache", "typescript/apisAssignQueryParam.mustache",
+                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache", "typescript/modelGenericInterfaces.mustache",
+                                    "typescript/providerField.mustache", "typescript/provider_enum_read.mustache",
+                                    "typescript/provider_enum_write.mustache", "typescript/provider_type.mustache"])
 
     def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
         stock = self.stock("kotlin-client/data_class.mustache")
@@ -460,6 +549,32 @@ class TemplateOverrideDriftTest(unittest.TestCase):
                                      "    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));\n"
                                      '    providerWire(wire, "{{name}}");\n    return wire;\n'
                                      "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        expected = self.core_adapter(expected, "typescript/modelGeneric.mustache")
+        expected = self.replace_once(expected, "        {{#vars}}\n        {{#isPrimitiveType}}\n",
+            "        {{#vars}}\n"
+            "        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        '{{name}}': {{^required}}json['{{baseName}}'] === undefined ? undefined : {{/required}}"
+            "{{#isNullable}}json['{{baseName}}'] === null ? null : {{/isNullable}}"
+            "{{#uniqueItems}}new Set({{/uniqueItems}}(json['{{baseName}}'] as Array<any>).map("
+            "{{#items}}{{>provider_enum_read}}{{/items}}){{#uniqueItems}}){{/uniqueItems}},\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{#isPrimitiveType}}\n")
+        expected = self.replace_once(expected, "        {{/isPrimitiveType}}\n        {{/vars}}\n",
+            "        {{/isPrimitiveType}}\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{/vars}}\n")
+        expected = self.replace_once(expected, "        {{^isReadOnly}}\n        {{#isPrimitiveType}}\n",
+            "        {{^isReadOnly}}\n"
+            "        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}"
+            "{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}"
+            "{{#uniqueItems}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}"
+            "{{^uniqueItems}}(value['{{name}}'] as Array<any>){{/uniqueItems}}"
+            ".map({{#items}}{{>provider_enum_write}}{{/items}}),\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{#isPrimitiveType}}\n")
+        expected = self.replace_once(expected, "        {{/isPrimitiveType}}\n        {{/isReadOnly}}\n",
+            "        {{/isPrimitiveType}}\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{/isReadOnly}}\n")
         self.assertEqual(override, expected)
         self.assertIn("{{>providerField}}", field_block)
         partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")

@@ -104,6 +104,10 @@ export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boole
             ...json,
         {{/additionalPropertiesType}}
         {{#vars}}
+        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}
+        '{{name}}': {{^required}}json['{{baseName}}'] === undefined ? undefined : {{/required}}{{#isNullable}}json['{{baseName}}'] === null ? null : {{/isNullable}}{{#uniqueItems}}new Set({{/uniqueItems}}(json['{{baseName}}'] as Array<any>).map({{#items}}{{>provider_enum_read}}{{/items}}){{#uniqueItems}}){{/uniqueItems}},
+        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
+        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}
         {{#isPrimitiveType}}
         {{#isArray}}
         {{#uniqueItems}}
@@ -131,10 +135,10 @@ export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boole
         {{^isPrimitiveType}}
         {{#isArray}}
         {{#uniqueItems}}
-        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}new Set((json['{{baseName}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}FromJSON))),
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}new Set((json['{{baseName}}'] as Array<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}FromJSON{{#isNullable}}(item){{/isNullable}}{{/items}}))),
         {{/uniqueItems}}
         {{^uniqueItems}}
-        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}(json['{{baseName}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}FromJSON)),
+        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}({{#required}}{{#isNullable}}json['{{baseName}}'] == null ? null : {{/isNullable}}{{/required}}(json['{{baseName}}'] as Array<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}FromJSON{{#isNullable}}(item){{/isNullable}}{{/items}})),
         {{/uniqueItems}}
         {{/isArray}}
         {{#isMap}}
@@ -143,7 +147,7 @@ export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boole
         {{^isArray}}
         {{^isMap}}
         {{^isFreeFormObject}}
-        '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}{{datatype}}FromJSON(json['{{baseName}}']),
+        '{{name}}': {{#vendorExtensions.x-pennilogic-nullable-enum}}json['{{baseName}}'] === null ? null : {{/vendorExtensions.x-pennilogic-nullable-enum}}{{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}{{#required}}{{#isNullable}}json['{{baseName}}'] === null ? null : {{/isNullable}}{{/required}}{{datatype}}FromJSON(json['{{baseName}}']),
         {{/isFreeFormObject}}
         {{#isFreeFormObject}}
         '{{name}}': {{^required}}{{#isNullable}}json['{{baseName}}'] === undefined ? undefined : json['{{baseName}}'] === null ? null : {{/isNullable}}{{^isNullable}}json['{{baseName}}'] == null ? undefined : {{/isNullable}}{{/required}}json['{{baseName}}'],
@@ -151,6 +155,7 @@ export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boole
         {{/isMap}}
         {{/isArray}}
         {{/isPrimitiveType}}
+        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
         {{/vars}}
     };
     {{/hasVars}}
@@ -193,6 +198,10 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{/additionalPropertiesType}}
         {{#vars}}
         {{^isReadOnly}}
+        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}
+        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}{{#uniqueItems}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}(value['{{name}}'] as Array<any>){{/uniqueItems}}.map({{#items}}{{>provider_enum_write}}{{/items}}),
+        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
+        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}
         {{#isPrimitiveType}}
         {{#isDateType}}
         '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDate(value['{{name}}']),
@@ -201,7 +210,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDateTime(value['{{name}}']),
         {{/isDateTimeType}}
         {{#isArray}}
-        '{{baseName}}': {{#uniqueItems}}{{^required}}value['{{name}}'] == null ? undefined : {{/required}}{{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}value['{{name}}']{{/uniqueItems}},
+        '{{baseName}}': {{#uniqueItems}}{{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}value['{{name}}']{{/uniqueItems}},
         {{/isArray}}
         {{^isDateType}}
         {{^isDateTimeType}}
@@ -214,10 +223,10 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{^isPrimitiveType}}
         {{#isArray}}
         {{#uniqueItems}}
-        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}Array.from(value['{{name}}'] as Set<any>).map({{#items}}{{datatype}}{{/items}}ToJSON)),
+        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}({{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}Array.from(value['{{name}}'] as Set<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}ToJSON{{#isNullable}}(item){{/isNullable}}{{/items}})),
         {{/uniqueItems}}
         {{^uniqueItems}}
-        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}(value['{{name}}'] as Array<any>).map({{#items}}{{datatype}}{{/items}}ToJSON)),
+        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}({{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}(value['{{name}}'] as Array<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}ToJSON{{#isNullable}}(item){{/isNullable}}{{/items}})),
         {{/uniqueItems}}
         {{/isArray}}
         {{#isMap}}
@@ -226,7 +235,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{^isArray}}
         {{^isMap}}
         {{^isFreeFormObject}}
-        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{datatype}}ToJSON(value['{{name}}']),
+        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#vendorExtensions.x-pennilogic-nullable-enum}}value['{{name}}'] === null ? null : {{/vendorExtensions.x-pennilogic-nullable-enum}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}{{datatype}}ToJSON(value['{{name}}']),
         {{/isFreeFormObject}}
         {{#isFreeFormObject}}
         '{{baseName}}': value['{{name}}'],
@@ -234,6 +243,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{/isMap}}
         {{/isArray}}
         {{/isPrimitiveType}}
+        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
         {{/isReadOnly}}
         {{/vars}}
     };

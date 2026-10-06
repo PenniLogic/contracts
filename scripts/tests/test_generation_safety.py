@@ -61,6 +61,11 @@ class ConstructiveExampleTest(unittest.TestCase):
                     self.assertEqual(list(self.spec.path.glob(".contracts-generation-*")), [])
 
     def test_huge_upper_counts_and_bounded_nested_alternatives_generate_all_three_real_targets(self) -> None:
+        baseline = subprocess.run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"),
+                                   str(ROOT / "spec" / "openapi.yaml")],
+                                  cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        baseline_examples = len(json.loads(baseline.stdout).get("generation_examples", []))
         patterns = {
             "WideMaximum": "^a{0,2147483647}$",
             "WideNearlyMaximum": "^a{0,2147483646}$",
@@ -89,7 +94,7 @@ class ConstructiveExampleTest(unittest.TestCase):
         for language in gc.LANGUAGES:
             manifest = json.loads((output / language / "contracts-manifest.json").read_bytes())
             self.assertTrue(manifest["generation_examples"]["validated_generation_only_annotations"])
-            self.assertEqual(manifest["generation_examples"]["count"], len(patterns) + 1)
+            self.assertEqual(manifest["generation_examples"]["count"], baseline_examples + len(patterns) + 1)
             self.assertEqual(manifest["generation_examples"]["budget"], 4096)
             digest, files = tree_hash(output / language, exclude=("contracts-manifest.json",))
             self.assertEqual(digest, manifest["tree_sha256"])

@@ -12,7 +12,10 @@ import * as models from '../../../build/generated/typescript/src/index.js';
 interface Fixture { refusal: Record<string, unknown> }
 const refusal = loadFixture<Fixture>('error-provider.v1.json').refusal;
 
-interface Specimen { schema: string; fixture: string; path: Array<string | number>; set?: Record<string, unknown> }
+interface Specimen {
+    schema: string; fixture: string; path: Array<string | number>;
+    set?: Record<string, unknown>; empty_allowed?: boolean;
+}
 interface TransportFixture {
     models: Specimen[];
     array_controls: Specimen[];
@@ -56,6 +59,89 @@ const codecs: Readonly<Record<string, Codec>> = {
     AuthenticationProblemDetail: codec(models.AuthenticationProblemDetailFromJSON, models.AuthenticationProblemDetailToJSON),
     AuthenticationRequiredProblemDetail: codec(models.AuthenticationRequiredProblemDetailFromJSON, models.AuthenticationRequiredProblemDetailToJSON),
     OperationProblemDetail: codec(models.OperationProblemDetailFromJSON, models.OperationProblemDetailToJSON),
+    ApplicationProblemDetail: codec(models.ApplicationProblemDetailFromJSON, models.ApplicationProblemDetailToJSON),
+    AuthenticationChallengeProblemDetail: codec(models.AuthenticationChallengeProblemDetailFromJSON, models.AuthenticationChallengeProblemDetailToJSON),
+    AuthenticationContextProblemDetail: codec(models.AuthenticationContextProblemDetailFromJSON, models.AuthenticationContextProblemDetailToJSON),
+    AuthPublicKey: codec(models.AuthPublicKeyFromJSON, models.AuthPublicKeyToJSON),
+    AuthDeviceInput: codec(models.AuthDeviceInputFromJSON, models.AuthDeviceInputToJSON),
+    AuthEnrollmentRequest: codec(models.AuthEnrollmentRequestFromJSON, models.AuthEnrollmentRequestToJSON),
+    AuthEnrollmentAccepted: codec(models.AuthEnrollmentAcceptedFromJSON, models.AuthEnrollmentAcceptedToJSON),
+    AuthChannelProofRequest: codec(models.AuthChannelProofRequestFromJSON, models.AuthChannelProofRequestToJSON),
+    AuthEnrollmentVerified: codec(models.AuthEnrollmentVerifiedFromJSON, models.AuthEnrollmentVerifiedToJSON),
+    AuthCredentialDescriptor: codec(models.AuthCredentialDescriptorFromJSON, models.AuthCredentialDescriptorToJSON),
+    AuthCredentialAlgorithm: codec(models.AuthCredentialAlgorithmFromJSON, models.AuthCredentialAlgorithmToJSON),
+    AuthRelyingParty: codec(models.AuthRelyingPartyFromJSON, models.AuthRelyingPartyToJSON),
+    AuthPasskeyUser: codec(models.AuthPasskeyUserFromJSON, models.AuthPasskeyUserToJSON),
+    AuthAuthenticatorSelection: codec(models.AuthAuthenticatorSelectionFromJSON, models.AuthAuthenticatorSelectionToJSON),
+    AuthCreationExtensions: codec(models.AuthCreationExtensionsFromJSON, models.AuthCreationExtensionsToJSON),
+    AuthCreationOptions: codec(models.AuthCreationOptionsFromJSON, models.AuthCreationOptionsToJSON),
+    AuthRegistrationOptionsRequest: codec(models.AuthRegistrationOptionsRequestFromJSON, models.AuthRegistrationOptionsRequestToJSON),
+    AuthAttestationResponse: codec(models.AuthAttestationResponseFromJSON, models.AuthAttestationResponseToJSON),
+    AuthRegistrationResultRequest: codec(models.AuthRegistrationResultRequestFromJSON, models.AuthRegistrationResultRequestToJSON),
+    AuthAuthenticationOptionsRequest: codec(models.AuthAuthenticationOptionsRequestFromJSON, models.AuthAuthenticationOptionsRequestToJSON),
+    AuthAssertionOptions: codec(models.AuthAssertionOptionsFromJSON, models.AuthAssertionOptionsToJSON),
+    AuthAssertionResponse: codec(models.AuthAssertionResponseFromJSON, models.AuthAssertionResponseToJSON),
+    AuthAssertionResultRequest: codec(models.AuthAssertionResultRequestFromJSON, models.AuthAssertionResultRequestToJSON),
+    AuthTokenSet: codec(models.AuthTokenSetFromJSON, models.AuthTokenSetToJSON),
+    AuthBrowserTokenSet: codec(models.AuthBrowserTokenSetFromJSON, models.AuthBrowserTokenSetToJSON),
+    AuthRefreshRequest: codec(models.AuthRefreshRequestFromJSON, models.AuthRefreshRequestToJSON),
+    AuthBrowserRefreshRequest: codec(models.AuthBrowserRefreshRequestFromJSON, models.AuthBrowserRefreshRequestToJSON),
+    AuthProfile: codec(models.AuthProfileFromJSON, models.AuthProfileToJSON),
+    AuthCredential: codec(models.AuthCredentialFromJSON, models.AuthCredentialToJSON),
+    AuthCredentialList: codec(models.AuthCredentialListFromJSON, models.AuthCredentialListToJSON),
+    AuthCredentialNameRequest: codec(models.AuthCredentialNameRequestFromJSON, models.AuthCredentialNameRequestToJSON),
+    AuthSession: codec(models.AuthSessionFromJSON, models.AuthSessionToJSON),
+    AuthSessionList: codec(models.AuthSessionListFromJSON, models.AuthSessionListToJSON),
+    AuthDevice: codec(models.AuthDeviceFromJSON, models.AuthDeviceToJSON),
+    AuthDeviceList: codec(models.AuthDeviceListFromJSON, models.AuthDeviceListToJSON),
+    AuthChannelInput: codec(models.AuthChannelInputFromJSON, models.AuthChannelInputToJSON),
+    AuthChannel: codec(models.AuthChannelFromJSON, models.AuthChannelToJSON),
+    AuthChannelList: codec(models.AuthChannelListFromJSON, models.AuthChannelListToJSON),
+    AuthRecoveryCodeCount: codec(models.AuthRecoveryCodeCountFromJSON, models.AuthRecoveryCodeCountToJSON),
+    AuthRecoveryCodeSet: codec(models.AuthRecoveryCodeSetFromJSON, models.AuthRecoveryCodeSetToJSON),
+    AuthRecoveryStartRequest: codec(models.AuthRecoveryStartRequestFromJSON, models.AuthRecoveryStartRequestToJSON),
+    AuthRecoveryAccepted: codec(models.AuthRecoveryAcceptedFromJSON, models.AuthRecoveryAcceptedToJSON),
+    AuthRecoveryVerifyRequest: codec(models.AuthRecoveryVerifyRequestFromJSON, models.AuthRecoveryVerifyRequestToJSON),
+    AuthRecoveryProgress: codec(models.AuthRecoveryProgressFromJSON, models.AuthRecoveryProgressToJSON),
+    AuthRecoveryActionRequest: codec(models.AuthRecoveryActionRequestFromJSON, models.AuthRecoveryActionRequestToJSON),
+    AuthRecoveryCredentialRequest: codec(models.AuthRecoveryCredentialRequestFromJSON, models.AuthRecoveryCredentialRequestToJSON),
+    AuthRegistrationGrant: codec(models.AuthRegistrationGrantFromJSON, models.AuthRegistrationGrantToJSON),
+    AuthDeviceChallenge: codec(models.AuthDeviceChallengeFromJSON, models.AuthDeviceChallengeToJSON),
+    AuthDeviceRegistrationRequest: codec(models.AuthDeviceRegistrationRequestFromJSON, models.AuthDeviceRegistrationRequestToJSON),
+    AuthRecoveryCompletion: codec(models.AuthRecoveryCompletionFromJSON, models.AuthRecoveryCompletionToJSON),
+    AuthStepUpIntentTarget: codec(models.AuthStepUpIntentTargetFromJSON, models.AuthStepUpIntentTargetToJSON),
+    AuthStepUpIntentBody: codec(models.AuthStepUpIntentBodyFromJSON, models.AuthStepUpIntentBodyToJSON),
+    AuthStepUpIntent: codec(models.AuthStepUpIntentFromJSON, models.AuthStepUpIntentToJSON),
+    AuthStepUpResultRequest: codec(models.AuthStepUpResultRequestFromJSON, models.AuthStepUpResultRequestToJSON),
+    AuthStepUpGrant: codec(models.AuthStepUpGrantFromJSON, models.AuthStepUpGrantToJSON),
+    SessionRevokedProblemDetail: codec(models.SessionRevokedProblemDetailFromJSON, models.SessionRevokedProblemDetailToJSON),
+    CursorPage: codec(models.CursorPageFromJSON, models.CursorPageToJSON),
+    CreateAccountRequest: codec(models.CreateAccountRequestFromJSON, models.CreateAccountRequestToJSON),
+    UpdateAccountRequest: codec(models.UpdateAccountRequestFromJSON, models.UpdateAccountRequestToJSON),
+    Account: codec(models.AccountFromJSON, models.AccountToJSON),
+    AccountPage: codec(models.AccountPageFromJSON, models.AccountPageToJSON),
+    OpeningBalanceRequest: codec(models.OpeningBalanceRequestFromJSON, models.OpeningBalanceRequestToJSON),
+    LedgerEntryInput: codec(models.LedgerEntryInputFromJSON, models.LedgerEntryInputToJSON),
+    LedgerEntry: codec(models.LedgerEntryFromJSON, models.LedgerEntryToJSON),
+    PostTransactionRequest: codec(models.PostTransactionRequestFromJSON, models.PostTransactionRequestToJSON),
+    Transaction: codec(models.TransactionFromJSON, models.TransactionToJSON),
+    TransactionPage: codec(models.TransactionPageFromJSON, models.TransactionPageToJSON),
+    ReverseTransactionRequest: codec(models.ReverseTransactionRequestFromJSON, models.ReverseTransactionRequestToJSON),
+    CorrectTransactionRequest: codec(models.CorrectTransactionRequestFromJSON, models.CorrectTransactionRequestToJSON),
+    TransactionCorrection: codec(models.TransactionCorrectionFromJSON, models.TransactionCorrectionToJSON),
+    CategorisationView: codec(models.CategorisationViewFromJSON, models.CategorisationViewToJSON),
+    CategoryAllocationLine: codec(models.CategoryAllocationLineFromJSON, models.CategoryAllocationLineToJSON),
+    CategoryExactLineInput: codec(models.CategoryExactLineInputFromJSON, models.CategoryExactLineInputToJSON),
+    CategoryWeightedLineInput: codec(models.CategoryWeightedLineInputFromJSON, models.CategoryWeightedLineInputToJSON),
+    CategoryEntryAssignmentInput: codec(models.CategoryEntryAssignmentInputFromJSON, models.CategoryEntryAssignmentInputToJSON),
+    CategoryAssignmentRequest: codec(models.CategoryAssignmentRequestFromJSON, models.CategoryAssignmentRequestToJSON),
+    Categorisation: codec(models.CategorisationFromJSON, models.CategorisationToJSON),
+    CreateCategoryRequest: codec(models.CreateCategoryRequestFromJSON, models.CreateCategoryRequestToJSON),
+    UpdateCategoryRequest: codec(models.UpdateCategoryRequestFromJSON, models.UpdateCategoryRequestToJSON),
+    Category: codec(models.CategoryFromJSON, models.CategoryToJSON),
+    CategoryPage: codec(models.CategoryPageFromJSON, models.CategoryPageToJSON),
+    RedirectCategoryRequest: codec(models.RedirectCategoryRequestFromJSON, models.RedirectCategoryRequestToJSON),
+    CategoryRedirect: codec(models.CategoryRedirectFromJSON, models.CategoryRedirectToJSON),
 };
 function sample(entry: Specimen): Record<string, unknown> {
     let value: unknown = loadFixture<unknown>(entry.fixture);
@@ -193,19 +279,23 @@ test('all eight undefined and sparse model arrays fail before actual generated B
 
 test('every nested marked-provider model and primitive array rejects absent and null entries before write', () => {
     let cases = 0;
+    let legacyCases = 0;
+    const legacy = new Set(transport.models.slice(0, 29).map((entry) => entry.schema));
     for (const entry of [...transport.models, ...transport.array_controls]) {
         const transform = codecs[entry.schema]; assert.ok(transform);
         const model = transform.decode(sample(entry));
         for (const invalid of invalidArrays(model)) {
             assert.throws(() => transform.encode(invalid), safe, entry.schema);
             cases += 1;
+            if (legacy.has(entry.schema)) legacyCases += 1;
         }
     }
-    assert.equal(cases, 45);
+    assert.equal(legacyCases, 45);
+    assert.equal(cases, 129);
 });
 
 test('all marked roots reject null in ordinary conversion and generated response transport', async () => {
-    assert.equal(transport.models.length, 29);
+    assert.equal(transport.models.length, 112);
     for (const entry of transport.models) {
         const transform = codecs[entry.schema]; assert.ok(transform);
         assert.throws(() => transform.decode(null), safe, entry.schema);
@@ -260,7 +350,8 @@ test('ordinary generated import conversion rejects nested closed-provider extras
 });
 
 test('every closed provider rejects original extras through ordinary conversion, write and transport', async () => {
-    assert.equal(transport.models.length, 29);
+    assert.equal(transport.models.slice(0, 29).length, 29);
+    assert.equal(transport.models.length, 112);
     assert.deepEqual(Object.keys(codecs).sort(), transport.models.map((item) => item.schema).sort());
     for (const entry of transport.models) {
         const transform = codecs[entry.schema];
@@ -277,8 +368,13 @@ test('every closed provider rejects original extras through ordinary conversion,
         }
         const missing = { ...wire };
         delete missing[Object.keys(wire)[0]!];
-        assert.throws(() => transform.decode(missing), safe, entry.schema);
-        await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(missing)), transform.decode).value(), safe);
+        if (entry.empty_allowed) {
+            assert.deepEqual(transform.encode(transform.decode(missing)), missing);
+            await new JSONApiResponse(new Response(JSON.stringify(missing)), transform.decode).value();
+        } else {
+            assert.throws(() => transform.decode(missing), safe, entry.schema);
+            await assert.rejects(new JSONApiResponse(new Response(JSON.stringify(missing)), transform.decode).value(), safe);
+        }
         for (const invalid of quotedNativePrimitives(model)) assert.throws(() => transform.encode(invalid), safe, entry.schema);
     }
 });
