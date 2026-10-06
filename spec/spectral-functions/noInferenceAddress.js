@@ -90,17 +90,107 @@ module.exports = function noInferenceAddress(document) {
   }
   const enrollmentAddresses = new Map();
   for (const field of wire.registration_fields.filter(address)) {
-    function remember(value, at, origin, seen) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return;
-      enrollmentAddresses.set(JSON.stringify(at.map(String)), field);
-      // A constrained reference is not an alias: its shared base can still be ordinary text.
-      if (Object.keys(value).every((key) => key === "$ref" || key === "summary" || SCHEMA_ANNOTATIONS.has(key))) {
-        reference(value, at, origin, seen, remember);
-      }
+    const origin = `registration field ${field}`;
+    const rootAt = ["components", "schemas", "CustomDestinationRegistrationRequest", "properties", field];
+    const root = document.components?.schemas?.CustomDestinationRegistrationRequest?.properties?.[field];
+    if (!root || typeof root !== "object" || Array.isArray(root)) continue;
+    const key = (at) => JSON.stringify(at.map(String));
+    enrollmentAddresses.set(key(rootAt), field);
+    const candidates = new Map();
+    let work = 0;
+    function unproved(reason, at) {
+      report(`registration address provenance is unproved: ${reason}`, at, origin);
+      return undefined;
     }
-    remember(document.components?.schemas?.CustomDestinationRegistrationRequest?.properties?.[field],
-      ["components", "schemas", "CustomDestinationRegistrationRequest", "properties", field],
-      `registration field ${field}`, new Set());
+    function conjuncts(value, at, active = new Set(), depth = 0) {
+      if (++work > 16384 || depth > 64) return unproved("local reference/conjunction traversal bound", at);
+      if (!value || typeof value !== "object" || Array.isArray(value) || active.has(key(at))) {
+        return unproved("malformed or cyclic scalar alias", at);
+      }
+      const next = new Set(active).add(key(at));
+      const facts = { type: undefined, min: 0, max: Infinity, patterns: new Map(), formats: new Set(), finite: undefined };
+      const intersect = (values) => {
+        facts.finite = facts.finite === undefined ? values : facts.finite.filter((item) => values.includes(item));
+      };
+      const merge = (child) => {
+        if (child.type) facts.type = child.type;
+        facts.min = Math.max(facts.min, child.min);
+        facts.max = Math.min(facts.max, child.max);
+        for (const [pattern, expression] of child.patterns) facts.patterns.set(pattern, expression);
+        for (const format of child.formats) facts.formats.add(format);
+        if (child.finite !== undefined) intersect(child.finite);
+      };
+      for (const [name, child] of Object.entries(value)) {
+        if (SCHEMA_ANNOTATIONS.has(name) || name === "summary" || name === "$ref" || name === "allOf") continue;
+        if (name === "type" && child === "string") facts.type = child;
+        else if (["minLength", "maxLength"].includes(name) && Number.isSafeInteger(child) && child >= 0 && child <= 2147483647) {
+          facts[name === "minLength" ? "min" : "max"] = child;
+        } else if (name === "pattern" && typeof child === "string" && child.length <= 4096) {
+          try { facts.patterns.set(child, new RegExp(child, "u")); }
+          catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+            return unproved("malformed scalar pattern", [...at, name]);
+          }
+        } else if (name === "format" && typeof child === "string" && child.length > 0) facts.formats.add(child);
+        else if (name === "const" && typeof child === "string") intersect([child]);
+        else if (name === "enum" && Array.isArray(child) && child.length > 0 && child.length <= 256 &&
+            child.every((item) => typeof item === "string") && new Set(child).size === child.length) intersect(child);
+        else return unproved(`unsupported scalar alias keyword or value ${JSON.stringify(name)}`, [...at, name]);
+      }
+      if (Object.hasOwn(value, "$ref")) {
+        let target;
+        reference(value, at, origin, new Set(), (resolved, targetAt) => {
+          target = conjuncts(resolved, targetAt, next, depth + 1);
+          if (target) candidates.set(key(targetAt), { facts: target, at: targetAt });
+        });
+        if (!target) return unproved("reference cannot establish a scalar alias", [...at, "$ref"]);
+        merge(target);
+      }
+      if (Object.hasOwn(value, "allOf")) {
+        if (!Array.isArray(value.allOf) || !value.allOf.length || value.allOf.length > 256) {
+          return unproved("malformed or unbounded scalar conjunction", [...at, "allOf"]);
+        }
+        for (const [index, branch] of value.allOf.entries()) {
+          const child = conjuncts(branch, [...at, "allOf", index], next, depth + 1);
+          if (!child) return undefined;
+          merge(child);
+        }
+      }
+      if (facts.min > facts.max || facts.finite?.length === 0) return unproved("contradictory scalar constraints", at);
+      return facts;
+    }
+    function accepts(facts, text) {
+      return facts.type === "string" && [...text].length >= facts.min && [...text].length <= facts.max &&
+        (facts.finite === undefined || facts.finite.includes(text)) &&
+        [...facts.patterns.values()].every((pattern) => pattern.test(text));
+    }
+    function implies(target, role) {
+      if (target.type !== "string" || role.type !== "string" ||
+          [...role.formats].some((format) => !target.formats.has(format))) return false;
+      return (role.finite === undefined || target.finite !== undefined && target.finite.every((text) => role.finite.includes(text))) &&
+        target.min >= role.min && target.max <= role.max &&
+        [...role.patterns.keys()].every((pattern) => target.patterns.has(pattern));
+    }
+    if (document.openapi !== "3.1.0" || ![
+      undefined, "https://spec.openapis.org/oas/3.1/dialect/base", "https://json-schema.org/draft/2020-12/schema",
+    ].includes(document.jsonSchemaDialect)) {
+      unproved("unsupported OpenAPI schema dialect", rootAt);
+      continue;
+    }
+    const role = conjuncts(root, rootAt);
+    if (!role) continue;
+    for (const [targetKey, { facts: target, at }] of candidates) {
+      if (implies(target, role)) {
+        enrollmentAddresses.set(targetKey, field);
+        continue;
+      }
+      // A concrete counterexample proves proper narrowing, not regex-language equivalence.
+      // Bound the witness input to empty/single-character strings; an unproved case stays red.
+      const witnesses = target.finite ?? ["", ...Array.from({ length: 128 }, (_, code) => String.fromCharCode(code))];
+      const narrowed = !target.formats.size && !role.formats.size && witnesses.some((text) =>
+        text.length <= 1 && accepts(target, text) && !accepts(role, text));
+      if (!narrowed) unproved("neither an equivalent alias nor a proved narrower use of its shared base", at);
+    }
   }
   function schema(value, at, origin, seen, structuredArguments = false, usageAt = at) {
     if (value === false) return;

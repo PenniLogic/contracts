@@ -104,11 +104,17 @@ Cold runs download Gradle and the Kotlin toolchain (several minutes).
 | `pl-money-example-registry-scale` | Every Money example uses a registry currency with exactly the registry exponent of fraction digits. |
 | `pl-problem-detail-no-money` | `ProblemDetail` never carries a monetary value. |
 | `pl-custom-destination-contract` | Direct accepted ADR-022 byte/schema/provenance validation, four exactly-once enum definitions, closed registration fields and canonical state-denial mapping. Schema-map member names remain inspectable even when named `example(s)` or `default`; genuine annotation data is not a schema. |
-| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no named or registration-role-derived address scalar, explicit URI/IRI/host/IP format, header, open-map or encoded-argument escape. Registration provenance survives the shared compiler-supported non-constraining annotations. Negative `not` request compositions beyond plain scalar exclusions are explicitly unsupported, including under scalar types; the DPoP newline exclusion is preserved. Ordinary prompt strings and owner-bound IDs remain allowed. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
+| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no named or registration-role-derived address scalar, explicit URI/IRI/host/IP format, header, open-map or encoded-argument escape. Bounded source implication preserves registration roles across annotations, matching types, equal/looser bounds and equivalent local ref/`allOf` wrappers; unproved alias/narrowing cases fail explicitly. Genuinely narrowed general-text bases remain separate. Negative `not` request compositions beyond plain scalar exclusions are explicitly unsupported, including under scalar types; the DPoP newline exclusion is preserved. Ordinary prompt strings and owner-bound IDs remain allowed. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
 
 `oas3-unused-component` is off: the shared components are published before any operation
 references them. The money-example rule reads `currency-registry.v1.json` from the linted
 document's directory.
+
+The custom guards' schema-versus-data distinction does not certify the stock example resolver.
+The unchanged `oas3-valid-schema-example` path has a known limitation with AJV-valid example
+payloads combining `enum`, `example`/`default` keys and literal `$ref` data. Keep that full-source
+failure distinct from a custom-guard positive; neither the stock rule nor its dependencies are
+disabled or overridden.
 
 ## Generation and the seams
 

@@ -39,9 +39,15 @@ one OpenAPI enum definition, not removal of canonical values from the pinned sou
 The copy guard rejects another enum containing the complete canonical set even when reordered,
 widened or padded with repeated members. Ref-only aliases and unrelated or partial-overlap enums
 remain allowed; the actual Spectral controls distinguish these from complete copies.
-Traversal distinguishes OpenAPI/schema containers from annotation data: schema-map names such
+The custom guards distinguish OpenAPI/schema containers from annotation data: schema-map names such
 as `example`, `examples` and `default` remain inspectable through nested objects, arrays and
 compositions. Genuine example/default/const/enum payloads are data, not extra schema declarations.
+This is not a guarantee about the whole Spectral engine: its unchanged stock
+`oas3-valid-schema-example`/resolution path can reject an AJV-valid example payload that combines
+`enum`, `example`/`default` member names and a literal `$ref`. That known stock limitation has no
+`pl-*` finding, is not fixed or waived here, and must not be reported as a passing full-source
+positive. Existing passing CLI positives remain required; the stock rule and dependencies remain
+unchanged.
 The canonical state-denial map is preserved as `CustomDestination.x-state-denials`; that
 metadata is not a generated runtime conditional validator.
 
@@ -139,14 +145,23 @@ follows local requestBody/path/schema references and reference siblings, and wal
 compositions and cycles. It refuses address/header aliases, encoded names, open nested maps,
 external/dynamic references, untyped array/media shapes, object-valued constant escapes and
 string-encoded tool arguments. The canonical registration address roles (`host` and `pathPrefix`)
-also identify their declared schemas and annotation-only reference aliases: an innocuous inference
+also identify their declared schemas and source-proved equivalent aliases: an innocuous inference
 field cannot reuse those address scalars through references, compositions or nested arrays.
 The rule and strict compiler share the compiler's existing non-constraining annotation vocabulary,
 including `x-not-money` and the supported provider metadata, so those annotations cannot hide a
 registration role on a direct reference or intermediate alias. This does not admit new compiler
 keywords or change default handling; the existing lint-only `summary` annotation remains separate.
-Constrained references do not taint an otherwise general text base, and component-name resemblance
-or regex similarity alone is not address provenance.
+The bounded proof follows local references and positive `allOf` conjunctions, retaining scalar
+type, effective length bounds, exact pattern/format identities and finite string constraints.
+Matching types, equal/looser bounds and equivalent intermediate or renamed wrappers cannot erase
+the role. It does not blindly propagate provenance into every referenced base: a genuinely narrowed
+general-text use remains separate when a concrete value satisfies the base but not the role.
+That proper-narrowing witness is limited to empty/single-character strings; it is not a
+regex-equivalence guess. Unproved narrowing, unsupported/ambiguous composition, cycles and exhausted
+bounds fail explicitly rather than certify role absence. Traversal is limited to depth 64, 16,384
+nodes, 256-member conjunctions/finite sets and 4,096-character pattern sources. Component-name
+resemblance or regex similarity alone is not address provenance. Compiler/generator inputs and
+their supported vocabulary are unchanged.
 
 Explicit `uri`, `uri-reference`, `uri-template`, `iri`, `iri-reference`, `url`, `hostname`,
 `idn-hostname`, `ipv4` and `ipv6` format declarations are address-bearing in inspected requests.

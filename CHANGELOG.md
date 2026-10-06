@@ -41,6 +41,10 @@
 - Explicitly refuse negative request-schema compositions beyond plain scalar exclusions, including
   double-negated address references/formats. Preserve the DPoP newline exclusion, natural member
   names, example data and existing response constraints.
+- Preserve registration roles through source-proved equivalent local aliases, scalar conjunctions,
+  matching types and equal/looser bounds. Keep proved narrower general-text bases separate and
+  refuse ambiguous provenance rather than silently admitting it. Clarify that custom-guard data
+  handling does not waive the unchanged stock Spectral example/resolution limitation.
 - Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
   retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
   validation diagnostics; add actual three-language root-null and Python error-path controls.
