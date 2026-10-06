@@ -1,5 +1,5 @@
 "use strict";
-const { HTTP_METHODS } = require("./_shared");
+const { HTTP_METHODS, SCHEMA_ANNOTATIONS } = require("./_shared");
 const { loadSource } = require("./_customDestinationSource");
 
 const ENROLLMENT = new Map([
@@ -18,6 +18,21 @@ const OPERATION_NAME = /(?:^|[^a-z])(?:ai|inference|assistant|completion|chat|to
 function words(name) {
   return String(name).replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function scalarExclusion(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const scalar = (item) => item === null || ["string", "boolean"].includes(typeof item) ||
+    typeof item === "number" && Number.isFinite(item);
+  return Object.entries(value).every(([key, child]) => {
+    if (SCHEMA_ANNOTATIONS.has(key) || key === "summary") return true;
+    if (key === "type") return ["string", "integer", "boolean", "null"].includes(child);
+    if (key === "const") return scalar(child);
+    if (key === "enum") return Array.isArray(child) && child.length > 0 && child.every(scalar);
+    if (key === "pattern") return typeof child === "string";
+    return ["minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"].includes(key) &&
+      typeof child === "number" && Number.isFinite(child);
+  });
 }
 
 function enrollmentBody(operation, pathName, method) {
@@ -79,7 +94,7 @@ module.exports = function noInferenceAddress(document) {
       if (!value || typeof value !== "object" || Array.isArray(value)) return;
       enrollmentAddresses.set(JSON.stringify(at.map(String)), field);
       // A constrained reference is not an alias: its shared base can still be ordinary text.
-      if (Object.keys(value).every((key) => ["$ref", "title", "summary", "description", "example", "examples", "default", "deprecated"].includes(key))) {
+      if (Object.keys(value).every((key) => key === "$ref" || key === "summary" || SCHEMA_ANNOTATIONS.has(key))) {
         reference(value, at, origin, seen, remember);
       }
     }
@@ -104,6 +119,9 @@ module.exports = function noInferenceAddress(document) {
     }
     if (value.$dynamicRef || value.$recursiveRef) {
       report("dynamic request references cannot prove a closed request shape", at, origin);
+    }
+    if (Object.hasOwn(value, "not") && !scalarExclusion(value.not)) {
+      report("negative (not) request schema composition beyond plain scalar exclusions is unsupported: address-free fields cannot be proved", [...at, "not"], origin);
     }
     const object = value.type === "object" || (Array.isArray(value.type) && value.type.includes("object")) || value.properties !== undefined ||
       value.additionalProperties !== undefined || value.patternProperties !== undefined;

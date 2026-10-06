@@ -39,6 +39,9 @@ one OpenAPI enum definition, not removal of canonical values from the pinned sou
 The copy guard rejects another enum containing the complete canonical set even when reordered,
 widened or padded with repeated members. Ref-only aliases and unrelated or partial-overlap enums
 remain allowed; the actual Spectral controls distinguish these from complete copies.
+Traversal distinguishes OpenAPI/schema containers from annotation data: schema-map names such
+as `example`, `examples` and `default` remain inspectable through nested objects, arrays and
+compositions. Genuine example/default/const/enum payloads are data, not extra schema declarations.
 The canonical state-denial map is preserved as `CustomDestination.x-state-denials`; that
 metadata is not a generated runtime conditional validator.
 
@@ -138,6 +141,10 @@ external/dynamic references, untyped array/media shapes, object-valued constant 
 string-encoded tool arguments. The canonical registration address roles (`host` and `pathPrefix`)
 also identify their declared schemas and annotation-only reference aliases: an innocuous inference
 field cannot reuse those address scalars through references, compositions or nested arrays.
+The rule and strict compiler share the compiler's existing non-constraining annotation vocabulary,
+including `x-not-money` and the supported provider metadata, so those annotations cannot hide a
+registration role on a direct reference or intermediate alias. This does not admit new compiler
+keywords or change default handling; the existing lint-only `summary` annotation remains separate.
 Constrained references do not taint an otherwise general text base, and component-name resemblance
 or regex similarity alone is not address provenance.
 
@@ -147,6 +154,16 @@ This finite source check does not expand the generated validators' supported for
 Ordinary typed prompt strings, including URL text as content, and owner-bound destination/model
 identifiers remain allowed. The rule does not classify arbitrary strings or regex languages,
 authorize routing or prove operational SSRF resistance.
+
+Negative `not` compositions beyond plain scalar exclusions are explicitly unsupported in inspected
+request schemas, even under an outer scalar type. Scalar type/const/enum/pattern/bound exclusions
+remain allowed, including the existing DPoP newline exclusion. References, formats, structured
+values and nested composition inside `not` are refused. The rule does not attempt Boolean
+equivalence or polarity analysis; this conservative source boundary prevents double-negation from
+hiding an enrollment scalar or format.
+It applies through request bodies, parameters, references and nested arrays/compositions, not to
+ordinary field names or schema-shaped example data. It does not change the compiler vocabulary or
+the existing response-schema negative constraints.
 
 Only the exact six operation names and canonical enrollment body references receive an address
 exception. A substituted body, reused tag/path or address query/header does not. The planted

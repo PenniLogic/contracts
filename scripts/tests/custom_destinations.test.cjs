@@ -9,7 +9,9 @@ const { parse } = require("@stoplight/yaml");
 const { schema: validateSchema } = require("@stoplight/spectral-functions");
 const contract = require("../../spec/spectral-functions/customDestinationContract");
 const noAddress = require("../../spec/spectral-functions/noInferenceAddress");
+const { SCHEMA_ANNOTATIONS } = require("../../spec/spectral-functions/_shared");
 const { SOURCE, loadSource } = require("../../spec/spectral-functions/_customDestinationSource");
+const { compile } = require("../provider_constraints.cjs");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const base = parse(fs.readFileSync(path.join(ROOT, "spec", "openapi.yaml"), "utf8"));
@@ -164,6 +166,154 @@ test("real Spectral CLI permits unchanged canonical enums, ref-only aliases and 
         type: "string", enum: [...values.slice(1), "synthetic_extra", "synthetic_other"],
       };
     }
+    const result = lint(doc);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI finds all four copied enums under example/examples/default field and component names", () => {
+  withLintProbe((lint) => {
+    const doc = structuredClone(base);
+    const expected = [];
+    for (const member of ["example", "examples", "default"]) {
+      const properties = {};
+      for (const [name, values] of Object.entries(consequence.enums)) {
+        properties[name] = { type: "object", additionalProperties: false, required: [member], properties: {
+          [member]: { type: "string", enum: ["synthetic_extra", ...[...values].reverse()] },
+        } };
+        expected.push(["components", "schemas", member, "properties", name, "properties", member, "enum"]);
+      }
+      doc.components.schemas[member] = {
+        type: "object", "x-pennilogic-strict-provider": true, additionalProperties: false,
+        required: Object.keys(properties), properties,
+      };
+      doc.components.schemas[`ReferenceTo${member}`] = { $ref: `#/components/schemas/${member}` };
+    }
+    assert.doesNotThrow(() => compile(doc));
+    assert.deepEqual(findings(doc).map((finding) => finding.path), expected);
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+      line.includes("[pl-custom-destination-contract]") && line.includes(`(${location.join(".")})`) &&
+      line.includes("duplicate") && line.includes("use $ref")), result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI traverses schema maps, nested arrays and every schema applicator without treating names as annotations", () => {
+  withLintProbe((lint) => {
+    const doc = structuredClone(base);
+    const copy = () => ({ type: "string", enum: [...consequence.enums.CredentialHeader, "synthetic_extra"] });
+    const shape = { type: "object", properties: {
+      examples: { type: "array", items: { allOf: [copy()] } },
+    } };
+    const suffixes = [["properties", "examples", "items", "allOf", "0", "enum"]];
+    for (const keyword of ["patternProperties", "dependentSchemas", "$defs"]) {
+      shape[keyword] = { examples: copy() };
+      suffixes.push([keyword, "examples", "enum"]);
+    }
+    for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
+      shape[keyword] = [copy()];
+      suffixes.push([keyword, "0", "enum"]);
+    }
+    for (const keyword of ["additionalProperties", "unevaluatedProperties", "unevaluatedItems", "contains",
+      "propertyNames", "not", "if", "then", "else", "contentSchema"]) {
+      shape[keyword] = copy();
+      suffixes.push([keyword, "enum"]);
+    }
+    doc.components.schemas.SchemaPositions = shape;
+    const expected = suffixes.map((suffix) => ["components", "schemas", "SchemaPositions", ...suffix].join(".")).sort();
+    assert.deepEqual(findings(doc).map((finding) => finding.path.join(".")).sort(), expected);
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+      line.includes("[pl-custom-destination-contract]") && line.includes(`(${location})`) &&
+      line.includes("duplicate CredentialHeader enumeration")), result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI visits OpenAPI schema containers including named components, headers, callbacks and webhooks", () => {
+  withLintProbe((lint) => {
+    const doc = structuredClone(base);
+    const copy = () => ({ type: "string", enum: [...consequence.enums.CredentialHeader, "synthetic_extra"] });
+    const parameter = () => ({ name: "selection", in: "query", description: "Synthetic enum control.", schema: copy() });
+    const body = () => ({ content: { "application/json": { schema: copy() } } });
+    const operation = (id) => ({
+      operationId: id, description: "Synthetic enum control.", tags: ["CustomDestinations"],
+      parameters: [{ $ref: "#/components/parameters/DPoPProof" },
+        { $ref: "#/components/parameters/IdempotencyKey" }, parameter()],
+      requestBody: body(), responses: { "200": { description: "Synthetic response.", ...body() } },
+    });
+    const callbackPath = "{$request.query.callback}";
+    doc.components.parameters.examples = parameter();
+    doc.components.headers.default = { description: "Synthetic header.", schema: copy() };
+    doc.components.requestBodies.example = body();
+    doc.components.responses = { ...doc.components.responses, examples: {
+      description: "Synthetic response.", ...body(), headers: { default: { schema: copy() } },
+    } };
+    doc.components.pathItems = { examples: { post: operation("componentEnumProbe") } };
+    doc.components.callbacks = { default: { [callbackPath]: { post: operation("componentCallbackEnumProbe") } } };
+    doc.paths["/enum-copy"] = { parameters: [parameter()], post: operation("pathEnumProbe") };
+    doc.paths["/enum-copy"].post.callbacks = { examples: { [callbackPath]: { post: operation("callbackEnumProbe") } } };
+    doc.paths["/enum-copy"].post.responses.default = { description: "Synthetic fallback.", ...body() };
+    doc.webhooks = { examples: { post: operation("webhookEnumProbe") } };
+    doc.components.requestBodies.encoding = { content: { "multipart/form-data": {
+      schema: { type: "object", properties: { examples: { type: "string" } } },
+      encoding: { examples: { headers: { default: { schema: copy() } } } },
+    } } };
+    const expected = [
+      "components.parameters.examples.schema.enum", "components.headers.default.schema.enum",
+      "components.requestBodies.example.content.application/json.schema.enum",
+      "components.responses.examples.content.application/json.schema.enum",
+      "components.responses.examples.headers.default.schema.enum",
+      "components.requestBodies.encoding.content.multipart/form-data.encoding.examples.headers.default.schema.enum",
+      "paths./enum-copy.parameters.0.schema.enum",
+      "paths./enum-copy.post.responses.default.content.application/json.schema.enum",
+    ];
+    for (const prefix of [
+      "components.pathItems.examples.post", `components.callbacks.default.${callbackPath}.post`,
+      "paths./enum-copy.post", `paths./enum-copy.post.callbacks.examples.${callbackPath}.post`, "webhooks.examples.post",
+    ]) {
+      expected.push(`${prefix}.parameters.2.schema.enum`, `${prefix}.requestBody.content.application/json.schema.enum`,
+        `${prefix}.responses.200.content.application/json.schema.enum`);
+    }
+    assert.deepEqual(findings(doc).map((finding) => finding.path.join(".")).sort(), expected.sort());
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+      line.includes("[pl-custom-destination-contract]") && line.includes(`(${location})`) &&
+      line.includes("duplicate CredentialHeader enumeration")), result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI preserves genuine annotation and example data, canonical refs and partial-overlap fields", () => {
+  withLintProbe((lint) => {
+    const doc = structuredClone(base);
+    const data = { enum: [...consequence.enums.CredentialHeader] };
+    const shape = { type: "object", additionalProperties: false, required: ["enum"], properties: {
+      enum: { type: "array", items: { type: "string" } },
+    }, example: data, examples: [data], default: data, const: data, enum: [data],
+    "x-synthetic-data": { schema: { enum: data.enum }, properties: { examples: { enum: data.enum } } } };
+    doc.components.schemas.AnnotationPayload = shape;
+    doc.components.examples = { example: { value: data }, examples: { value: data }, default: { value: data } };
+    doc.components.responses = { ...doc.components.responses, example: { description: "Synthetic data response.",
+      content: { "application/json": { schema: shape, example: data, examples: { default: { value: data } } } },
+    } };
+    doc.components.schemas.examples = { type: "object", properties: {} };
+    for (const [name, values] of Object.entries(consequence.enums)) {
+      doc.components.schemas.examples.properties[name] = { type: "object", properties: {
+        examples: { $ref: `#/components/schemas/${name}` },
+        default: { type: "string", enum: values.slice(1) },
+        example: { type: "string", enum: [...values.slice(1), "synthetic_extra", "synthetic_other"] },
+      } };
+    }
+    doc.paths["x-synthetic-data"] = { post: {
+      operationId: "dataTemplate", description: "Schema-shaped extension data.", tags: ["CustomDestinations"],
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }],
+      requestBody: { content: { "application/json": { schema: { enum: data.enum } } } },
+      responses: { "204": { description: "Schema-shaped data only." } },
+    } };
+    doc["x-synthetic-data"] = { components: { schemas: { example: { enum: data.enum } } } };
+    assert.deepEqual(findings(doc), []);
     const result = lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
@@ -385,6 +535,172 @@ test("enrollment scalar provenance follows its declared role rather than a fixed
   properties.target = { $ref: "#/components/schemas/CustomDestinationRegistrationRequest/properties/host" };
   assert.ok(noAddress(doc).some((finding) => finding.path.at(-1) === "$ref" &&
     finding.message.includes("registration-only host address schema")));
+});
+
+test("real Spectral CLI preserves enrollment roles through each compiler-supported annotation on direct and intermediate refs", () => {
+  withLintProbe((lint) => {
+    const annotations = {
+      title: "Synthetic scalar", description: "Synthetic scalar.", default: null,
+      example: null, examples: null, deprecated: true, "x-pennilogic-strict-provider": false,
+      "x-pennilogic-provider-validator": "synthetic", "x-not-money": true, "x-state-denials": {},
+    };
+    assert.deepEqual([...SCHEMA_ANNOTATIONS], Object.keys(annotations));
+    for (const [annotation, value] of Object.entries(annotations)) {
+      for (const intermediate of [false, true]) {
+        const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+          target: { $ref: "#/components/schemas/CustomDestinationHost" },
+          segment: { $ref: "#/components/schemas/CustomDestinationPathPrefix" },
+        } });
+        const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+        for (const field of ["host", "pathPrefix"]) {
+          if (intermediate) {
+            doc.components.schemas[`EnrollmentAlias${field}`] = structuredClone(registration[field]);
+            registration[field] = { $ref: `#/components/schemas/EnrollmentAlias${field}` };
+          }
+        }
+        const control = compile(doc);
+        for (const field of ["host", "pathPrefix"]) {
+          const target = intermediate ? doc.components.schemas[`EnrollmentAlias${field}`] : registration[field];
+          const example = field === "host" ? "synthetic.example" : "/v1";
+          target[annotation] = annotation === "example" ? example : annotation === "examples" ? [example] : value;
+        }
+        const compiled = compile(doc);
+        assert.deepEqual(compiled.schemas, control.schemas, annotation);
+        assert.deepEqual(compiled.roots, control.roots, annotation);
+        assert.equal(noAddress(doc).length, 2, `${annotation}/${intermediate}`);
+        const result = lint(doc);
+        assert.equal(result.status, 1, result.stdout + result.stderr);
+        for (const [member, role] of [["target", "host"], ["segment", "pathPrefix"]]) {
+          assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+            line.includes("[pl-no-inference-address]") && line.includes(`properties.${member}.$ref)`) &&
+            line.includes(`registration-only ${role} address schema`) && line.includes("destinationId/custom_model_id")),
+          `${annotation}/${intermediate}: ${result.stdout}${result.stderr}`);
+        }
+      }
+    }
+  });
+});
+
+test("supported annotations do not taint constrained general-text bases or widen the compiler vocabulary", () => {
+  withLintProbe((lint) => {
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+      prompt: { $ref: "#/components/schemas/GeneralText" },
+    } });
+    doc.components.schemas.GeneralText = {
+      type: "string", examples: ["Discuss https://content.example/v1 as content, not routing."],
+    };
+    const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+    for (const field of ["host", "pathPrefix"]) {
+      registration[field] = {
+        $ref: "#/components/schemas/GeneralText",
+        pattern: base.components.schemas[field === "host" ? "CustomDestinationHost" : "CustomDestinationPathPrefix"].pattern,
+        description: "Constrained registration role, not a general-text alias.", "x-not-money": true,
+      };
+    }
+    assert.deepEqual(noAddress(doc), []);
+    assert.doesNotThrow(() => compile(doc));
+    const result = lint(doc);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    for (const annotation of ["summary", "readOnly", "writeOnly", "externalDocs", "x-unknown-annotation"]) {
+      const altered = structuredClone(base);
+      altered.components.schemas.CustomDestinationRegistrationRequest.properties.host[annotation] = true;
+      assert.throws(() => compile(altered), /provider constraint generation rejected: unsupported keyword/, annotation);
+    }
+    const summary = withRequest({ type: "object", additionalProperties: false, properties: {
+      target: { $ref: "#/components/schemas/CustomDestinationHost" },
+    } });
+    summary.components.schemas.CustomDestinationRegistrationRequest.properties.host.summary = "Existing lint-only annotation.";
+    assert.equal(noAddress(summary).length, 1);
+    const nonnullDefault = structuredClone(base);
+    nonnullDefault.components.schemas.CustomDestinationRegistrationRequest.properties.host.default = "synthetic.example";
+    assert.throws(() => compile(nonnullDefault), /provider constraint generation rejected: unsupported default/);
+  });
+});
+
+test("real Spectral CLI refuses negative composition through body refs, parameters, aliases, nested arrays and compositions", () => {
+  withLintProbe((lint) => {
+    const negative = (schema) => ({ type: "string", not: { not: schema } });
+    const host = { $ref: "#/components/schemas/CustomDestinationHost" };
+    const prefix = { $ref: "#/components/schemas/CustomDestinationPathPrefix" };
+    for (const [shape, accepted, refused] of [
+      [host, "outside.example", "bad host with spaces"],
+      [prefix, "/v1", "https://outside.example"],
+      [{ type: "string", format: "uri" }, "https://outside.example/v1", "not an absolute URI"],
+    ]) {
+      for (const candidate of [shape, negative(shape)]) {
+        assert.deepEqual(validate(accepted, { ...candidate, components: base.components }), []);
+        assert.ok(validate(refused, { ...candidate, components: base.components }).length > 0);
+      }
+    }
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+      selector: negative(host), segment: negative(prefix),
+      referenced: { $ref: "#/components/schemas/NegativeScalarAlias" },
+      entries: { type: "array", items: { type: "object", additionalProperties: false,
+        properties: { value: negative(prefix) } } },
+      values: { type: "array", items: negative(host) },
+      combined: { allOf: [negative({ type: "string", format: "uri" })] },
+      excluded: { type: "string", not: { not: { const: "synthetic-selected" } } },
+      formatted: { type: "string", not: { format: "uri" } },
+      reference: { type: "string", not: host },
+      structured: { type: "string", not: { const: { selector: "synthetic.example" } } },
+    } });
+    doc.components.schemas.NegativeScalarAlias = negative(host);
+    doc.components.requestBodies.ConstraintBody = doc.paths["/ai/inference"].post.requestBody;
+    doc.paths["/ai/inference"].post.requestBody = { $ref: "#/components/requestBodies/ConstraintBody" };
+    doc.paths["/ai/inference"].parameters = [
+      { in: "query", name: "selector", description: "Synthetic negative.", schema: negative(host) },
+    ];
+    doc.paths["/ai/inference"].post.parameters.push({
+      in: "header", name: "Selection", description: "Synthetic negative.", schema: negative(prefix),
+    });
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const body = "components.requestBodies.ConstraintBody.content.application/json.schema.properties";
+    const locations = [
+      `${body}.selector.not`, `${body}.segment.not`, `${body}.entries.items.properties.value.not`,
+      `${body}.values.items.not`, `${body}.combined.allOf.0.not`, `${body}.excluded.not`,
+      `${body}.formatted.not`, `${body}.reference.not`, `${body}.structured.not`,
+      "components.schemas.NegativeScalarAlias.not",
+      "paths./ai/inference.parameters.0.schema.not", "paths./ai/inference.post.parameters.2.schema.not",
+    ];
+    assert.equal(noAddress(doc).length, locations.length);
+    for (const location of locations) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+      line.includes("[pl-no-inference-address]") && line.includes(`(${location})`) &&
+      line.includes("negative (not) request schema composition beyond plain scalar exclusions is unsupported") &&
+      line.includes("destinationId/custom_model_id")), result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI keeps not/example/examples/default member names and schema-shaped annotation data as ordinary content", () => {
+  withLintProbe((lint) => {
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+      prompt: { type: "string" },
+      not: { type: "object", additionalProperties: false, properties: {
+        not: { type: "object", additionalProperties: false, properties: { $ref: { type: "string" } } },
+      } },
+      example: { type: "string" }, examples: { type: "string" }, default: { type: "string" },
+      limited: { type: "string", not: { const: "synthetic-excluded" } },
+      patterned: { type: "string", not: { pattern: "^synthetic-excluded$" } },
+      enumerated: { type: "string", not: { enum: ["synthetic-excluded"] } },
+      typed: { type: "string", not: { type: "null" } },
+      bounded: { type: "string", not: { minLength: 2, maxLength: 3, description: "Scalar-only exclusion." } },
+      count: { type: "integer", not: { minimum: 1, maximum: 3, exclusiveMinimum: 0, exclusiveMaximum: 4, multipleOf: 1 } },
+      enabled: { type: "boolean", not: { const: false } },
+      destinationId: { $ref: "#/components/schemas/CustomDestinationId" },
+      custom_model_id: { $ref: "#/components/schemas/CustomDestinationModelId" },
+      selection: { $ref: "#/components/schemas/CredentialHeader" },
+      partial: { type: "string", enum: consequence.enums.CredentialHeader.slice(1) },
+    }, examples: [{
+      prompt: "Explain https://content.example/v1 as text, not routing.",
+      not: { not: { $ref: "#/components/schemas/CustomDestinationHost" } },
+      example: "example", examples: "examples", default: "default",
+    }] });
+    assert.deepEqual(noAddress(doc), []);
+    assert.deepEqual(findings(doc), []);
+    for (const [route, item] of Object.entries(base.paths)) assert.deepEqual(doc.paths[route], item);
+    const result = lint(doc);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
 });
 
 test("real Spectral CLI refuses semantic address parameters and fake enrollment exceptions", () => {

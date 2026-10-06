@@ -2,14 +2,12 @@
 
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
-const { resolveLocalRef } = require("../spec/spectral-functions/_shared.js");
+const { resolveLocalRef, SCHEMA_ANNOTATIONS } = require("../spec/spectral-functions/_shared.js");
 const Ajv = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats");
 
 const EXAMPLE_BUDGET = 4096;
 
-const ANNOTATIONS = new Set(["title", "description", "default", "example", "examples", "deprecated",
-  "x-pennilogic-strict-provider", "x-pennilogic-provider-validator", "x-not-money", "x-state-denials"]);
 const KEYS = new Set(["$ref", "type", "properties", "required", "additionalProperties", "items",
   "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
   "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "uniqueItems",
@@ -186,7 +184,7 @@ function compile(document) {
   function node(input, valueSchema = true) {
     const source = object(input), result = {};
     for (const key of Object.keys(source)) {
-      if (!KEYS.has(key) && !ANNOTATIONS.has(key)) reject("unsupported keyword");
+      if (!KEYS.has(key) && !SCHEMA_ANNOTATIONS.has(key)) reject("unsupported keyword");
     }
     if (source.default !== undefined && source.default !== null) reject("unsupported default");
     if (valueSchema && source.type === undefined && source.$ref === undefined) reject("untyped value");
