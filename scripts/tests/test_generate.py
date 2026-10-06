@@ -157,7 +157,8 @@ class SeamWiringTest(unittest.TestCase):
         gc.generate("typescript", self.output / "typescript", self.tools, self.spec_path)
         model = (self.output / "typescript" / "src/models/SyntheticEnvelope.ts").read_text(encoding="utf-8")
         self.assertIn("MoneyFromJSON(json['total'])", model)
-        self.assertIn("MoneyToJSON(value['total'])", model)
+        self.assertRegex(model, r"const member = value\['total'\];\s+return requiredWireValue\(MoneyToJSON\(member\)\)")
+        self.assertIn("total': NonNullable<ReturnType<typeof MoneyToJSON>>", model)
         self.assertIn("InstantFromJSON(json['recorded_at'])", model)
         self.assertIn("LocalDateFromJSON(json['booked_on'])", model)
         self.assertIn("total: Money;", model)
@@ -432,6 +433,13 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             "typescript/provider_enum_read.mustache": "a69ab168a5abb26851699082eb5d3f88e3368134def948e142b7f454740091c0",
             "typescript/provider_enum_write.mustache": "9e2f18dd273b713a12d9ca07461f508ed908800aeb6ec4de96047e460e854719",
             "typescript/providerField.mustache": "378ee2817d00d90e254c90b66eda4ad6ff0f56a2104b690112f63572249217b3",
+            "typescript/wireEnumType.mustache": "68ee5bdc79721fe161b528a8a14e9cbfd6a6438e56c63486b43afe122bb5e928",
+            "typescript/wireEnumValue.mustache": "1b10ebcdb566726c03e9d27a92752d9f564d837df5a59bde387d76ee616d5406",
+            "typescript/wireField.mustache": "1ea11e360838133b00ef95519ac8e22082ee3b0db739677908bc55d9017aad98",
+            "typescript/wireInput.mustache": "148a76344dd3e38dc5749a5f9ef5f199699ec8eb452e3dc68c4d92418e0d3678",
+            "typescript/wireMember.mustache": "12cd7965b634734d48bb4d6a1734c1529a54b89b22e99093d563b6c2b11152bb",
+            "typescript/wireType.mustache": "79b2531f359378f3e14f022fb8f2b788586204505f86bed7ce029fdb2aa8eb5a",
+            "typescript/wireValue.mustache": "7fa512f482ac75a494d6372abdd700f8bff9fa2813ce0d7a810c055601928b30",
             "python/success_return_type.mustache": "cec162ef157593fd357de58d0240c16a58b44ab67ec99f6bb04ed621264d41d9",
         }
         for name, digest in expected.items():
@@ -481,7 +489,11 @@ class TemplateOverrideDriftTest(unittest.TestCase):
                                     "typescript/apis.mustache", "typescript/apisAssignQueryParam.mustache",
                                     "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache", "typescript/modelGenericInterfaces.mustache",
                                     "typescript/providerField.mustache", "typescript/provider_enum_read.mustache",
-                                    "typescript/provider_enum_write.mustache", "typescript/provider_type.mustache"])
+                                    "typescript/provider_enum_write.mustache", "typescript/provider_type.mustache",
+                                    "typescript/wireEnumType.mustache", "typescript/wireEnumValue.mustache",
+                                    "typescript/wireField.mustache", "typescript/wireInput.mustache",
+                                    "typescript/wireMember.mustache", "typescript/wireType.mustache",
+                                    "typescript/wireValue.mustache"])
 
     def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
         stock = self.stock("kotlin-client/data_class.mustache")
@@ -522,7 +534,9 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             "import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
             "{{/vendorExtensions.x-pennilogic-strict-provider}}\n" + stock
         )
-        field_block = override.split("{{>modelGenericInterfaces}}\n", 1)[1].split("\n\n/**", 1)[0]
+        provider = "{{#vendorExtensions.x-pennilogic-strict-provider}}\n\nconst providerFields"
+        tail = override.split("{{>modelGenericInterfaces}}\n", 1)[1]
+        field_block = tail[tail.index(provider):].split("\n\n/**", 1)[0]
         self.assertTrue(field_block.startswith("{{#vendorExtensions.x-pennilogic-strict-provider}}"))
         self.assertTrue(field_block.rstrip().endswith("{{/vendorExtensions.x-pennilogic-strict-provider}}"))
         expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n", "{{>modelGenericInterfaces}}\n" + field_block)
@@ -581,6 +595,28 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         expected = self.replace_once(expected, "        {{/isPrimitiveType}}\n        {{/isReadOnly}}\n",
             "        {{/isPrimitiveType}}\n"
             "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{/isReadOnly}}\n")
+        self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
+                         "2e3ed688cafa7ec02f7d79aae2f58ff8a20cf2f84f740a8696e92243619e1a01",
+                         "the complete pre-M1 adapter must still match immutable892 before the exact correction")
+        imports = "import { mapValues{{#isDateLibraryDate}}{{#vendorExtensions.x-hasDateVars}}, parseDate, parseDateTime, serializeDate, serializeDateTime{{/vendorExtensions.x-hasDateVars}}{{/isDateLibraryDate}} } from '../runtime{{importFileExtension}}';\n"
+        expected = self.replace_once(expected, imports, imports +
+            "import { requiredWireValue, omitOptionalWire, mapWireRecord, type WireOutput } from '../wireSerialization{{importFileExtension}}';\n")
+        wire_type = (
+            "export type {{classname}}Wire = {{#parent}}NonNullable<ReturnType<typeof {{{.}}}ToJSON>> & {{/parent}}{\n"
+            "    {{#additionalPropertiesType}}\n    [key: string]: unknown;\n    {{/additionalPropertiesType}}\n"
+            "    {{#vars}}\n    {{^isReadOnly}}\n"
+            "    {{>wireField}}\n"
+            "    {{/isReadOnly}}\n"
+            "    {{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}\n"
+            "    {{>wireField}}\n"
+            "    {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}\n"
+            "    {{/vars}}\n};\n"
+        )
+        expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n",
+                                     "{{>modelGenericInterfaces}}\n" + wire_type)
+        start = expected.index("export function {{classname}}ToJSON(json: any): {{classname}} {")
+        writer = (ROOT / "scripts" / "tests" / "fixtures" / "typescript-wire-writer.v1.mustache").read_text(encoding="utf-8")
+        expected = expected[:start] + writer
         self.assertEqual(override, expected)
         self.assertIn("{{>providerField}}", field_block)
         partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")

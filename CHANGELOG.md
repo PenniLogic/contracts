@@ -2,6 +2,18 @@
 
 ## Unreleased initial core contract 0.4.0
 
+- Correct the independently reproduced public TypeScript writer defect: generated `ModelToJSON`
+  and `ModelToJSONTyped` return a distinct recursive wire type rather than falsely promising a
+  domain `Money` wrapper. Preserve canonical codecs/wire values; validate strict portable consumers
+  and paired compile-negative domain/wire assignments. This necessary typing correction may
+  reject consumers that relied on the old false return or untyped writer input.
+- Declare ADR-016's transaction/categorisation projections read-only and preserve transaction
+  omission versus explicit null. Generic response-only metadata retains response fields on
+  serialization without adding them to write payloads or making the transaction field mandatory.
+- Bind financial duplicate-screen decisions to the shared distinct 202 response at the actual
+  whole-source lint gate. Use strict structural metadata equality instead of object insertion
+  order, retaining array/type/value/extra-field/pin and exact category-byte guards. Preserve all
+  original 89224d4/1f2abdf evidence, reviewer findings and failed author correction attempts.
 - Add original contracts#1's authentication, accounts, transactions and categories, including
   mutations, canonical Money and both transaction instants, closed synthetic request fixtures,
   bounded cursors/filters/stable sorts and declared financial P30D/P14D idempotency.
@@ -28,7 +40,8 @@
 
 LOCAL PREPARATION ONLY: no release/artifact publication, backend real-response acceptance,
 consumer rollout, independent review, protected integration or original #1/Infra #22 closure
-is asserted. Category source acceptance is not API9 runtime completion or released client
+is asserted. Local corrections are not fresh independent approval or hosted-budget qualification.
+Category source acceptance is not API9 runtime completion or released client
 publication. See [the core contract](docs/core-contract.md).
 
 ## Unreleased pipeline timing correction

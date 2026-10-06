@@ -2,19 +2,20 @@
 
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
-const { resolveLocalRef, SCHEMA_ANNOTATIONS } = require("../spec/spectral-functions/_shared.js");
+const { resolveLocalRef, SCHEMA_ANNOTATIONS, HTTP_METHODS } = require("../spec/spectral-functions/_shared.js");
 const Ajv = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats");
 const { successResponses } = require("./success_responses.cjs");
 const { BINDING, loadSeed, derivedEnums } = require("./category_seed.cjs");
 const path = require("node:path");
+const { isDeepStrictEqual } = require("node:util");
 
 const EXAMPLE_BUDGET = 4096;
 
 const KEYS = new Set(["$ref", "type", "properties", "required", "additionalProperties", "items",
   "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
   "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "uniqueItems",
-  "format", "allOf", "anyOf", "oneOf", "not", "if", "then", "else"]);
+  "format", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "readOnly"]);
 const TYPES = new Set(["object", "array", "string", "integer", "boolean", "null"]);
 
 function reject(reason) { throw new Error(`provider constraint generation rejected: ${reason}`); }
@@ -188,16 +189,18 @@ function compile(document) {
     if (active.has(name)) reject("cyclic reference");
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || !Object.hasOwn(schemas, name)) reject("unresolved reference");
     active.add(name);
-    compiled[name] = node(schemas[name]);
+    compiled[name] = node(schemas[name], true, false, roots.includes(name));
     active.delete(name);
   }
 
-  function node(input, valueSchema = true) {
+  function node(input, valueSchema = true, readOnlyAllowed = false, ownsProperties = false) {
     const source = object(input), result = {};
     for (const key of Object.keys(source)) {
       if (!KEYS.has(key) && !SCHEMA_ANNOTATIONS.has(key)) reject("unsupported keyword");
     }
     if (source.default !== undefined && source.default !== null) reject("unsupported default");
+    if (source.readOnly !== undefined && typeof source.readOnly !== "boolean") reject("malformed readOnly annotation");
+    if (source.readOnly === true && !readOnlyAllowed) reject("unsupported readOnly placement");
     if (valueSchema && source.type === undefined && source.$ref === undefined && !nullablePair(source)) reject("untyped value");
     if (source.$ref !== undefined) {
       if (typeof source.$ref !== "string" || !/^#\/components\/schemas\/[A-Za-z][A-Za-z0-9_]*$/.test(source.$ref) ||
@@ -279,7 +282,7 @@ function compile(document) {
     }
     if (source.properties !== undefined) {
       result.properties = Object.fromEntries(Object.entries(object(source.properties)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-        .map(([name, property]) => [name, node(property, valueSchema)]));
+        .map(([name, property]) => [name, node(property, valueSchema, ownsProperties)]));
     }
     if (source.additionalProperties !== undefined) {
       if (typeof source.additionalProperties !== "boolean") reject("unsupported object map");
@@ -312,6 +315,62 @@ function compile(document) {
   }
   const result = { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
   const projection = JSON.parse(JSON.stringify(document));
+  const readOnlyModels = roots.filter((name) =>
+    Object.values(schemas[name].properties || {}).some((property) => property.readOnly === true));
+  if (readOnlyModels.length) {
+    function usedSchemas(response) {
+      const names = new Set(), visited = new Set();
+      let work = 0;
+      function visit(value, depth = 0) {
+        if (value === undefined) return;
+        if (++work > 16384 || depth > 64) reject("readOnly usage traversal bound");
+        if (!value || typeof value !== "object" || Array.isArray(value)) reject("malformed readOnly usage");
+        if (value.$ref !== undefined) {
+          if (typeof value.$ref !== "string" || !value.$ref.startsWith("#/")) reject("unsupported readOnly usage reference");
+          const target = resolveLocalRef(value.$ref, document);
+          if (!target) reject("unresolved readOnly usage reference");
+          if (value.$ref.startsWith("#/components/schemas/")) names.add(value.$ref.slice("#/components/schemas/".length));
+          if (!visited.has(value.$ref)) {
+            visited.add(value.$ref);
+            visit(target, depth + 1);
+          }
+        }
+        for (const child of Object.values(value.properties || {})) visit(child, depth + 1);
+        for (const keyword of ["schema", "items", "not", "if", "then", "else"]) visit(value[keyword], depth + 1);
+        for (const keyword of ["allOf", "anyOf", "oneOf"]) for (const child of value[keyword] || []) visit(child, depth + 1);
+        for (const child of Object.values(value.content || {})) visit(child.schema, depth + 1);
+      }
+      function pathItem(item, active = new Set()) {
+        if (item.$ref) {
+          if (active.has(item.$ref)) reject("cyclic readOnly path reference");
+          const target = resolveLocalRef(item.$ref, document);
+          if (!target) reject("unresolved readOnly path reference");
+          pathItem(target, new Set(active).add(item.$ref));
+        }
+        for (const method of HTTP_METHODS) {
+          const operation = item[method];
+          if (!operation) continue;
+          if (response) {
+            for (const child of Object.values(operation.responses || {})) visit(child);
+          } else {
+            visit(operation.requestBody);
+            for (const child of [...(item.parameters || []), ...(operation.parameters || [])]) visit(child);
+          }
+        }
+      }
+      for (const item of Object.values(document.paths || {})) pathItem(item);
+      return names;
+    }
+    const requests = usedSchemas(false), responses = usedSchemas(true);
+    for (const name of readOnlyModels) {
+      if (requests.has(name) || !responses.has(name)) reject("unsupported keyword: readOnly model must be response-only");
+      const model = projection.components.schemas[name];
+      model["x-pennilogic-read-only-response"] = true;
+      for (const property of Object.values(model.properties)) {
+        if (property.readOnly === true) property["x-pennilogic-read-only-response"] = true;
+      }
+    }
+  }
   for (const operation of success) {
     const {cases, ...metadata} = operation;
     projection.paths[operation.path][operation.method]["x-pennilogic-success"] = {
@@ -453,10 +512,10 @@ if (require.main === module) {
     const parsed = Yaml.parse(fs.readFileSync(process.argv[2], "utf8"));
     if (parsed.diagnostics.length) reject("invalid source document");
     const seed = loadSeed(path.dirname(process.argv[2]));
-    if (JSON.stringify(parsed.data["x-category-seed-source"]) !== JSON.stringify(BINDING)) reject("category source binding");
+    if (!isDeepStrictEqual(parsed.data["x-category-seed-source"], BINDING)) reject("category source binding");
     for (const [name, values] of Object.entries(derivedEnums(seed))) {
       const schema = parsed.data.components?.schemas?.[name];
-      if (schema?.type !== "string" || JSON.stringify(schema.enum) !== JSON.stringify(values)) reject("category vocabulary binding");
+      if (schema?.type !== "string" || !isDeepStrictEqual(schema.enum, values)) reject("category vocabulary binding");
     }
     process.stdout.write(JSON.stringify({ ...compile(parsed.data), category_seed: seed }));
   } catch (error) {

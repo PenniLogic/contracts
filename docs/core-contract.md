@@ -169,6 +169,47 @@ before the outer operation-specific guard. Scratch-generated consumers also exer
 null, scalar pairs, multi-hop aliases, nullable/nested arrays and body/empty success branches in
 all three real targets.
 
+## Corrected public wire types and read-only projections
+
+TypeScript domain DTOs and their serialized wire objects are different representations.
+`ModelFromJSON` and API request/response types retain the domain wrappers. Both `ModelToJSON`
+and `ModelToJSONTyped` now return the generated `ModelWire` type: source wire member names,
+canonical `MoneyWire` string members, temporal strings and recursively converted arrays/sets/
+model references. Optional values and declared null remain distinct; codecs and wire bytes
+are not replaced. The generated implementation is type-checked without output casts or an
+`any` return that hides a domain/wire mismatch.
+
+This is a necessary TypeScript source-compatibility correction, not a claim that every old
+type signature is unchanged. A consumer assigning `ModelToJSON(model)` back to `Model` or
+`Money` was relying on the reproduced false declaration and must use `ModelFromJSON`/
+`MoneyFromJSON` to reconstruct the domain. Writer arguments are domain-typed instead of
+untyped. Existing model names, readers, API arguments, canonical codecs, exports and accepted
+Kotlin constructors remain; legitimate old consumers and deliberately invalid native calls
+are still checked. No schema-breaking acknowledgement or published-client migration is implied.
+
+ADR-016's `Transaction.category_id` and `Categorisation.category_id` are declared `readOnly`.
+The transaction field remains optional and now accepts explicit null for no single fully
+explained category; omission is not substituted for null. Categorisation's existing required
+nullable projection is unchanged in presence semantics and uses the view's instant.
+TypeScript exposes both domain and wire projections as readonly. Python's frozen models and
+Kotlin's immutable values retain explicit-null/absent native behavior.
+
+Generic code-generation metadata proves that marked models with locally declared read-only
+members occur only in responses, never in request schemas. Their ordinary response serialization
+therefore preserves those fields rather than dropping a server-derived required member.
+Unbound, request/mixed-use or unsupported read-only placements fail generation explicitly.
+Separate closed write payloads continue to exclude the projection; serializing a received
+response is not permission to edit the projection or send it to a financial write endpoint.
+No runtime authorization, database projection or sharing enforcement is certified here.
+
+The actual full-source lint now binds every declared duplicate screen to the shared
+T-CON-10 `DuplicateSuspected` response under 202, with successful resource/effect statuses
+separate from that decision, including reference/union composition checks. Structural metadata
+comparison uses the same strict Node comparator as the accepted custom-destination guard:
+object-key order is immaterial, while ordered arrays, scalar types, extra fields and exact
+provider pins remain significant. Category companion bytes are still checked exactly, never
+normalized or loosened to pass an ordering test.
+
 ## Cursor, filter, sort, version and immutable rollback
 
 The shared `CursorPage` envelope defines `page_size` 1-100 and `has_more`; next `cursor` exists

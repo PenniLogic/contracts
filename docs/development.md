@@ -253,6 +253,11 @@ bound to the pinned generator:
   before invoking a required child writer; required references and explicit null remain guarded.
   Declared undefined optional output members are omitted after native-field validation and before
   validating the emitted object, so closed union branches see actual JSON rather than phantom keys.
+  Public writers now declare `ModelWire` output and domain input, not the stock's false domain
+  return/`any` implementation. Exact field-metadata partials recursively type and convert the
+  wire keys, Money/time seams and arrays/sets/references. The finite `wireSerialization.ts`
+  helpers narrow actual codec output and omit only statically optional undefined members;
+  no output assertion equates domain wrappers with plain wire data.
 - `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
   for marked models, including model-valued array items. Array indices must be present and their
   values non-undefined and non-null unless the source declares null; property omission is not
@@ -264,6 +269,26 @@ bound to the pinned generator:
   Python uses a required union or optional default with explicit-null presence retained.
 - The three API templates and Python success-return partial bind distinct declared success statuses
   without changing their wire bodies; TypeScript's query partial uses the canonical time seams.
+
+`scripts/tests/test_typescript_wire.py` compiles real generated public consumers with strict
+settings and no casts/suppressions, executes actual Money-wire counterexamples/roundtrips,
+and checks every paired negative diagnostic. It covers normal/typed/nested/collection/null/
+optional writers, generic read-only response members and refusal of unbound/request-owned
+read-only models. `ModelToJSON` no longer permits a false domain assignment; reconstruct with
+`ModelFromJSON` when domain behavior is needed. This is an explicit TypeScript source-compatibility
+correction, not a blanket unchanged-ABI or migrated-consumer claim.
+
+Marked response models with locally declared `readOnly` fields require a bounded complete-source
+usage proof that they are response-only. Their serializers retain the received projection,
+including required null, while write DTOs remain separate closed schemas. Unsupported annotation
+placements and unbound/mixed request usage fail before output promotion. Transaction projection
+omission remains supported; explicit null is not normalized into absence.
+
+`scripts/tests/test_core_cli_guards.py` uses full valid YAML and the real lint/generation CLIs,
+not a partial JSON/version failure or function-only stand-in. It checks distinct shared 202
+financial decisions and legitimate object-key reorderings alongside semantic/array/type/extra-field/
+pin negatives. The strict structural comparator is existing accepted custom-destination prior art;
+exact category seed bytes and ordered vocabularies are not reformatted or weakened.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other

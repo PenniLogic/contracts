@@ -1,6 +1,7 @@
 "use strict";
 
 const { HTTP_METHODS, MUTATING_METHODS, resolveLocalRef, referencesMoney } = require("./_shared");
+const { isDeepStrictEqual } = require("node:util");
 
 const TAGS = new Set(["Auth", "Accounts", "Transactions", "Categories"]);
 const OBJECTS = new Set(["ApplicationProblemDetail", "SessionRevokedProblemDetail", "CursorPage",
@@ -14,6 +15,9 @@ const RAW = new Set(["rawsms", "rawemail", "smsbody", "emailbody", "rawmessage",
   "rawcontent", "messagetext", "rawhash", "rawdigest", "raweventdigest", "messagedigest",
   "ownerid", "dedupekey", "dedupekeyversion"]);
 const key = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+const IDEMPOTENCY_POLICY = { scope: ["principal", "method", "path_template", "key"], lifetime: "P30D", retryHorizon: "P14D" };
+const DECISION_RESPONSE = "#/components/responses/DuplicateSuspected";
+const DECISION_SCHEMA = "#/components/schemas/DedupOutcome";
 
 module.exports = function coreEndpointContract(document) {
   const findings = [];
@@ -34,6 +38,25 @@ module.exports = function coreEndpointContract(document) {
     active.add(value.$ref);
     return resolve(resolveLocalRef(value.$ref, document), active);
   }
+  function containsDecision(value, active = new Set(), depth = 0, work = { count: 0 }) {
+    if (!value || typeof value !== "object") return false;
+    if (++work.count > 16384 || depth > 64) return undefined;
+    if (value.$ref === DECISION_SCHEMA) return true;
+    if (value.$ref) {
+      if (active.has(value.$ref)) return undefined;
+      const target = resolveLocalRef(value.$ref, document);
+      if (!target) return undefined;
+      const reference = containsDecision(target, new Set(active).add(value.$ref), depth + 1, work);
+      if (reference !== false) return reference;
+    }
+    const children = [...Object.values(value.properties || {}), value.items, value.not, value.if, value.then, value.else,
+      ...(value.allOf || []), ...(value.oneOf || []), ...(value.anyOf || [])];
+    for (const child of children) {
+      const found = containsDecision(child, new Set(active), depth + 1, work);
+      if (found !== false) return found;
+    }
+    return false;
+  }
   function requestShape(value, path, active = new Set()) {
     if (!value || typeof value !== "object") return;
     if (value.$ref) {
@@ -51,6 +74,7 @@ module.exports = function coreEndpointContract(document) {
     }
     for (const [name, member] of Object.entries(value.properties || {})) {
       if (RAW.has(key(name))) add("raw content, digests and client owner/fingerprint claims are absent", [...path, "properties", name]);
+      if (member.readOnly === true) add("server-derived readOnly response members are not request fields", [...path, "properties", name]);
       requestShape(member, [...path, "properties", name], new Set(active));
     }
     if (value.items) requestShape(value.items, [...path, "items"], new Set(active));
@@ -85,13 +109,35 @@ module.exports = function coreEndpointContract(document) {
         const exempt = operation.tags.includes("Auth") && operation["x-idempotency"] === "auth" &&
           typeof operation["x-idempotency-reason"] === "string" && operation["x-idempotency-reason"].trim();
         if (!header && !exempt) add("mutations need the canonical key or a reasoned authentication exemption", at);
-        if (header && JSON.stringify(operation["x-idempotency-policy"]) !==
-            '{"scope":["principal","method","path_template","key"],"lifetime":"P30D","retryHorizon":"P14D"}') {
+        if (header && !isDeepStrictEqual(operation["x-idempotency-policy"], IDEMPOTENCY_POLICY)) {
           add("keyed mutations declare the accepted principal/operation/key scope and P30D/P14D bounds", at);
         }
         if (referencesMoney(operation.requestBody, document) &&
             !["reverseTransaction"].includes(operation.operationId) && !operation["x-duplicate-screen"]) {
           add("financial writes publish their structured duplicate-screen field set and window", at);
+        }
+        if (operation["x-duplicate-screen"]) {
+          const decision = operation.responses?.["202"];
+          const shared = resolve(decision);
+          const expected = { allOf: [{ $ref: DECISION_SCHEMA },
+            { properties: { outcome: { const: "duplicate_suspected" } } }] };
+          if (decision?.$ref !== DECISION_RESPONSE ||
+              Object.keys(decision).some((field) => !["$ref", "summary", "description"].includes(field)) ||
+              shared?.["x-response-status"] !== 202 ||
+              !isDeepStrictEqual(shared?.content?.["application/json"]?.schema, expected)) {
+            add("duplicate screens require the canonical shared T-CON-10 decision under its distinct 202 status",
+              [...at, "responses", "202"]);
+          }
+          const created = Object.entries(operation.responses || {}).filter(([status]) => /^2[0-9]{2}$/.test(status) && status !== "202");
+          if (!created.length) add("a duplicate decision is distinct from the successful resource/effect status", [...at, "responses"]);
+          for (const [status, response] of created) {
+            const resolved = resolve(response);
+            if (!resolved || Object.values(resolved.content || {}).some((content) =>
+              containsDecision(content.schema) !== false)) {
+              add("a successful resource/effect response cannot also carry the shared duplicate decision",
+                [...at, "responses", status]);
+            }
+          }
         }
       }
       const body = resolve(operation.requestBody);
@@ -122,6 +168,18 @@ module.exports = function coreEndpointContract(document) {
     if (!schemas.Transaction?.required?.includes(member) ||
         schemas.Transaction?.properties?.[member]?.$ref !== "#/components/schemas/Instant") {
       add("posted transactions require both canonical effective and booking instants", ["components", "schemas", "Transaction"]);
+    }
+    for (const name of ["Transaction", "Categorisation"]) {
+      const projection = schemas[name]?.properties?.category_id;
+      if (projection?.readOnly !== true || JSON.stringify(projection.anyOf) !==
+          '[{"$ref":"#/components/schemas/ResourceId"},{"type":"null"}]') {
+        add("ADR-016 category projections must declare readOnly and preserve explicit null",
+          ["components", "schemas", name, "properties", "category_id"]);
+      }
+    }
+    if (schemas.Transaction?.required?.includes("category_id")) {
+      add("transaction projection omission remains permitted; do not invent mandatory presence",
+        ["components", "schemas", "Transaction", "required"]);
     }
   }
   if (document.paths?.["/transactions/{transactionId}"]?.patch ||

@@ -127,6 +127,11 @@ Future producer adoption must route the new contextual authentication family onl
 declared core/versioned interfaces. The accepted legacy authentication/custom-destination
 responses retain their old domains; an old enum reader is not promised new-code support.
 Actual prerelease publication and consumer/backend evidence remain coordinator-owned.
+The unreleased TypeScript correction separates `ModelWire` destruction output from domain
+DTOs. Existing consumers relying on the earlier false `ModelToJSON(): Model` declaration
+must reconstruct through the accepted reader instead of treating wire Money as its wrapper.
+That intentional source-type correction is recorded explicitly; it does not change Money
+JSON, waive old-consumer checks or imply a published/accepted consumer migration.
 The accepted API category seed is copied byte-identically and shipped through the same
 provider-companion mechanism, inside all three client trees and beside the specification.
 Its derived enums and localized defaults do not run an owner seed or create category UUIDs;

@@ -188,6 +188,38 @@ test("all own posted transaction dates and nested money shapes use canonical pro
   }
 });
 
+test("ADR-016 projections are readonly nullable responses, with existing omission and separate write boundaries", () => {
+  const id = "00000000-0000-7000-8000-000000000008";
+  assert.equal(doc.components.schemas.Transaction.required.includes("category_id"), false);
+  assert.equal(doc.components.schemas.Categorisation.required.includes("category_id"), true);
+  for (const name of ["Transaction", "Categorisation"]) {
+    assert.equal(doc.components.schemas[name].properties.category_id.readOnly, true);
+  }
+  for (const value of [null, id]) {
+    assert.ok(valid({ $ref: "#/components/schemas/Transaction" }, { ...fixture.payloads.transaction, category_id: value }));
+    assert.ok(valid({ $ref: "#/components/schemas/Categorisation" }, { ...fixture.payloads.categorisation, category_id: value }));
+    assert.equal(valid({ $ref: "#/components/schemas/PostTransactionRequest" },
+      { ...fixture.payloads.post_transaction, category_id: value }), false);
+  }
+  for (const value of [1, "", "SYNTHETIC_UNKNOWN", "00000000-0000-4000-8000-000000000008"]) {
+    assert.equal(valid({ $ref: "#/components/schemas/Transaction" },
+      { ...fixture.payloads.transaction, category_id: value }), false);
+  }
+  const withoutProjection = { ...fixture.payloads.categorisation }; delete withoutProjection.category_id;
+  assert.equal(valid({ $ref: "#/components/schemas/Categorisation" }, withoutProjection), false);
+  for (const mutate of [
+    (v) => { delete v.components.schemas.Transaction.properties.category_id.readOnly; },
+    (v) => { delete v.components.schemas.Categorisation.properties.category_id.readOnly; },
+    (v) => { v.components.schemas.Transaction.properties.category_id.anyOf.pop(); },
+    (v) => { v.components.schemas.Transaction.required.push("category_id"); },
+    (v) => { v.components.schemas.PostTransactionRequest.properties.category_id =
+      structuredClone(v.components.schemas.Transaction.properties.category_id); },
+  ]) {
+    const planted = structuredClone(doc); mutate(planted);
+    assert.ok(coreLint(planted).length > 0);
+  }
+});
+
 test("new source lint refuses weakened auth, date, key, immutable and raw-content constraints", () => {
   assert.deepEqual(coreLint(doc), []);
   const defects = [

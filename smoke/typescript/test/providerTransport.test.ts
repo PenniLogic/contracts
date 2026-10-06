@@ -311,7 +311,7 @@ test('optional undefined properties still omit normally while null and unknown m
     assert.deepEqual(JSON.parse(JSON.stringify(models.DedupOutcomeToJSON({
         ...model, matchedRecordId: undefined, enrichment: undefined, precedence: undefined,
     }))), clear);
-    assert.throws(() => models.DedupOutcomeToJSON({ ...model, enrichment: null }), safe);
+    assert.throws(() => Reflect.apply(models.DedupOutcomeToJSON, undefined, [{ ...model, enrichment: null }]), safe);
     assert.throws(() => models.DedupOutcomeToJSON({ ...model, provider_detail: 'PRIVATE_SYNTHETIC_CANARY' }), safe);
     const legacy = models.ProblemDetailFromJSON({
         type: 'about:blank', title: 'Legacy', status: 422, code: 'legacy', correlation_id: 'legacy',

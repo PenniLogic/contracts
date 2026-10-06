@@ -4440,8 +4440,12 @@ components:
         replaces: {$ref: '#/components/schemas/DedupRecordId'}
         correction_id: {$ref: '#/components/schemas/ResourceId'}
         category_id:
-          $ref: '#/components/schemas/ResourceId'
-          description: Read-only single-category projection; never accepted by a transaction write.
+          readOnly: true
+          anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]
+          description: |
+            Server-derived CURRENT projection(t, infinity) under ADR-016 section 9, not a
+            writable transaction field. Explicit null means no single fully explained category;
+            omission remains permitted and is not silently substituted for an explicit null.
       allOf:
         - if: {properties: {kind: {const: REVERSAL}}, required: [kind]}
           then: {required: [reverses, correction_id], not: {required: [replaces]}}
@@ -4579,7 +4583,10 @@ components:
       required: [view, category_id, allocations, assignment_id, source, reason, assigned_at]
       properties:
         view: {$ref: '#/components/schemas/CategorisationView'}
-        category_id: {anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]}
+        category_id:
+          readOnly: true
+          anyOf: [{$ref: '#/components/schemas/ResourceId'}, {type: 'null'}]
+          description: Server-derived projection(t, r) at the view's instant; explicit null means no single fully explained category.
         allocations: {type: array, minItems: 1, maxItems: 2048, items: {$ref: '#/components/schemas/CategoryAllocationLine'}}
         assignment_id: {$ref: '#/components/schemas/ResourceId'}
         source: {$ref: '#/components/schemas/CategoryAssignmentSource'}

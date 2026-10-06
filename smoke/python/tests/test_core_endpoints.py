@@ -25,6 +25,7 @@ from pennilogic_contracts.models.categorisation_view_mode import CategorisationV
 from pennilogic_contracts.models.create_account_request import CreateAccountRequest
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.post_transaction_request import PostTransactionRequest
+from pennilogic_contracts.models.transaction import Transaction
 from pennilogic_contracts.success_responses import PostTransactionSuccessStatus201, PostTransactionSuccessStatus202
 from pennilogic_contracts.exceptions import ApiException
 from pennilogic_contracts.models.application_problem_detail import ApplicationProblemDetail
@@ -41,6 +42,31 @@ def response(body: object, status: int = 200, media: str = "application/json") -
 
 
 class CoreGeneratedEndpointTest(unittest.TestCase):
+    def test_readonly_projection_response_preserves_omission_null_and_uuid_without_write_permission(self) -> None:
+        category = "00000000-0000-7000-8000-000000000008"
+        for extra in ({}, {"category_id": None}, {"category_id": category}):
+            wire = {**CORE["payloads"]["transaction"], **extra}
+            value = Transaction.from_dict(wire)
+            self.assertEqual(value.to_dict(), wire)
+            self.assertEqual("category_id" in value.to_dict(), "category_id" in extra)
+            with self.assertRaises(ValueError):
+                setattr(value, "category_id", UUID(category))
+            nested = TypeAdapter(list[Transaction]).validate_json(json.dumps([wire]))
+            self.assertEqual(json.loads(TypeAdapter(list[Transaction]).dump_json(nested)), [wire])
+            client = self.client()
+            with patch.object(client.rest_client.pool_manager, "request", return_value=response(wire)):
+                received = TransactionsApi(client).get_transaction(
+                    "synthetic.projection.signature", "rec_00000000-0000-4000-8000-000000000004")
+            self.assertEqual(received.to_dict(), wire)
+        for projected in (None, category):
+            wire = {**CORE["payloads"]["categorisation"], "category_id": projected}
+            self.assertEqual(Categorisation.from_dict(wire).to_dict(), wire)
+            with self.assertRaises(ValueError):
+                PostTransactionRequest.from_dict({**CORE["payloads"]["post_transaction"], "category_id": projected})
+        missing = {key: value for key, value in CORE["payloads"]["categorisation"].items() if key != "category_id"}
+        with self.assertRaises(ValueError):
+            Categorisation.from_dict(missing)
+
     def test_all_eight_authentication_contexts_use_real_non_2xx_transports_without_service_projection(self) -> None:
         catalogue = json.loads((ROOT / "spec" / "error-catalogue.v1.json").read_text(encoding="utf-8"))
         fixture = json.loads((ROOT / "spec" / "fixtures" / "authentication-errors.v1.json").read_text(encoding="utf-8"))

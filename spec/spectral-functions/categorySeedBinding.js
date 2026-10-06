@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("node:path");
+const { isDeepStrictEqual } = require("node:util");
 const { BINDING, loadSeed, derivedEnums } = require("../../scripts/category_seed.cjs");
 
 module.exports = function categorySeedBinding(document, _options, context) {
@@ -16,13 +17,13 @@ module.exports = function categorySeedBinding(document, _options, context) {
       ["x-category-seed-source"]);
     return findings;
   }
-  if (JSON.stringify(document["x-category-seed-source"]) !== JSON.stringify(BINDING)) {
+  if (!isDeepStrictEqual(document["x-category-seed-source"], BINDING)) {
     add("Category source must retain the exact accepted API commit and immutable byte binding",
       ["x-category-seed-source"]);
   }
   const schemas = document.components?.schemas || {};
   for (const [name, values] of Object.entries(derivedEnums(seed))) {
-    if (schemas[name]?.type !== "string" || JSON.stringify(schemas[name]?.enum) !== JSON.stringify(values)) {
+    if (schemas[name]?.type !== "string" || !isDeepStrictEqual(schemas[name]?.enum, values)) {
       add("Category key/icon/colour vocabulary must be derived from the one accepted seed",
         ["components", "schemas", name]);
     }

@@ -25,6 +25,33 @@ class CoreEndpointGeneratedTest {
     private val auth = Fixtures.load("auth-endpoints.v1.json").getValue("payloads").jsonObject
     private val key = "00000000-0000-4000-8000-000000000010"
 
+    @Test
+    fun `readonly projection response preserves omission null and uuid with no write payload field`() = runBlocking<Unit> {
+        val category = "00000000-0000-7000-8000-000000000008"
+        for (extra in listOf(emptyMap(), mapOf("category_id" to JsonNull), mapOf("category_id" to JsonPrimitive(category)))) {
+            val wire = JsonObject(core.getValue("transaction").jsonObject + extra)
+            val value = json.decodeFromJsonElement<Transaction>(wire)
+            assertEquals(wire, json.encodeToJsonElement(value))
+            if (extra.isEmpty()) assertEquals(ProviderPresence.Absent, value.categoryId)
+            else assertEquals(ProviderPresence.Present(if (extra.getValue("category_id") == JsonNull) null else UUID.fromString(category)), value.categoryId)
+            assertEquals(JsonArray(listOf(wire)), json.encodeToJsonElement(listOf(value)))
+            val api = TransactionsApi(httpClientEngine = MockEngine {
+                respond(wire.toString(), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            })
+            api.setApiKey("DPoP synthetic.access.signature", "Authorization")
+            assertEquals(wire, json.encodeToJsonElement(api.getTransaction(
+                "synthetic.projection.signature", "rec_00000000-0000-4000-8000-000000000004").body()))
+        }
+        for (projected in listOf(JsonNull, JsonPrimitive(category))) {
+            val response = JsonObject(core.getValue("categorisation").jsonObject + ("category_id" to projected))
+            assertEquals(response, json.encodeToJsonElement(json.decodeFromJsonElement<Categorisation>(response)))
+            val request = JsonObject(core.getValue("post_transaction").jsonObject + ("category_id" to projected))
+            assertFails { json.decodeFromJsonElement<PostTransactionRequest>(request) }
+        }
+        assertFails { json.decodeFromJsonElement<Categorisation>(
+            JsonObject(core.getValue("categorisation").jsonObject - "category_id")) }
+    }
+
     @Test fun `all eight auth contexts use actual error transports with exact typed wire and no disclosure`() = runBlocking<Unit> {
         val fixture = Fixtures.load("authentication-errors.v1.json")
         val catalogue = json.parseToJsonElement(Fixtures.root.resolve("spec/error-catalogue.v1.json").readText()).jsonObject

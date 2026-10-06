@@ -2,6 +2,7 @@
 import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';
 {{/vendorExtensions.x-pennilogic-strict-provider}}
 import { mapValues{{#isDateLibraryDate}}{{#vendorExtensions.x-hasDateVars}}, parseDate, parseDateTime, serializeDate, serializeDateTime{{/vendorExtensions.x-hasDateVars}}{{/isDateLibraryDate}} } from '../runtime{{importFileExtension}}';
+import { requiredWireValue, omitOptionalWire, mapWireRecord, type WireOutput } from '../wireSerialization{{importFileExtension}}';
 {{#hasImports}}
 {{#tsImports}}
 import type { {{{classname}}} } from './{{filename}}{{importFileExtension}}';
@@ -20,6 +21,19 @@ import { type {{modelName}}, {{modelName}}FromJSONTyped, {{modelName}}ToJSON, {{
 {{/discriminator.mappedModels}}
 {{/discriminator}}
 {{>modelGenericInterfaces}}
+export type {{classname}}Wire = {{#parent}}NonNullable<ReturnType<typeof {{{.}}}ToJSON>> & {{/parent}}{
+    {{#additionalPropertiesType}}
+    [key: string]: unknown;
+    {{/additionalPropertiesType}}
+    {{#vars}}
+    {{^isReadOnly}}
+    {{>wireField}}
+    {{/isReadOnly}}
+    {{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}
+    {{>wireField}}
+    {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}
+    {{/vars}}
+};
 {{#vendorExtensions.x-pennilogic-strict-provider}}
 
 const providerFields: Readonly<Record<string, ProviderField>> = {
@@ -164,11 +178,16 @@ export function {{classname}}FromJSONTyped(json: any, ignoreDiscriminator: boole
     {{/hasVars}}
 }
 
-export function {{classname}}ToJSON(json: any): {{classname}} {
-    return {{classname}}ToJSONTyped(json, false);
+export function {{classname}}ToJSON<Input extends {{>wireInput}} | null | undefined>(value: Input): WireOutput<Input, {{classname}}Wire{{#vendorExtensions.x-pennilogic-strict-provider}}, never{{/vendorExtensions.x-pennilogic-strict-provider}}>;
+export function {{classname}}ToJSON(value: {{>wireInput}}): {{classname}}Wire;
+export function {{classname}}ToJSON(value?: {{>wireInput}} | null): {{classname}}Wire{{^vendorExtensions.x-pennilogic-strict-provider}} | null{{/vendorExtensions.x-pennilogic-strict-provider}} | undefined {
+    return {{classname}}ToJSONTyped(value, false);
 }
 
-export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classname}}, {{#readOnlyVars}}'{{name}}'{{^-last}}|{{/-last}}{{/readOnlyVars}}>{{/hasReadOnly}}{{^hasReadOnly}}{{classname}}{{/hasReadOnly}} | null, ignoreDiscriminator: boolean = false): any {
+export function {{classname}}ToJSONTyped(): undefined;
+export function {{classname}}ToJSONTyped<Input extends {{>wireInput}} | null | undefined>(value: Input, ignoreDiscriminator?: boolean): WireOutput<Input, {{classname}}Wire{{#vendorExtensions.x-pennilogic-strict-provider}}, never{{/vendorExtensions.x-pennilogic-strict-provider}}>;
+export function {{classname}}ToJSONTyped(value: {{>wireInput}}, ignoreDiscriminator?: boolean): {{classname}}Wire;
+export function {{classname}}ToJSONTyped(value?: {{>wireInput}} | null, ignoreDiscriminator: boolean = false): {{classname}}Wire{{^vendorExtensions.x-pennilogic-strict-provider}} | null{{/vendorExtensions.x-pennilogic-strict-provider}} | undefined {
     {{#vendorExtensions.x-pennilogic-strict-provider}}
     if (value === null) throw new ProviderWireError();
     if (value !== undefined) providerObject(value, providerFields, false);
@@ -183,7 +202,7 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         switch (value['{{discriminator.propertyName}}']) {
         {{#discriminator.mappedModels}}
             case '{{mappingName}}':
-                return {{modelName}}ToJSONTyped(value as {{modelName}}, ignoreDiscriminator);
+                return {{modelName}}ToJSONTyped(value, ignoreDiscriminator);
         {{/discriminator.mappedModels}}
             default:
                 return value;
@@ -191,66 +210,27 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
     }
     {{/discriminator}}
 
-    {{#vendorExtensions.x-pennilogic-strict-provider}}const result ={{/vendorExtensions.x-pennilogic-strict-provider}}{{^vendorExtensions.x-pennilogic-strict-provider}}return{{/vendorExtensions.x-pennilogic-strict-provider}} {
+    const result: {{classname}}Wire = {
         {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}
         {{#additionalPropertiesType}}
             ...value,
         {{/additionalPropertiesType}}
         {{#vars}}
         {{^isReadOnly}}
-        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}
-        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}{{#uniqueItems}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}(value['{{name}}'] as Array<any>){{/uniqueItems}}.map({{#items}}{{>provider_enum_write}}{{/items}}),
-        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
-        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}
-        {{#isPrimitiveType}}
-        {{#isDateType}}
-        '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDate(value['{{name}}']),
-        {{/isDateType}}
-        {{#isDateTimeType}}
-        '{{baseName}}': value['{{name}}'] == null ? value['{{name}}'] : serializeDateTime(value['{{name}}']),
-        {{/isDateTimeType}}
-        {{#isArray}}
-        '{{baseName}}': {{#uniqueItems}}{{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}{{^uniqueItems}}value['{{name}}']{{/uniqueItems}},
-        {{/isArray}}
-        {{^isDateType}}
-        {{^isDateTimeType}}
-        {{^isArray}}
-        '{{baseName}}': value['{{name}}'],
-        {{/isArray}}
-        {{/isDateTimeType}}
-        {{/isDateType}}
-        {{/isPrimitiveType}}
-        {{^isPrimitiveType}}
-        {{#isArray}}
-        {{#uniqueItems}}
-        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}({{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}Array.from(value['{{name}}'] as Set<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}ToJSON{{#isNullable}}(item){{/isNullable}}{{/items}})),
-        {{/uniqueItems}}
-        {{^uniqueItems}}
-        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}({{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}(value['{{name}}'] as Array<any>).map({{#items}}{{#isNullable}}(item) => item === null ? null : {{/isNullable}}{{datatype}}ToJSON{{#isNullable}}(item){{/isNullable}}{{/items}})),
-        {{/uniqueItems}}
-        {{/isArray}}
-        {{#isMap}}
-        '{{baseName}}': {{^required}}value['{{name}}'] == null ? undefined : {{/required}}({{#required}}{{#isNullable}}value['{{name}}'] == null ? null : {{/isNullable}}{{/required}}mapValues(value['{{name}}'], {{#items}}{{datatype}}{{/items}}ToJSON)),
-        {{/isMap}}
-        {{^isArray}}
-        {{^isMap}}
-        {{^isFreeFormObject}}
-        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}{{#vendorExtensions.x-pennilogic-nullable-enum}}value['{{name}}'] === null ? null : {{/vendorExtensions.x-pennilogic-nullable-enum}}{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}{{datatype}}ToJSON(value['{{name}}']),
-        {{/isFreeFormObject}}
-        {{#isFreeFormObject}}
-        '{{baseName}}': value['{{name}}'],
-        {{/isFreeFormObject}}
-        {{/isMap}}
-        {{/isArray}}
-        {{/isPrimitiveType}}
-        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
+        {{>wireMember}}
         {{/isReadOnly}}
+        {{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}
+        {{>wireMember}}
+        {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}
         {{/vars}}
     };
     {{#vendorExtensions.x-pennilogic-strict-provider}}
-    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));
+    const wire = omitOptionalWire(result, [{{#vars}}{{^required}}{{^isReadOnly}}'{{baseName}}', {{/isReadOnly}}{{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}'{{baseName}}', {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}{{/required}}{{/vars}}]);
     providerWire(wire, "{{name}}");
     return wire;
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{^vendorExtensions.x-pennilogic-strict-provider}}
+    return result;
     {{/vendorExtensions.x-pennilogic-strict-provider}}
     {{/hasVars}}
     {{^hasVars}}
