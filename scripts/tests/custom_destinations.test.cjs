@@ -35,6 +35,25 @@ function withRequest(shape) {
   return doc;
 }
 
+function withLintProbe(check) {
+  fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
+  const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
+  try {
+    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json"]) {
+      fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
+    }
+    const file = path.join(directory, "probe.json");
+    check((doc) => {
+      fs.writeFileSync(file, JSON.stringify(doc));
+      const result = spawnSync("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--spec", file], { cwd: ROOT, encoding: "utf8" });
+      assert.equal(result.error, undefined);
+      return result;
+    });
+  } finally {
+    fs.rmSync(directory, { recursive: true });
+  }
+}
+
 test("canonical accepted consequence satisfies its complete published closed schema", () => {
   assert.deepEqual(validateSchema(consequence, { schema, dialect: "draft7", allErrors: true }, context()), []);
   assert.deepEqual(base["x-custom-destination-source"], SOURCE);
@@ -95,6 +114,53 @@ test("all four canonical enums reject missing, additional, duplicate, reordered 
     doc.components.schemas.CustomDestinationCopiedEnum = { type: "string", enum: [...values] };
     assert.ok(findings(doc).some((finding) => finding.message.includes(`duplicate ${name}`)), name);
   }
+});
+
+test("real Spectral CLI rejects complete canonical enum copies regardless of widening, order or repeated members", async (t) => {
+  for (const [name, values] of Object.entries(consequence.enums)) {
+    await t.test(name, () => withLintProbe((lint) => {
+      const variants = {
+        Exact: [...values],
+        Reordered: [...values].reverse(),
+        Widened: [...values, "synthetic_extra"],
+        ReorderedSuperset: ["synthetic_extra", ...[...values].reverse(), "synthetic_other"],
+        RepeatedMember: [...values, values[0]],
+        WidenedRepeatedMember: ["synthetic_extra", ...values, values[0]],
+      };
+      const doc = structuredClone(base);
+      for (const [variant, members] of Object.entries(variants)) {
+        doc.components.schemas[`EnumCopy${variant}`] = { type: "string", enum: members };
+      }
+      const result = lint(doc);
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      const diagnostics = result.stderr.split(/\r?\n/);
+      for (const variant of Object.keys(variants)) {
+        assert.ok(diagnostics.some((line) =>
+          line.includes("[pl-custom-destination-contract]") &&
+          line.includes(`(components.schemas.EnumCopy${variant}.enum)`) &&
+          line.includes(`duplicate ${name} enumeration; use $ref: '#/components/schemas/${name}'`)),
+        `${name}/${variant}: ${result.stdout}${result.stderr}`);
+      }
+    }));
+  }
+});
+
+test("real Spectral CLI permits unchanged canonical enums, ref-only aliases and unrelated or partial-overlap enums", () => {
+  withLintProbe((lint) => {
+    const doc = structuredClone(base);
+    for (const [name, values] of Object.entries(consequence.enums)) {
+      doc.components.schemas[`EnumAlias${name}`] = { $ref: `#/components/schemas/${name}` };
+      doc.components.schemas[`EnumUnrelated${name}`] = {
+        type: "string", enum: values.map((_, index) => `synthetic_${index}`),
+      };
+      doc.components.schemas[`EnumPartial${name}`] = { type: "string", enum: values.slice(1) };
+      doc.components.schemas[`EnumPartialSuperset${name}`] = {
+        type: "string", enum: [...values.slice(1), "synthetic_extra", "synthetic_other"],
+      };
+    }
+    const result = lint(doc);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
 });
 
 test("source reference, state mapping, registration closure and header references cannot drift", () => {
@@ -198,29 +264,20 @@ test("recursive lint finds a planted address through requestBody refs, arrays, c
 });
 
 test("real Spectral CLI fails nested address fixtures actionably and passes the repaired control", () => {
-  const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
-  try {
-    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json"]) {
-      fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
-    }
-    const file = path.join(directory, "probe.json");
+  withLintProbe((lint) => {
     const doc = probe();
     for (const field of ["base_url", "endpoint", "host"]) {
       doc.components.schemas.CustomDestinationLintTarget.properties = { [field]: { type: "string" } };
-      fs.writeFileSync(file, JSON.stringify(doc));
-      const result = spawnSync("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--spec", file], { cwd: ROOT, encoding: "utf8" });
+      const result = lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.match(result.stderr, /\[pl-no-inference-address\]/);
       assert.ok(result.stderr.includes(`CustomDestinationLintTarget.properties.${field}`));
       assert.match(result.stderr, /destinationId\/custom_model_id/);
     }
     doc.components.schemas.CustomDestinationLintTarget.properties = {};
-    fs.writeFileSync(file, JSON.stringify(doc));
-    const result = spawnSync("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--spec", file], { cwd: ROOT, encoding: "utf8" });
+    const result = lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-  } finally {
-    fs.rmSync(directory, { recursive: true });
-  }
+  });
 });
 
 test("lint refuses every canonical address alias and camel/encoded spelling in nested input fields", () => {

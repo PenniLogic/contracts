@@ -31,6 +31,8 @@
   new values, and no consumer migration or binary ABI certification is asserted.
 - Refuse source numeric precision loss before comparison, including an author-reproduced
   exclusive-bound counterexample that would otherwise be rounded into a false compatibility pass.
+- Reject complete canonical enum copies even when widened, reordered or padded with duplicates.
+  Actual Spectral controls cover all four families and retain ref-only and partial-overlap positives.
 - Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
   retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
   validation diagnostics; add actual three-language root-null and Python error-path controls.

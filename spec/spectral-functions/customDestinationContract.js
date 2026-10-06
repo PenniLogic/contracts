@@ -28,8 +28,7 @@ module.exports = function customDestinationContract(document, _options, context)
     if (Array.isArray(value.enum)) {
       for (const [name, values] of Object.entries(consequence.enums)) {
         const canonicalPath = ["components", "schemas", name];
-        if (!isDeepStrictEqual(at, canonicalPath) && value.enum.length === values.length &&
-            values.every((member) => value.enum.includes(member))) {
+        if (!isDeepStrictEqual(at, canonicalPath) && values.every((member) => value.enum.includes(member))) {
           report(`duplicate ${name} enumeration; use $ref: '#/components/schemas/${name}'`, [...at, "enum"]);
         }
       }

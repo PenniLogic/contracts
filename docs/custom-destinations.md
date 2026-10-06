@@ -36,6 +36,9 @@ The four OpenAPI definitions are `DestinationClass`, `CredentialHeader`,
 `CustomDestinationState` and `EgressDenialReason`. They contain exactly the canonical ordered
 values and are referenced rather than copied into another enumeration. "Exactly once" means
 one OpenAPI enum definition, not removal of canonical values from the pinned source or fixtures.
+The copy guard rejects another enum containing the complete canonical set even when reordered,
+widened or padded with repeated members. Ref-only aliases and unrelated or partial-overlap enums
+remain allowed; the actual Spectral controls distinguish these from complete copies.
 The canonical state-denial map is preserved as `CustomDestination.x-state-denials`; that
 metadata is not a generated runtime conditional validator.
 
