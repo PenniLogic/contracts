@@ -11,7 +11,7 @@ from pennilogic_contracts.models.validation_issue import ValidationIssue
 from pennilogic_contracts.models.allocation_mismatch_direction import AllocationMismatchDirection
 
 from fixtures import ROOT, load
-from pennilogic_contracts.error_catalogue import ERROR_POLICIES, error_policy, new_correlation_id
+from pennilogic_contracts.error_catalogue import AUTHENTICATION_POLICIES, ERROR_POLICIES, authentication_policy, error_policy, new_correlation_id
 from pennilogic_contracts.models.ai_refusal import AiRefusal
 from pennilogic_contracts.models.ai_refusal_code import AiRefusalCode
 from pennilogic_contracts.models.client_state import ClientState
@@ -76,11 +76,18 @@ class ErrorProviderTest(unittest.TestCase):
                 serialize(changed)
 
     def test_generated_codes_and_catalogue_have_one_typed_state_and_key_policy(self) -> None:
-        self.assertEqual({code.value for code in ProblemCode}, {entry["code"] for entry in CATALOGUE["codes"]})
-        self.assertEqual(set(ERROR_POLICIES), set(ProblemCode))
-        for code in ProblemCode:
+        self.assertEqual({code.value for code in ProblemCode},
+                         {entry["code"] for entry in CATALOGUE["codes"] + CATALOGUE["authentication_codes"]})
+        self.assertEqual(set(ERROR_POLICIES) | set(AUTHENTICATION_POLICIES), set(ProblemCode))
+        self.assertFalse(set(ERROR_POLICIES) & set(AUTHENTICATION_POLICIES))
+        for code in ERROR_POLICIES:
             self.assertIsInstance(error_policy(code).state, ClientState)
             self.assertIsInstance(error_policy(code).idempotency, IdempotencyTreatment)
+        for code in AUTHENTICATION_POLICIES:
+            self.assertIsNone(authentication_policy(code).state)
+            self.assertEqual(authentication_policy(code).flow, "authentication_required")
+            with self.assertRaisesRegex(TypeError, "problem code rejected"):
+                error_policy(code)
         mismatch = error_policy(ProblemCode.IDEMPOTENCY_PAYLOAD_MISMATCH)
         self.assertFalse(mismatch.retryable)
         self.assertEqual(mismatch.idempotency, IdempotencyTreatment.NEVER_REPLACE_TO_ESCAPE_MISMATCH)

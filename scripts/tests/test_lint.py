@@ -4,10 +4,32 @@ from __future__ import annotations
 
 import unittest
 
-from support import SpecDir, replace_once, run_script, spec_text, with_probe_paths
+from support import SpecDir, replace_in_section, replace_once, replace_section, run_script, section_text, spec_text, with_probe_paths
 
 
 class LintCleanTest(unittest.TestCase):
+    def test_probe_insertion_preserves_all_existing_operations_security_components_and_version(self) -> None:
+        source = spec_text()
+        combined = with_probe_paths(source)
+        for name in ("info", "security", "components", "x-custom-destination-source", "x-dpop-protocol"):
+            self.assertEqual(section_text(combined, (name,)), section_text(source, (name,)), name)
+        self.assertEqual(section_text(combined, ("paths", "/ai/custom-destinations")),
+                         section_text(source, ("paths", "/ai/custom-destinations")))
+        restored = replace_section(combined, ("paths",), section_text(source, ("paths",)))
+        restored = replace_section(restored, ("tags",), section_text(source, ("tags",)))
+        self.assertEqual(restored, source)
+        with self.assertRaises(AssertionError):
+            with_probe_paths(combined)
+
+    def test_named_mutation_changes_only_the_requested_header_when_shapes_repeat(self) -> None:
+        source = spec_text()
+        changed = replace_in_section(source, ("components", "parameters", "IdempotencyKey"),
+                                     "      required: true\n", "      required: false\n")
+        for name in ("DPoPProof", "StepUpToken"):
+            self.assertEqual(section_text(changed, ("components", "parameters", name)),
+                             section_text(source, ("components", "parameters", name)))
+        self.assertNotEqual(source, changed)
+
     def test_document_passes(self) -> None:
         completed = run_script("lint_spec.py")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -41,13 +63,17 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertRegex(output, r"\[(parser|oas3-schema)\]")
 
     def test_missing_info_version_fails_schema_rule(self) -> None:
-        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", ""))
+        source = spec_text()
+        version = next(line for line in section_text(source, ("info",)).splitlines(keepends=True) if line.startswith("  version:"))
+        output = self.lint(replace_in_section(source, ("info",), version, ""))
         self.assertIn("[oas3-schema]", output)
 
     def test_non_semver_version(self) -> None:
-        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", "  version: '1.0'\n"))
+        source = spec_text()
+        version = next(line for line in section_text(source, ("info",)).splitlines(keepends=True) if line.startswith("  version:"))
+        output = self.lint(replace_in_section(source, ("info",), version, "  version: '1.0'\n"))
         self.assertIn("[pl-info-version-semver]", output)
-        output = self.lint(replace_once(spec_text(), "  version: 0.2.0\n", "  version: 1.0\n"))
+        output = self.lint(replace_in_section(source, ("info",), version, "  version: 1.0\n"))
         self.assertIn("[oas3-schema]", output)  # a YAML float is not a string version either
 
     def test_money_binding_shape_drift(self) -> None:
@@ -66,9 +92,11 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertIn("[pl-instant-component-binding]", output)
         output = self.lint(replace_once(spec_text(), "      pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'\n      maxLength: 64\n", "      pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'\n      maxLength: 128\n"))
         self.assertIn("[pl-timezone-component-binding]", output)
-        output = self.lint(replace_once(spec_text(), "      in: header\n      required: true\n", "      in: header\n      required: false\n"))
+        output = self.lint(replace_in_section(spec_text(), ("components", "parameters", "IdempotencyKey"),
+                                             "      required: true\n", "      required: false\n"))
         self.assertIn("[pl-idempotency-key-parameter-binding]", output)
-        output = self.lint(replace_once(spec_text(), "      schema: { type: boolean }\n", "      schema: { type: string }\n"))
+        output = self.lint(replace_in_section(spec_text(), ("components", "headers", "IdempotentReplayed"),
+                                             "      schema: { type: boolean }\n", "      schema: { type: string }\n"))
         self.assertIn("[pl-idempotent-replayed-header-binding]", output)
 
     def test_money_named_property_must_reference_money(self) -> None:
@@ -159,7 +187,7 @@ class PlantedDefectTest(unittest.TestCase):
         self.assertIn("[pl-safe-method-no-idempotency-key]", output)
 
     def test_operation_without_security_refused(self) -> None:
-        text = replace_once(with_probe_paths(spec_text()), "security:\n  - probe: []\n", "")
+        text = replace_section(with_probe_paths(spec_text()), ("security",), "")
         output = self.lint(text)
         self.assertIn("[pl-operation-security]", output)
         text = replace_once(with_probe_paths(spec_text()), "      operationId: getProbe\n", "      operationId: getProbe\n      security: []\n")

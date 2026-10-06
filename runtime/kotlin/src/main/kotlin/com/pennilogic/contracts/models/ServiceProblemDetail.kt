@@ -56,6 +56,7 @@ data class ServiceProblemDetail(
         require(allowance == null || (allowance.limit >= 0 &&
             ((allowance.limit != 0 && allowance.window != AllowanceWindow.LIFETIME) || allowance.resetsAt == null))) { "problem rejected: allowance" }
         require((code == ProblemCode.ENTITLEMENT_DENIED) == (entitlement != null)) { "problem rejected: entitlement" }
+        ServiceProblemDetailSerializer.validateValue(this)
     }
 }
 

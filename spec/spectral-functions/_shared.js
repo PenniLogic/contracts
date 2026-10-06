@@ -28,6 +28,8 @@ const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch"
 const SAFE_METHODS = new Set(["get", "head", "options", "trace"]);
 const MUTATING_METHODS = new Set(["post", "put", "patch", "delete"]);
 const EXEMPTIONS = new Set(["not-applicable", "per-item", "provider-event", "auth"]);
+const SCHEMA_ANNOTATIONS = new Set(["title", "description", "default", "example", "examples", "deprecated",
+  "x-pennilogic-strict-provider", "x-pennilogic-provider-validator", "x-not-money", "x-state-denials"]);
 
 let registryCache = new Map();
 
@@ -85,6 +87,6 @@ function pathString(pathParts) {
 }
 
 module.exports = {
-  MONEY_REF, AMOUNT_GRAMMAR, HTTP_METHODS, SAFE_METHODS, MUTATING_METHODS, EXEMPTIONS,
+  MONEY_REF, AMOUNT_GRAMMAR, HTTP_METHODS, SAFE_METHODS, MUTATING_METHODS, EXEMPTIONS, SCHEMA_ANNOTATIONS,
   registry, isMoneyRef, isMoneyName, mentionsMoney, referencesMoney, resolveLocalRef, pathString,
 };

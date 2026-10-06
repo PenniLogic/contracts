@@ -20,7 +20,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import json
+import math
 import re
 import subprocess
 import sys
@@ -28,7 +30,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pl_contracts import PipelineError, ROOT, SEMVER, SPEC, fail, run, spec_version  # noqa: E402
+from pl_contracts import PipelineError, ROOT, SEMVER, SPEC, fail, node_executable, run, spec_version  # noqa: E402
+from schema_compatibility import SourceProof  # noqa: E402
 from toolchain import ensure_installed  # noqa: E402
 
 ACKNOWLEDGEMENT = ROOT / "spec" / "breaking-change-acknowledgement.json"
@@ -39,6 +42,7 @@ NARROWING = {
     "minLength": "increased", "minItems": "increased", "minProperties": "increased", "minimum": "increased",
 }
 EXACT_KEYS = ("type", "format", "pattern", "multipleOf", "exclusiveMinimum", "exclusiveMaximum")
+COMPONENT_KINDS = ("schemas", "parameters", "headers", "responses", "requestBodies", "securitySchemes")
 
 
 class Finding:
@@ -106,14 +110,43 @@ def _member_identity(value: object) -> bool:
     )
 
 
-def _only_optional_property_additions(diff: object) -> bool:
+def _only_enum_additions(change: object) -> bool:
+    if not isinstance(change, dict) or set(change) != {"added"}:
+        return False
+    added = change["added"]
+    if not isinstance(added, list) or not added:
+        return False
+    identities = set()
+    for value in added:
+        if type(value) not in (str, int, float, bool, type(None)) or \
+                (type(value) is float and not math.isfinite(value)):
+            return False
+        identity = ("number" if type(value) in (int, float) else type(value).__name__, value)
+        if identity in identities:
+            return False
+        identities.add(identity)
+    return True
+
+
+def _only_optional_property_additions(diff: object, *, enum_description: bool = False) -> bool:
     """Recognise only additive property diffs, including dereferenced allOf inheritance.
 
-    Every other composition/response change remains conservatively breaking. In particular
-    required, removed, narrowed, conditional and unknown changes are never waived here.
+    Response proofs may also opt into scalar enum additions and inert description changes.
+    Required, removed, narrowed, conditional and unknown changes are never waived here.
     """
-    if not isinstance(diff, dict) or not diff or set(diff) - {"properties", "items", "allOf"}:
+    allowed = {"properties", "items", "allOf"}
+    if enum_description:
+        allowed.update(("enum", "description"))
+    if not isinstance(diff, dict) or not diff or set(diff) - allowed:
         return False
+    if "enum" in diff and not _only_enum_additions(diff["enum"]):
+        return False
+    if "description" in diff:
+        description = diff["description"]
+        if not isinstance(description, dict) or set(description) != {"from", "to"} or \
+                any(value is not None and not isinstance(value, str) for value in description.values()) or \
+                description["from"] == description["to"]:
+            return False
     if "properties" in diff:
         properties = diff["properties"]
         if not isinstance(properties, dict) or not properties or set(properties) - {"added", "modified"}:
@@ -126,9 +159,9 @@ def _only_optional_property_additions(diff: object) -> bool:
             modified = properties["modified"]
             if not isinstance(modified, dict) or not modified or any(not isinstance(name, str) or not name for name in modified):
                 return False
-            if any(not _only_optional_property_additions(child) for child in modified.values()):
+            if any(not _only_optional_property_additions(child, enum_description=enum_description) for child in modified.values()):
                 return False
-    if "items" in diff and not _only_optional_property_additions(diff["items"]):
+    if "items" in diff and not _only_optional_property_additions(diff["items"], enum_description=enum_description):
         return False
     if "allOf" in diff:
         composition = diff["allOf"]
@@ -141,7 +174,8 @@ def _only_optional_property_additions(diff: object) -> bool:
         for change in records:
             if not isinstance(change, dict) or set(change) != {"base", "revision", "diff"} or \
                     not _member_identity(change["base"]) or not _member_identity(change["revision"]) or \
-                    change["base"] != change["revision"] or not _only_optional_property_additions(change["diff"]):
+                    change["base"] != change["revision"] or not \
+                    _only_optional_property_additions(change["diff"], enum_description=enum_description):
                 return False
             index = change["base"]["index"]
             if index in identities:
@@ -159,10 +193,13 @@ def _only_additive_response_schema(change: object) -> bool:
             any(not isinstance(name, str) or not name for name in content["modified"]):
         return False
     return all(isinstance(media, dict) and set(media) == {"schema"} and
-               _only_optional_property_additions(media["schema"]) for media in content["modified"].values())
+               _only_optional_property_additions(media["schema"], enum_description=True) for media in content["modified"].values())
 
 
 def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
+    if not isinstance(diff, dict):
+        findings.append(Finding("component-schema-unproved-change", pointer, "schema diff must be an object", "component-guard"))
+        return
     for key in EXACT_KEYS:
         if key in diff:
             findings.append(Finding(f"component-schema-{key.lower()}-changed", pointer, f"{key} changed at {pointer}: {json.dumps(diff[key])}", "component-guard"))
@@ -195,8 +232,12 @@ def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
     if isinstance(properties, dict):
         for name in properties.get("deleted", []) or []:
             findings.append(Finding("component-schema-property-removed", f"{pointer}/properties/{name}", f"property '{name}' removed from {pointer}", "component-guard"))
-        for name, child in (properties.get("modified") or {}).items():
-            _schema_findings(f"{pointer}/properties/{name}", child, findings)
+        modified = properties.get("modified", {})
+        if not isinstance(modified, dict):
+            findings.append(Finding("component-schema-unproved-change", pointer, "modified properties need named diff objects", "component-guard"))
+        else:
+            for name, child in modified.items():
+                _schema_findings(f"{pointer}/properties/{name}", child, findings)
     items = diff.get("items")
     if isinstance(items, dict):
         _schema_findings(f"{pointer}/items", items, findings)
@@ -214,10 +255,31 @@ def _schema_findings(pointer: str, diff: dict, findings: list[Finding]) -> None:
             findings.append(Finding("component-schema-allof-added", pointer, f"allOf constraints added at {pointer}", "component-guard"))
 
 
-def component_findings(diff: object) -> list[Finding]:
+def component_findings(diff: object, base: dict | None = None, revision: dict | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    components = diff.get("components", {}) if isinstance(diff, dict) else {}
-    for kind in ("schemas", "parameters", "headers", "responses", "requestBodies", "securitySchemes"):
+    components = diff.get("components", {}) if isinstance(diff, dict) else None
+    if not isinstance(components, dict) or set(components) - set(COMPONENT_KINDS) or any(
+            not isinstance(section, dict) or set(section) - {"added", "deleted", "modified"} or
+            ("modified" in section and not isinstance(section["modified"], dict))
+            for section in components.values()):
+        return [Finding("component-diff-unproved", "components", "malformed or unknown component diff envelope", "component-guard")]
+    proof = SourceProof(base, revision) if base is not None and revision is not None else None
+    candidates: dict[tuple[str, str], tuple[dict, dict]] = {}
+    if proof is not None:
+        if any(not isinstance(document, dict) or not isinstance(document.get("components"), dict) or
+               any(not isinstance(document["components"].get(kind, {}), dict) for kind in ("schemas", "responses"))
+               for document in (base, revision)):
+            return [Finding("component-source-unproved", "components", "complete source components are required", "component-guard")]
+        for kind in ("schemas", "responses"):
+            before = base.get("components", {}).get(kind, {})
+            after = revision.get("components", {}).get(kind, {})
+            for name in before.keys() & after.keys():
+                if isinstance(before[name], dict) and isinstance(after[name], dict) and proof.candidate(before[name], after[name]):
+                    candidates[kind, name] = before[name], after[name]
+                    if name not in components.get(kind, {}).get("modified", {}):
+                        findings.append(Finding(f"component-{kind}-unproved-change", f"components/{kind}/{name}",
+                                                "source conjunction addition is missing from the diff record", "component-guard"))
+    for kind in COMPONENT_KINDS:
         section = components.get(kind)
         if not isinstance(section, dict):
             continue
@@ -225,8 +287,22 @@ def component_findings(diff: object) -> list[Finding]:
             findings.append(Finding(f"component-{kind}-removed", f"components/{kind}/{name}", f"{kind[:-1]} '{name}' removed from components/{kind}", "component-guard"))
         for name, change in (section.get("modified") or {}).items():
             pointer = f"components/{kind}/{name}"
+            if not isinstance(change, dict):
+                findings.append(Finding(f"component-{kind}-unproved-change", pointer,
+                                        "modified component needs a complete diff object", "component-guard"))
+                continue
             if kind == "schemas":
-                _schema_findings(pointer, change, findings)
+                local: list[Finding] = []
+                _schema_findings(pointer, change, local)
+                if (kind, name) in candidates:
+                    before, after = candidates[kind, name]
+                    if proof.schema(before, after, change, components.get("schemas", {}).get("modified", {})):
+                        local = [finding for finding in local if finding.id not in
+                                 ("component-schema-allof-added", "component-schema-allof-changed")]
+                    elif not local:
+                        local.append(Finding("component-schema-unproved-change", pointer,
+                                             "source conjunction addition has no complete supported proof", "component-guard"))
+                findings.extend(local)
             elif kind in ("parameters", "headers"):
                 for key in ("in", "name", "style", "explode"):
                     if key not in change:
@@ -239,8 +315,14 @@ def component_findings(diff: object) -> list[Finding]:
                     findings.append(Finding(f"component-{kind}-required-added", pointer, f"{pointer} became required", "component-guard"))
                 if isinstance(change.get("schema"), dict):
                     _schema_findings(f"{pointer}/schema", change["schema"], findings)
-            elif kind == "responses" and _only_additive_response_schema(change):
-                continue
+            elif kind == "responses":
+                if (kind, name) in candidates:
+                    before, after = candidates[kind, name]
+                    if proof.response(before, after, change, components.get("schemas", {}).get("modified", {})):
+                        continue
+                elif _only_additive_response_schema(change):
+                    continue
+                findings.append(Finding("component-responses-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
             else:
                 findings.append(Finding(f"component-{kind}-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
     return findings
@@ -305,9 +387,66 @@ def evaluate(findings: list[Finding], acknowledgement: dict | None, baseline_lab
 
 # --- entry point -------------------------------------------------------------------------------------
 
+def source_documents(base: Path, revision: Path) -> tuple[dict, dict]:
+    script = """
+const fs = require("fs");
+const { Yaml } = require("@stoplight/spectral-parsers");
+const { Kind, ScalarType, determineScalarType, parseYamlBigInteger, parseYamlFloat } = require("@stoplight/yaml-ast-parser");
+const documents = process.argv.slice(1).map(path => {
+  const source = fs.readFileSync(path, "utf8");
+  const result = Yaml.parse(source);
+  if (result.diagnostics.length || !result.data || typeof result.data !== "object" || Array.isArray(result.data)) {
+    throw new Error("complete OpenAPI source parsing failed");
+  }
+  const numeric = [];
+  const seen = new Set();
+  function inspect(node) {
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    if (node.kind === Kind.SCALAR) {
+      const type = determineScalarType(node);
+      if (type === ScalarType.int || type === ScalarType.float) {
+        const value = type === ScalarType.int ? Number(parseYamlBigInteger(node.value)) : parseYamlFloat(node.value);
+        numeric.push([source.slice(node.startPosition, node.endPosition), JSON.stringify(value)]);
+      }
+    } else if (node.kind === Kind.MAP) {
+      node.mappings.forEach(inspect);
+    } else if (node.kind === Kind.MAPPING) {
+      inspect(node.key);
+      inspect(node.value);
+    } else if (node.kind === Kind.SEQ) {
+      node.items.forEach(inspect);
+    } else if (node.kind === Kind.ANCHOR_REF) {
+      inspect(node.value);
+    }
+  }
+  inspect(result.ast);
+  return { data: result.data, numeric };
+});
+process.stdout.write(JSON.stringify(documents));
+"""
+    completed = run([node_executable(), "-e", script, str(base), str(revision)], capture=True, check=False)
+    if completed.returncode != 0:
+        raise PipelineError("complete OpenAPI source parsing failed; the pinned parser must accept both documents")
+    documents = json.loads(completed.stdout)
+    for document in documents:
+        for raw, normalized in document["numeric"]:
+            if not re.fullmatch(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?", raw):
+                raise PipelineError("source numeric spelling is outside the shared JSON/YAML comparison grammar")
+            try:
+                exact, parsed = Decimal(raw), Decimal(normalized)
+            except InvalidOperation as error:
+                raise PipelineError("source numeric spelling cannot be proved lossless by the pinned parser") from error
+            if not exact.is_finite() or not parsed.is_finite() or exact != parsed:
+                raise PipelineError("source numeric precision would be lost by the pinned parser; comparison refused")
+    return documents[0]["data"], documents[1]["data"]
+
+
 def compare(base: Path, revision: Path, oasdiff: str) -> tuple[list[Finding], list[str]]:
+    before, after = source_documents(base, revision)
     findings, warnings = operation_findings(oasdiff_json(oasdiff, "breaking", base, revision))
-    findings.extend(component_findings(oasdiff_json(oasdiff, "diff", base, revision)))
+    changes = oasdiff_json(oasdiff, "diff", base, revision)
+    findings.extend(component_findings(changes, before, after))
     unique: dict[tuple[str, str], Finding] = {}
     for finding in findings:
         unique.setdefault(finding.key(), finding)

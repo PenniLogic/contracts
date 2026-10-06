@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "group_version": "1.0.0",
+  "group_version": "1.1.0",
   "owner": "T-CON-12 (PenniLogic/contracts#16)",
   "taxonomy_version": "1.1.0",
   "decisions": ["ADR-015 sections 1.5, 4.4, 4.6, 4.8 and 5", "ADR-016 section 14", "ADR-017 section 10", "ADR-018 sections 4.5 and 10", "ADR-019 section 16"],
@@ -8,6 +8,55 @@
   "key_lifetime": "P30D",
   "retry_rule": "Retry means identical intended effect, persisted key and payload bytes. A refusal records no effect or idempotency receipt. Edited input is a new intended effect, never an automatic retry. A mismatch must never be escaped by minting a key. Horizon-exceeded money writes reconcile before an explicit new intended effect. This catalogue does not implement retries, auth flows or service idempotency.",
   "message_rule": "ServiceProblemDetail type/title/status/detail are exact per-code constants. These protocol diagnostics are not UI copy. Fields are registered tokens; unknown input names map to request. Never copy provider text, inputs, amounts, balances, resource identifiers, account existence signals or stack traces. Structured Python validation diagnostics must exclude input.",
+  "egress_binding": {
+    "authority": "Root owning-source decision for original contracts#27, composed with accepted contracts#16 provider source; not runtime acceptance.",
+    "consequence": "adr-022-ai-egress-consequences@1.1.0",
+    "policy_version": "2026-10-05.2",
+    "service_schema": "EgressDeniedProblemDetail",
+    "authentication_schema": "AuthenticationProblemDetail",
+    "member": "egress_denial_reason",
+    "schema": "EgressDenialReason",
+    "rule": "Require the canonical reason for an egress refusal. Authorization and indistinguishable unknown/foreign resource handling precede classification. No provider, host, address, raw exception, fallback, automatic retry or repinning is authorized.",
+    "reason_codes": {
+      "destination_denied": "egress_denied",
+      "destination_not_registered": "egress_denied",
+      "destination_suspended": "egress_denied",
+      "destination_revoked": "egress_denied",
+      "destination_busy": "dependency_unavailable",
+      "resolution_changed": "egress_denied",
+      "redirect_denied": "egress_denied",
+      "redirect_hop_limit": "egress_denied",
+      "tls_verification_failed": "egress_denied",
+      "unreachable": "dependency_unavailable",
+      "kill_switch_active": "egress_denied",
+      "registration_rate_limited": "rate_limited",
+      "step_up_required": "step_up_required",
+      "pending_activation": "egress_denied"
+    }
+  },
+  "authentication_codes": [
+    {
+      "code": "authentication_required",
+      "status": 401,
+      "title": "Authentication required",
+      "detail": "Authentication is required for this request.",
+      "classification": "authentication_owned",
+      "condition": "authentication_required",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "step_up_required",
+      "status": 403,
+      "title": "Confirmation required",
+      "detail": "Fresh authentication confirmation is required.",
+      "classification": "authentication_owned",
+      "condition": "step_up_required",
+      "flow": "authentication_required",
+      "state": null
+    }
+  ],
+  "authentication_rule": "Outside the eight-state service-error projection, using its already excluded authentication_required flow. Auth codes are in the same ProblemCode vocabulary, never ordinary ServiceProblemDetail. No automatic retry or weaker fallback. Fresh per-send DPoP and step-up-request@1 remain runtime obligations; an explicitly re-authorized identical intended request retains its key and bytes within existing bounds.",
   "validation_reason_bindings": [
     {
       "reason": "allocation_sum_mismatch",
@@ -31,6 +80,19 @@
       "retry_class": "same_request",
       "idempotency": "reuse_unchanged",
       "precondition": "Repeat only the same request inside the retry horizon; honour any server delay. A supplementary region can compose to degraded, but the code still binds to error."
+    },
+    {
+      "code": "egress_denied",
+      "schema": "EgressDeniedProblemDetail",
+      "status": 403,
+      "title": "Destination not available",
+      "detail": "The destination cannot be used for this request.",
+      "condition": "request_failed",
+      "state": "error",
+      "retryable": false,
+      "retry_class": "never",
+      "idempotency": "reuse_unchanged",
+      "precondition": "No automatic retry, fallback or repinning. Only explicit resubmission after the independent denial condition is resolved may reuse the unchanged key/body for the same intent inside existing bounds; edited input is new intent."
     },
     {
       "code": "entitlement_denied",

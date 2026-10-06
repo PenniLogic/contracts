@@ -1,0 +1,72 @@
+{
+  "version": "step-up-request@1",
+  "scope": "Finite synthetic ASCII-only RFC8785 envelope bytes and SHA-256/base64url vectors. Not a JCS implementation, issuer, signature, single-use verifier or runtime authorization proof.",
+  "vectors": [
+    {
+      "name": "register-minimal",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-model\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "626a1683dc69c8c174ce13b4e1b0775941c39f3023dce4f49b8865a5e9415f21",
+      "rq": "YmoWg9xpyMF0zhO04bB3WUHDnzAj3OT0m4hlpelBXyE"
+    },
+    {
+      "name": "register-host-case-not-normalized",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.PenniLogic.example\",\"models\":[\"fixture-model\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "36f042e56bb3903fa646a045b9c4e11f5d9c31c8430e3de870e66fffd08d8cd2",
+      "rq": "NvBC5WuzkD-mRqBFucThH12cMchDDj3ocOZv_9CNjNI"
+    },
+    {
+      "name": "register-credential-selector",
+      "canonical": "{\"body\":{\"credentialHeader\":\"x_api_key\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-model\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "1c03b3dac1f881215bb3ab7808684da99fb533711cf9e33a2175aa9ad8f75401",
+      "rq": "HAOz2sH4gSFbs6t4CGhNqZ-1M3Ec-eM6IXWqmtj3VAE"
+    },
+    {
+      "name": "register-model",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"different-fixture-model\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "920dd761889d91211e13925f4192326d9bed52b5b10a8968dee60b2ca8e99a3d",
+      "rq": "kg3XYYidkSEeE5JfQZIybZvtUrWxColo3uYLLKjpmj0"
+    },
+    {
+      "name": "register-explicit-root-not-omitted",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-model\"],\"pathPrefix\":\"/\"},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "f327d41298549093b72600e421807df03ad323ac081c9d2f67aedb0aa078efac",
+      "rq": "8yfUEphUkJO3JgDkIYB98DrTI6wIHJ0vZ67bCqB476w"
+    },
+    {
+      "name": "register-key-reference",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-model\"],\"providerKeyRef\":\"00000000-0000-4000-8000-000000000002\"},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "80617bd31e2e039b05ab12b5152ecb6b4a8784f89a6ff51f59fc6342077170ec",
+      "rq": "gGF70x4uA5sFqxK1FS7La0qHhPiab_UfWfxjQgdxcOw"
+    },
+    {
+      "name": "register-ordered-models",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-a\",\"fixture-b\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "5070adf432aa984b0b2277aeb26cb7c32c13f62232538fdfa74141af0ac2d5f2",
+      "rq": "UHCt9DKqmEsLIneusmy3wywT9iIyU4_fp0FBrwrC1fI"
+    },
+    {
+      "name": "register-reversed-models",
+      "canonical": "{\"body\":{\"credentialHeader\":\"authorization_bearer\",\"host\":\"models.pennilogic.example\",\"models\":[\"fixture-b\",\"fixture-a\"]},\"method\":\"POST\",\"operation\":\"registerCustomDestination\",\"target\":{},\"version\":\"step-up-request@1\"}",
+      "sha256": "26f78804ea0c981a2516c5c6e8d6863bff943ae93155d42cec056a29c3a9d951",
+      "rq": "JveIBOoMmBolFsXG6NaGO_-UOukxVdQs7AVqKcOp2VE"
+    },
+    {
+      "name": "activate-target-one",
+      "canonical": "{\"body\":{\"version\":\"1\"},\"method\":\"POST\",\"operation\":\"activateCustomDestination\",\"target\":{\"destinationId\":\"00000000-0000-4000-8000-000000000001\"},\"version\":\"step-up-request@1\"}",
+      "sha256": "feabced9163728ed51018e4af935e4f84311639f4fc2ef5219298b5283fcc369",
+      "rq": "_qvO2RY3KO1RAY5K-TXk-EMRY59Pwu9SGSmLUoP8w2k"
+    },
+    {
+      "name": "activate-target-two",
+      "canonical": "{\"body\":{\"version\":\"1\"},\"method\":\"POST\",\"operation\":\"activateCustomDestination\",\"target\":{\"destinationId\":\"00000000-0000-4000-8000-000000000004\"},\"version\":\"step-up-request@1\"}",
+      "sha256": "148434b7f856f7462fee702f1e73e1c4d01b698dd5e86b36c01afaebe92712d3",
+      "rq": "FIQ0t_hW90Yv7nAvHnPhxNAbaY3V6Gs2wBr66-knEtM"
+    },
+    {
+      "name": "activate-revision-two",
+      "canonical": "{\"body\":{\"version\":\"2\"},\"method\":\"POST\",\"operation\":\"activateCustomDestination\",\"target\":{\"destinationId\":\"00000000-0000-4000-8000-000000000001\"},\"version\":\"step-up-request@1\"}",
+      "sha256": "2b6db6927e31bb152be6432be9e06e81566bf9a82a5840bb6a88baecfad644ad",
+      "rq": "K222kn4xuxUr5kMr6eBugVZr-agqWEC7aoi67PrWRK0"
+    }
+  ]
+}

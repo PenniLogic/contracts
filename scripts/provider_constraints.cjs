@@ -2,14 +2,12 @@
 
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
-const { resolveLocalRef } = require("../spec/spectral-functions/_shared.js");
+const { resolveLocalRef, SCHEMA_ANNOTATIONS } = require("../spec/spectral-functions/_shared.js");
 const Ajv = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats");
 
 const EXAMPLE_BUDGET = 4096;
 
-const ANNOTATIONS = new Set(["title", "description", "default", "example", "examples", "deprecated",
-  "x-pennilogic-strict-provider", "x-pennilogic-provider-validator", "x-not-money"]);
 const KEYS = new Set(["$ref", "type", "properties", "required", "additionalProperties", "items",
   "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
   "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "uniqueItems",
@@ -63,13 +61,17 @@ function validatePattern(pattern) {
       if (character === "[" || ["&&", "||", "~~", "--"].includes(pattern.slice(index, index + 2))) {
         reject("unsupported character class");
       }
-      if (character === "\\") characters.push({ character: escaped(true), range: false });
+      if (character === "\\" && pattern[index + 1] === "s") {
+        characters.push({ character: " ", range: false, whitespace: true });
+        index += 2;
+      } else if (character === "\\") characters.push({ character: escaped(true), range: false });
       else { characters.push({ character, range: character === "-" }); index += 1; }
     }
     if (!characters.length || index >= end || peek() !== "]") reject("malformed character class");
     let previousRangeEnd = -1;
     for (let position = 1; position + 1 < characters.length; position += 1) {
       if (characters[position].range && (characters[position - 1].range || characters[position + 1].range ||
+          characters[position - 1].whitespace || characters[position + 1].whitespace ||
           position - 1 <= previousRangeEnd ||
           characters[position - 1].character.charCodeAt(0) > characters[position + 1].character.charCodeAt(0))) {
         reject("malformed character range");
@@ -182,7 +184,7 @@ function compile(document) {
   function node(input, valueSchema = true) {
     const source = object(input), result = {};
     for (const key of Object.keys(source)) {
-      if (!KEYS.has(key) && !ANNOTATIONS.has(key)) reject("unsupported keyword");
+      if (!KEYS.has(key) && !SCHEMA_ANNOTATIONS.has(key)) reject("unsupported keyword");
     }
     if (source.default !== undefined && source.default !== null) reject("unsupported default");
     if (valueSchema && source.type === undefined && source.$ref === undefined) reject("untyped value");
@@ -198,7 +200,7 @@ function compile(document) {
       result.type = source.type;
     }
     if (source.format !== undefined) {
-      if ((source.type === "string" && !["date", "date-time", "uri-reference"].includes(source.format)) ||
+      if ((source.type === "string" && !["date", "date-time", "uri-reference", "uuid"].includes(source.format)) ||
           (source.type === "integer" && !["int32", "int64"].includes(source.format)) ||
           !["string", "integer"].includes(source.type)) reject("unsupported format");
       result.format = source.format;
@@ -287,8 +289,67 @@ function compile(document) {
     component(name);
   }
   const result = { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
-  return generationExamples.length ? { ...result, generation_budget: EXAMPLE_BUDGET,
-    generation_examples: generationExamples, generation_input: document } : result;
+  const projection = JSON.parse(JSON.stringify(document));
+  const projectedModels = [];
+  function layoutPropertyNames(model) {
+    const inherited = model.$ref === undefined ? [] : layoutPropertyNames(resolveLocalRef(model.$ref, document));
+    return [...new Set([
+      ...inherited, ...(model.allOf || []).flatMap(layoutPropertyNames), ...Object.keys(model.properties || {}),
+    ])];
+  }
+  function projectLayout(model) {
+    let changed = false;
+    const objectRefinements = (model.allOf || []).filter((branch) =>
+      Object.keys(branch).length === 1 && branch.properties &&
+      Object.keys(branch.properties).length > 0 && Object.entries(branch.properties).every(([name, refinement]) => {
+        const field = model.properties?.[name];
+        const target = field?.$ref && resolveLocalRef(field.$ref, document);
+        return target?.type === "object" && Object.keys(refinement).length === 1 &&
+          refinement.properties && Object.keys(refinement.properties).length > 0 &&
+          Object.entries(refinement.properties).every(([property, constraint]) => {
+            const declared = target.properties?.[property];
+            const scalar = declared?.$ref ? resolveLocalRef(declared.$ref, document) : declared;
+            return scalar?.type === "string" && Object.keys(constraint).length === 1 &&
+              Array.isArray(constraint.enum) && constraint.enum.length > 0 &&
+              constraint.enum.every((value) => typeof value === "string");
+          });
+      }));
+    if (model.properties) {
+      // The pinned generator visits unconditional allOf fields before local fields. Preserve that
+      // positional API order without importing branch-only fields, types or requiredness.
+      const names = layoutPropertyNames(model).filter((name) => Object.hasOwn(model.properties, name));
+      changed = names.some((name, index) => name !== Object.keys(model.properties)[index]);
+      model.properties = Object.fromEntries(names.map((name) => [name, model.properties[name]]));
+    }
+    if (model.$ref !== undefined && Object.hasOwn(model, "enum")) {
+      delete model.enum;
+      changed = true;
+    }
+    for (const key of ["allOf", "anyOf", "oneOf", "if", "then", "else", "not", "const"]) {
+      if (!Object.hasOwn(model, key)) continue;
+      if (key === "allOf" && objectRefinements.length) {
+        // Scalar enum-only referenced-object refinements also publish inline helper models.
+        // Deeper constraints stay exclusively in the full validator, never the layout projection.
+        if (objectRefinements.length !== model.allOf.length) changed = true;
+        model.allOf = objectRefinements;
+        continue;
+      }
+      delete model[key];
+      changed = true;
+    }
+    for (const property of Object.values(model.properties || {})) changed = projectLayout(property) || changed;
+    if (model.items) changed = projectLayout(model.items) || changed;
+    return changed;
+  }
+  for (const name of roots) {
+    const model = projection.components.schemas[name];
+    // Closed marked objects declare their exact fields above. Keep branch requiredness and inherited
+    // constraints in the registered validator, not lossy field flattening or synthetic scalar enums.
+    if (projectLayout(model)) projectedModels.push(name);
+  }
+  return generationExamples.length || projectedModels.length ? { ...result, generation_budget: EXAMPLE_BUDGET,
+    generation_examples: generationExamples, generation_model_projection: projectedModels,
+    generation_input: projection } : result;
 }
 
 module.exports = { compile };

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { ProblemCode, ProblemCodeFromJSON, ClientState, IdempotencyTreatment, AiRefusalFromJSON, AiRefusalToJSON } from '../../../build/generated/typescript/src/index.js';
-import { ERROR_POLICIES, errorPolicy, newCorrelationId } from '../../../build/generated/typescript/src/errorCatalogue.js';
+import { AUTHENTICATION_POLICIES, ERROR_POLICIES, authenticationPolicy, errorPolicy, newCorrelationId, type ErrorPolicy, type ServiceProblemCode } from '../../../build/generated/typescript/src/errorCatalogue.js';
 import { ServiceProblemDetailFromJSON, ServiceProblemDetailToJSON } from '../../../build/generated/typescript/src/models/ServiceProblemDetail.js';
 import { AllocationMismatchDirection, ValidationIssueFromJSON } from '../../../build/generated/typescript/src/index.js';
 import { JSONApiResponse } from '../../../build/generated/typescript/src/runtime.js';
@@ -18,7 +18,7 @@ interface ErrorFixture {
 }
 interface Entry { code: string; title: string; detail: string; status: number }
 const fixture = loadFixture<ErrorFixture>('error-provider.v1.json');
-const catalogue: { codes: Entry[] } = JSON.parse(readFileSync(join(ROOT, 'spec', 'error-catalogue.v1.json'), 'utf8'));
+const catalogue: { codes: Entry[]; authentication_codes: Entry[] } = JSON.parse(readFileSync(join(ROOT, 'spec', 'error-catalogue.v1.json'), 'utf8'));
 const examples = new Map<string, Record<string, unknown>>(fixture.examples.map((example) => {
     const entry = catalogue.codes.find((value) => value.code === example.code);
     assert.ok(entry);
@@ -71,12 +71,30 @@ test('allocation direction is typed and conditional across actual ordinary neste
 const untypedCode: ProblemCode = 'validation_rejected';
 void untypedCode;
 
-test('all catalogue codes have a typed state and immutable retry/key policy', () => {
-    assert.deepEqual([...Object.values(ProblemCode)].sort(), catalogue.codes.map((entry) => entry.code).sort());
-    assert.equal(Object.keys(ERROR_POLICIES).length, Object.values(ProblemCode).length);
+test('service policies retain typed state and retry keys while authentication is excluded', () => {
+    assert.deepEqual([...Object.values(ProblemCode)].sort(), [...catalogue.codes, ...catalogue.authentication_codes].map((entry) => entry.code).sort());
+    assert.equal(Object.keys(ERROR_POLICIES).length, catalogue.codes.length);
+    assert.equal(Object.keys(AUTHENTICATION_POLICIES).length, catalogue.authentication_codes.length);
+    for (const entry of catalogue.authentication_codes) {
+        const code = ProblemCodeFromJSON(entry.code);
+        assert.equal(authenticationPolicy(code).state, null);
+        assert.equal(authenticationPolicy(code).flow, 'authentication_required');
+        assert.throws(() => errorPolicy(code), { message: 'problem code rejected' });
+    }
     assert.equal(errorPolicy(ProblemCode.DependencyUnavailable).state, ClientState.Error);
     assert.equal(errorPolicy(ProblemCode.IdempotencyPayloadMismatch).retryable, false);
     assert.equal(errorPolicy(ProblemCode.IdempotencyPayloadMismatch).idempotency, IdempotencyTreatment.NeverReplaceToEscapeMismatch);
+});
+
+test('published service-key lookups remain total without inventing authentication policies', () => {
+    const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.RequestFailed];
+    const status: number = ERROR_POLICIES[ProblemCode.RequestFailed].status;
+    const total: Readonly<Record<ServiceProblemCode, ErrorPolicy>> = ERROR_POLICIES;
+    assert.equal(policy, errorPolicy(ProblemCode.RequestFailed));
+    assert.equal(status, 503);
+    assert.equal(total[ProblemCode.EgressDenied].status, 403);
+    assert.equal(ERROR_POLICIES[ProblemCode.AuthenticationRequired], undefined);
+    assert.equal(ERROR_POLICIES[ProblemCode.StepUpRequired], undefined);
 });
 
 test('every error example decodes typed codes and round-trips through the actual seam', () => {

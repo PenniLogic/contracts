@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,18 +18,7 @@ REGISTRY = ROOT / "spec" / "currency-registry.v1.json"
 sys.path.insert(0, str(SCRIPTS))
 from pl_contracts import PROVIDER_SOURCE_NAMES  # noqa: E402
 
-PROBE_PATHS = """security:
-  - probe: []
-components:
-  securitySchemes:
-    probe:
-      type: http
-      scheme: bearer
-tags:
-  - name: probe
-    description: Probe operations used only by the pipeline tests.
-paths:
-  /probe:
+PROBE_PATHS = """  /probe:
     get:
       operationId: getProbe
       description: Probe read.
@@ -70,16 +60,52 @@ def spec_text() -> str:
 
 
 def with_probe_paths(text: str) -> str:
-    """Add a synthetic path item (one GET, one POST) so operation rules have something to check.
+    """Add only the probe path and tag, retaining the actual document and inherited security."""
+    paths = section_text(text, ("paths",))
+    heading, _, entries = paths.partition("\n")
+    assert heading in ("paths:", "paths: {}")
+    assert not re.search(r"(?m)^  ['\"]?/probe['\"]?:", entries)
+    text = replace_section(text, ("paths",), "paths:\n" + PROBE_PATHS + entries)
+    tags = section_text(text, ("tags",))
+    heading, _, entries = tags.partition("\n")
+    assert heading in ("tags:", "tags: []")
+    assert not re.search(r"(?m)^  - name: probe$", entries)
+    return replace_section(text, ("tags",), "tags:\n  - name: probe\n"
+                           "    description: Probe operations used only by the pipeline tests.\n" + entries)
 
-    The security scheme and tags are added under a second `components:`/`tags:` block; YAML forbids
-    duplicate keys, so the probe block replaces the empty `paths: {}` line and moves `components:`
-    entries by merging the probe security scheme into the existing components mapping.
-    """
-    assert "paths: {}\n" in text
-    probe = PROBE_PATHS.replace("components:\n  securitySchemes:\n    probe:\n      type: http\n      scheme: bearer\n", "")
-    text = text.replace("paths: {}\n", probe)
-    return text.replace("components:\n  schemas:\n", "components:\n  securitySchemes:\n    probe:\n      type: http\n      scheme: bearer\n  schemas:\n", 1)
+
+def section_span(text: str, path: tuple[str, ...]) -> tuple[int, int]:
+    """Locate a named mapping in the repository's two-space block YAML without reformatting it."""
+    start, end = 0, len(text)
+    for depth, name in enumerate(path):
+        key = re.escape(name)
+        pattern = re.compile(rf"(?m)^{'  ' * depth}(?:{key}|'{key}'|\"{key}\"):[^\n]*\n")
+        matches = list(pattern.finditer(text, start, end))
+        if len(matches) != 1:
+            raise AssertionError(f"expected one YAML section {'/'.join(path[:depth + 1])}, found {len(matches)}")
+        match = matches[0]
+        start = match.start()
+        offset = match.end()
+        for line in text[offset:end].splitlines(keepends=True):
+            if line.strip() and not line.lstrip().startswith("#") and len(line) - len(line.lstrip()) <= depth * 2:
+                end = offset
+                break
+            offset += len(line)
+    return start, end
+
+
+def section_text(text: str, path: tuple[str, ...]) -> str:
+    start, end = section_span(text, path)
+    return text[start:end]
+
+
+def replace_section(text: str, path: tuple[str, ...], replacement: str) -> str:
+    start, end = section_span(text, path)
+    return text[:start] + replacement + text[end:]
+
+
+def replace_in_section(text: str, path: tuple[str, ...], old: str, new: str) -> str:
+    return replace_section(text, path, replace_once(section_text(text, path), old, new))
 
 
 def replace_once(text: str, old: str, new: str) -> str:

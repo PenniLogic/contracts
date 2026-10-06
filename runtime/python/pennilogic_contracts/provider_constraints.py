@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.local_date import LocalDate
 from pennilogic_contracts.provider_constraint_data import SCHEMAS
+from pennilogic_contracts.uuid_wire import uuid_from_wire
 
 
 class ProviderConstraintError(ValueError):
@@ -24,7 +25,10 @@ def _pattern(source: str) -> re.Pattern[str]:
     escaped = False
     for character in source:
         if escaped:
-            parts.append(character)
+            if character == "s" and in_class:
+                parts[-1] = r"\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+            else:
+                parts.append(character)
             escaped = False
         elif character == "\\":
             parts.append(character)
@@ -77,6 +81,8 @@ def _format(value: str, name: str) -> bool:
             if not value.isascii() or re.search(r"[\x00-\x20\x7f]|%(?![0-9a-fA-F]{2})", value):
                 return False
             urlsplit(value)
+        elif name == "uuid":
+            uuid_from_wire(value)
         else:
             raise ValueError("provider constraint binding unsupported")
     except (ValueError, TypeError):

@@ -1,0 +1,629 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/PenniLogic/docs/blob/main/adr/ai-egress-consequences.schema.json",
+  "title": "ADR-022 source-only AI egress consequences 1.1.0",
+  "description": "Closed decision contract, not a live destination registry or runtime attestation. Uses the repository's strict stdlib draft-07 subset. Runtime configuration is derived from this pinned artifact plus separately reviewed complete inventory and evidence, never by flipping source claims to enabled.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "consequences_version", "artifact_id", "record", "ticket", "source_issue",
+    "schema", "decision_date", "effective_on", "evidence_scope", "authority", "policy_version",
+    "runtime", "enablement", "wire", "proxy_authorization", "normalization", "address_policy",
+    "pinning", "redirects", "transport", "registration", "enums", "state_denials", "kill_switch",
+    "privacy", "audit_evidence", "observability", "runtime_gates", "source_normalization_vectors", "delivery"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "consequences_version": {"const": "1.1.0"},
+    "artifact_id": {"const": "adr-022-ai-egress-consequences"},
+    "record": {"const": "ADR-022"},
+    "ticket": {"const": "T-ADR-AIEGRESS-08"},
+    "source_issue": {"const": "https://github.com/PenniLogic/docs/issues/42"},
+    "schema": {"const": "adr/ai-egress-consequences.schema.json"},
+    "decision_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "effective_on": {"const": "PROTECTED_MERGE"},
+    "evidence_scope": {"const": "SOURCE_ONLY_NOT_RUNTIME_ENFORCEMENT"},
+    "authority": {"const": "OWNER_DELEGATED_TECHNICAL_SELECTION_NO_DEPLOYMENT_OR_SPEND"},
+    "policy_version": {"const": "2026-10-05.2"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "state", "container_runtime", "supervisor", "network_boundary", "packet_enforcement",
+        "internet_path", "provider_or_custom_direct_path", "kubernetes_network_policy",
+        "workload_network_admin", "metadata_exception", "native_ipv4_required", "ipv6",
+        "residency", "production_key_custodian", "admin_host_separation", "startup",
+        "ordered_packet_rules", "blanket_established_accept", "lease_seconds", "lease_authority",
+        "lease_refresh_on_failure", "control_exception", "control_exception_address_scope",
+        "controlled_resolver", "atomic_ruleset_install"
+      ],
+      "properties": {
+        "id": {"const": "R4_LINUX_DOCKER_NFTABLES"},
+        "state": {"const": "FUTURE_NOT_DEPLOYED"},
+        "container_runtime": {"const": "DOCKER_ENGINE_COMPOSE"},
+        "supervisor": {"const": "HOST_SYSTEMD"},
+        "network_boundary": {"const": "SEPARATE_PREPARED_GATEWAY_AND_PROXY_NETWORK_NAMESPACES"},
+        "packet_enforcement": {"const": "HOST_OWNED_NAMESPACE_OUTPUT_AND_HOST_INPUT_FORWARD_NFTABLES"},
+        "internet_path": {"const": "AUTHENTICATED_DESTINATION_AWARE_PROXY_ALL_MODES"},
+        "provider_or_custom_direct_path": {"$ref": "#/definitions/false"},
+        "kubernetes_network_policy": {"$ref": "#/definitions/false"},
+        "workload_network_admin": {"$ref": "#/definitions/false"},
+        "metadata_exception": {"$ref": "#/definitions/false"},
+        "native_ipv4_required": {"$ref": "#/definitions/true"},
+        "ipv6": {"const": "BLOCKED_UNTIL_NATIVE_PARITY_QUALIFIED"},
+        "residency": {"const": "INDIA_COUNSEL_APPROVED_PROFILE_BEFORE_PROVISIONING"},
+        "production_key_custodian": {"const": "UNPROVISIONED_ADR018_NONEXPORTABLE_CUSTODIAN_GATE"},
+        "admin_host_separation": {"const": "ADR020_REQUIRED"},
+        "startup": {"const": "NO_NETWORK_HOLDER_THEN_RULES_THEN_VETH_THEN_WORKLOAD"},
+        "ordered_packet_rules": {
+          "const": [
+            "DROP_INVALID_SPOOFED_AND_HARD_DENIED",
+            "ALLOW_EXACT_ROLE_BOUND_CONTROL_TUPLES_AND_ADMITTED_REPLIES",
+            "DROP_REMAINING_DENIED_PRIVATE_AND_SELF",
+            "PROXY_ONLY_PUBLIC_TCP443_CURRENT_LEASE_MEMBERSHIP_EVERY_PACKET",
+            "DROP_ALL_OTHER_TRAFFIC"
+          ]
+        },
+        "blanket_established_accept": {"$ref": "#/definitions/false"},
+        "lease_seconds": {"type": "integer", "const": 15},
+        "lease_authority": {"const": "HOST_CONTROLLER_INDEPENDENT_CAPABILITY_REGISTRY_DNS_AND_FLAG_CHECK"},
+        "lease_refresh_on_failure": {"const": "DENY"},
+        "control_exception": {"const": "EXACT_INVENTORIED_ROLE_UNICAST_TUPLE_NEVER_HARD_DENIED"},
+        "control_exception_address_scope": {"const": "RFC1918_OR_SELF_ULA_OR_SELF_NATIVE_GLOBAL_UNICAST"},
+        "controlled_resolver": {"const": "ADMITTED_NAMES_ONLY_COMPLETE_A_AAAA_CNAME_RESULTS"},
+        "atomic_ruleset_install": {"const": "NFT_TRANSACTION_READBACK_AND_NAMESPACE_IDENTITY_CHECK"}
+      }
+    },
+    "enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "global_default", "custom_default", "approved_providers", "approved_custom_destinations",
+        "deployment_inventory", "missing_empty_or_stale_inventory", "runtime_implementation_claimed",
+        "source_tests_are_network_evidence", "spend_authorized", "prerequisite_evaluation",
+        "required_prerequisites", "provider_inference_prerequisites", "custom_inference_prerequisites"
+      ],
+      "properties": {
+        "global_default": {"const": "off"},
+        "custom_default": {"const": "off"},
+        "approved_providers": {"$ref": "#/definitions/empty"},
+        "approved_custom_destinations": {"$ref": "#/definitions/empty"},
+        "deployment_inventory": {"$ref": "#/definitions/empty"},
+        "missing_empty_or_stale_inventory": {"const": "DENY_STARTUP_AND_EGRESS"},
+        "runtime_implementation_claimed": {"$ref": "#/definitions/false"},
+        "source_tests_are_network_evidence": {"$ref": "#/definitions/false"},
+        "spend_authorized": {"$ref": "#/definitions/false"},
+        "prerequisite_evaluation": {"const": "CLASS_READINESS_BEFORE_ON_OWNER_AND_DESTINATION_CHECKS_PER_OPERATION"},
+        "required_prerequisites": {
+          "const": [
+            "PINNED_SOURCE_GENERATED_AND_LOADED_CONTRACT_EQUALITY",
+            "H1_APPLICATION_CONSUMERS_IMPLEMENTED",
+            "H2_REAL_LINUX_RUNTIME_AND_PIPELINE_CONSUMERS_IMPLEMENTED",
+            "COMPLETE_CURRENT_DEPLOYMENT_INVENTORY",
+            "ALL_APPLICABLE_RUNTIME_GATES_PASS_IN_EXACT_ENVIRONMENT",
+            "VERIFIED_UNEXPIRED_ENVIRONMENT_BOUND_SUITE_MANIFEST",
+            "VALID_TRANSFER_CONSENT_AND_LIVE_SHARING_GRANTS",
+            "ADR018_QUALIFIED_CUSTODIAN_BEFORE_REAL_DATA_OR_KEYS",
+            "RETENTION_ERASURE_RESTORE_AND_LOG_REDACTION_QUALIFIED",
+            "TWO_INDEPENDENT_ELIGIBLE_OPERATOR_PRINCIPALS",
+            "NATIVE_CI_PROTECTED_MERGE_AND_SEPARATE_NONAUTHOR_REVIEW"
+          ]
+        },
+        "provider_inference_prerequisites": {
+          "const": [
+            "APPROVED_PROVIDER_RETENTION_REGION_FEATURE_AND_DPA_EVIDENCE",
+            "REVIEWED_PROVIDER_ENTRY_LIVE_APPROVAL_AND_REQUEST_PIN"
+          ]
+        },
+        "custom_inference_prerequisites": {
+          "const": [
+            "REGISTERED_OWNER_BOUND_DESTINATION_ID",
+            "CURRENT_VALIDATION_APPROVAL_ACTIVE_STATE_AND_EXACT_PIN_SET",
+            "AUTHENTICATING_PROXY_AND_KERNEL_LEASE_PATH_PRESENT",
+            "ALL_T1_THROUGH_T20_GATES_PASS"
+          ]
+        }
+      }
+    },
+    "wire": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route", "client_direct", "client_provider_routing_url", "client_key_persistence",
+        "request_schema_additional_properties", "inference_target_fields", "inference_address_fields",
+        "forbidden_inference_fields", "registration_fields", "registration_raw_key",
+        "registration_full_base_url", "registration_scheme", "registration_port", "key_enrollment",
+        "quota_authority", "byok_custom_requests", "byok_custom_tokens", "fallback_to_managed",
+        "workload_identity", "custom_models", "denials"
+      ],
+      "properties": {
+        "route": {"const": ["client", "core_api", "ai_gateway", "egress_proxy", "approved_destination"]},
+        "client_direct": {"$ref": "#/definitions/false"},
+        "client_provider_routing_url": {"$ref": "#/definitions/false"},
+        "client_key_persistence": {"$ref": "#/definitions/false"},
+        "request_schema_additional_properties": {"$ref": "#/definitions/false"},
+        "inference_target_fields": {"const": ["destinationId", "custom_model_id"]},
+        "inference_address_fields": {"$ref": "#/definitions/empty"},
+        "forbidden_inference_fields": {
+          "const": ["url", "uri", "base_url", "baseUrl", "api_base", "endpoint", "host", "port", "pathPrefix", "providerKey", "headers", "proxy"]
+        },
+        "registration_fields": {"const": ["host", "pathPrefix", "credentialHeader", "providerKeyRef", "models"]},
+        "registration_raw_key": {"$ref": "#/definitions/false"},
+        "registration_full_base_url": {"$ref": "#/definitions/false"},
+        "registration_scheme": {"const": "https"},
+        "registration_port": {"type": "integer", "const": 443},
+        "key_enrollment": {"const": "SEPARATE_ADR019_STEP_UP_OPERATION"},
+        "quota_authority": {"const": "ADR-023"},
+        "byok_custom_requests": {"const": "CONSUMED_SERVER_SIDE"},
+        "byok_custom_tokens": {"const": "RECORDED_UNCHARGED"},
+        "fallback_to_managed": {"$ref": "#/definitions/false"},
+        "workload_identity": {"const": "ADR019_WL_PLUS_API_MINTED_DLG"},
+        "custom_models": {"const": "ADR023_REGISTERED_CUSTOM_MODEL_ID_ONLY"},
+        "denials": {"const": "T_CON_12_PROBLEM_DETAIL_NO_UPSTREAM_ADDRESS_OR_EXCEPTION"}
+      }
+    },
+    "proxy_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_type", "audience", "issuer", "presenter", "separate_signing_key_class",
+        "gateway_can_mint", "operations", "actor_kinds", "bindings", "max_lifetime_seconds",
+        "user_capability_bounded_by_request_and_delegation", "single_use", "request_or_maintenance_admission_check",
+        "maintenance_authority", "probe_admission", "replay_enforcement",
+        "independent_registry_read", "state_max_age_seconds", "stale_state", "connect_target",
+        "name_check", "client_hello_max_bytes", "client_hello_seconds", "reject", "tls_interception",
+        "validation_candidate_seconds", "tls_probe"
+      ],
+      "properties": {
+        "capability_type": {"const": "egress+jwt"},
+        "audience": {"const": "pennilogic-ai-egress"},
+        "issuer": {"const": "api"},
+        "presenter": {"const": "ai-service"},
+        "separate_signing_key_class": {"$ref": "#/definitions/true"},
+        "gateway_can_mint": {"$ref": "#/definitions/false"},
+        "operations": {"const": ["inference", "tls_probe"]},
+        "actor_kinds": {"const": ["user_request", "scheduled_revalidation"]},
+        "bindings": {
+          "const": ["sub", "azp", "actor_kind", "originating_request_digest", "admission_id", "destination_id", "destination_class", "destination_version", "operation", "hop", "policy_version", "jti", "iat", "exp"]
+        },
+        "max_lifetime_seconds": {"type": "integer", "const": 120},
+        "user_capability_bounded_by_request_and_delegation": {"$ref": "#/definitions/true"},
+        "single_use": {"$ref": "#/definitions/true"},
+        "request_or_maintenance_admission_check": {"$ref": "#/definitions/true"},
+        "maintenance_authority": {"const": "EXISTING_REGISTRATION_TLS_ONLY_NO_INFERENCE_ENROLLMENT_REPIN_OR_DELEGATION"},
+        "probe_admission": {"const": "REGISTRATION_OR_MAINTENANCE_RATE_BUDGET_NOT_INFERENCE_RESERVATION"},
+        "replay_enforcement": {"const": "CONTROLLER_ATOMIC_JTI_CLAIM_PROXY_SINGLE_CONNECTION_RECEIPT"},
+        "independent_registry_read": {"$ref": "#/definitions/true"},
+        "state_max_age_seconds": {"type": "integer", "const": 15},
+        "stale_state": {"const": "DENY_AND_CLOSE"},
+        "connect_target": {"const": "CANONICAL_VALIDATED_IP_LITERAL_TCP443"},
+        "name_check": {"const": "BOUNDED_CLIENT_HELLO_REGISTERED_SNI"},
+        "client_hello_max_bytes": {"type": "integer", "const": 65536},
+        "client_hello_seconds": {"type": "integer", "const": 5},
+        "reject": {"const": ["NON_TLS", "UNPARSEABLE_CLIENT_HELLO", "MISSING_SNI", "WRONG_SNI", "ECH"]},
+        "tls_interception": {"$ref": "#/definitions/false"},
+        "validation_candidate_seconds": {"type": "integer", "const": 120},
+        "tls_probe": {"const": "PROXY_OWN_HANDSHAKE_NO_HTTP_KEY_PROMPT_OR_GENERIC_TUNNEL"}
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order", "address_text", "comparison", "mapped_and_transition_addresses",
+        "literal_numeric_last_label", "platform_literal_parser_accepted_forms",
+        "reapply_literal_guard_after_idna", "strip_trailing_dots", "host_label_max_bytes",
+        "host_max_bytes", "path_prefix_max_bytes", "path_percent_decode_count",
+        "reject_nested_percent_encoding", "path_prefix_match", "denied_uri_parts",
+        "resolver_timeout_seconds", "max_dns_answers", "max_cname_hops", "any_denied_answer",
+        "empty_partial_failed_or_timed_out_resolution", "special_use_or_self_cname",
+        "interpreter_is_global"
+      ],
+      "properties": {
+        "order": {
+          "const": [
+            "STRICT_HTTPS_PARSE", "REJECT_LITERAL_HOST", "UTS46_NONTRANSITIONAL_STD3_LOWERCASE_A_LABEL",
+            "REPEAT_LITERAL_SPECIAL_USE_AND_SELF_NAME_CHECKS", "RESOLVE_ALL_A_AAAA_AND_CNAME",
+            "CANONICAL_PACKED_ADDRESS_DENY_AND_GLOBAL_CHECK", "PIN_NUMERIC_ADDRESS_THROUGH_TLS_AND_REQUEST"
+          ]
+        },
+        "address_text": {"const": "CANONICAL_ROUNDTRIP_ONLY"},
+        "comparison": {"const": "PACKED_BINARY"},
+        "mapped_and_transition_addresses": {"const": "DENY_WITHOUT_UNMAPPING"},
+        "literal_numeric_last_label": {"const": "ASCII_DIGITS_OR_0X_HEXADECIMAL_INCLUDING_EMPTY_0X"},
+        "platform_literal_parser_accepted_forms": {"const": "DENY"},
+        "reapply_literal_guard_after_idna": {"$ref": "#/definitions/true"},
+        "strip_trailing_dots": {"type": "integer", "const": 1},
+        "host_label_max_bytes": {"type": "integer", "const": 63},
+        "host_max_bytes": {"type": "integer", "const": 253},
+        "path_prefix_max_bytes": {"type": "integer", "const": 256},
+        "path_percent_decode_count": {"type": "integer", "const": 1},
+        "reject_nested_percent_encoding": {"$ref": "#/definitions/true"},
+        "path_prefix_match": {"const": "NORMALIZED_SEGMENT_BOUNDARY"},
+        "denied_uri_parts": {
+          "const": ["USERINFO", "QUERY_EVEN_EMPTY", "FRAGMENT", "WHITESPACE", "CONTROLS", "BACKSLASH", "PERCENT_ENCODED_HOST", "EMPTY_LABEL", "ZONE_ID", "ENCODED_PATH_SEPARATOR", "DOT_PATH_SEGMENT", "MALFORMED_PERCENT_ESCAPE"]
+        },
+        "resolver_timeout_seconds": {"type": "integer", "const": 5},
+        "max_dns_answers": {"type": "integer", "const": 64},
+        "max_cname_hops": {"type": "integer", "const": 8},
+        "any_denied_answer": {"const": "DENY_WHOLE_DESTINATION"},
+        "empty_partial_failed_or_timed_out_resolution": {"const": "DENY"},
+        "special_use_or_self_cname": {"const": "DENY"},
+        "interpreter_is_global": {"const": "ADDITIONAL_FAIL_CLOSED_NOT_SOLE_POLICY"}
+      }
+    },
+    "address_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "denied_ipv4", "denied_ipv6", "ipv6_allowed_scope", "named_metadata_and_credentials",
+        "metadata_denied_all_ports", "denied_name_suffixes", "suffix_comparison",
+        "single_label_names", "self_scope", "ai_destination_control_plane_exceptions"
+      ],
+      "properties": {
+        "denied_ipv4": {
+          "const": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4"]
+        },
+        "denied_ipv6": {
+          "const": ["::/128", "::1/128", "::/96", "::ffff:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16", "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8"]
+        },
+        "ipv6_allowed_scope": {"const": "2000::/3"},
+        "named_metadata_and_credentials": {"const": ["169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"]},
+        "metadata_denied_all_ports": {"$ref": "#/definitions/true"},
+        "denied_name_suffixes": {"const": ["localhost", "local", "internal", "arpa", "localdomain", "onion", "test", "example", "invalid"]},
+        "suffix_comparison": {"const": "EXACT_OR_DNS_LABEL_BOUNDARY"},
+        "single_label_names": {"const": "DENY"},
+        "self_scope": {"const": ["ALL_PRODUCT_DOMAINS", "PRIVATE_DEPENDENCIES", "HOST_AND_BRIDGE_ADDRESSES", "PUBLIC_INGRESS", "LOAD_BALANCERS", "NAT_EGRESS", "GLOBAL_UNICAST_IPV6_PREFIXES"]},
+        "ai_destination_control_plane_exceptions": {"$ref": "#/definitions/false"}
+      }
+    },
+    "pinning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "custom_dns_set", "any_custom_set_change", "provider_dns_set", "gateway_proxy_controller_disagreement",
+        "current_policy_check_before_connect", "numeric_dial_no_second_resolution", "peer_equals_authorized_address",
+        "sni_host_and_certificate_name", "lifetime", "connection_pool_reuse", "cross_origin_coalescing", "happy_eyeballs"
+      ],
+      "properties": {
+        "custom_dns_set": {"const": "EXACT_EQUALITY_WITH_REGISTRATION_PIN_SET"},
+        "any_custom_set_change": {"const": "SUSPEND_NOTIFY_ALERT_REQUIRE_FRESH_STEP_UP"},
+        "provider_dns_set": {"const": "FRESH_VALIDATION_PER_ATTEMPT"},
+        "gateway_proxy_controller_disagreement": {"const": "DENY"},
+        "current_policy_check_before_connect": {"$ref": "#/definitions/true"},
+        "numeric_dial_no_second_resolution": {"$ref": "#/definitions/true"},
+        "peer_equals_authorized_address": {"$ref": "#/definitions/true"},
+        "sni_host_and_certificate_name": {"const": "REGISTERED_A_LABEL"},
+        "lifetime": {"const": "THROUGH_CONNECTION_TLS_REQUEST_RESPONSE_AND_TEARDOWN"},
+        "connection_pool_reuse": {"$ref": "#/definitions/false"},
+        "cross_origin_coalescing": {"$ref": "#/definitions/false"},
+        "happy_eyeballs": {"$ref": "#/definitions/false"}
+      }
+    },
+    "redirects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "automatic_following", "hop_limit", "allowed_status", "location", "all_modes_origin", "path",
+        "revalidate_all_rules_each_hop", "new_single_use_capability_each_hop", "changed_custom_answers",
+        "headers", "reset_deadline_or_quota"
+      ],
+      "properties": {
+        "automatic_following": {"$ref": "#/definitions/false"},
+        "hop_limit": {"type": "integer", "const": 2},
+        "allowed_status": {"const": [307, 308], "type": "array", "items": {"type": "integer"}},
+        "location": {"const": "SINGLE_ABSOLUTE_HTTPS_TCP443"},
+        "all_modes_origin": {"const": "SAME_REGISTERED_A_LABEL_AND_CREDENTIAL_AUDIENCE"},
+        "path": {"const": "APPROVED_NORMALIZED_SEGMENT_BOUNDARY"},
+        "revalidate_all_rules_each_hop": {"$ref": "#/definitions/true"},
+        "new_single_use_capability_each_hop": {"$ref": "#/definitions/true"},
+        "changed_custom_answers": {"const": "REFUSE_WITHOUT_DIAL_AND_SUSPEND"},
+        "headers": {"const": "REBUILD_REGISTERED_SET_NEVER_CROSS_ORIGIN_FORWARD"},
+        "reset_deadline_or_quota": {"$ref": "#/definitions/false"}
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheme", "port", "tls_minimum", "http_version", "custom_trust_anchors", "connect_seconds",
+        "tls_seconds", "first_byte_seconds", "logical_request_seconds", "logical_request_max_attempts",
+        "decoded_response_max_bytes",
+        "max_in_flight_per_account", "max_in_flight_per_host_across_accounts", "global_capacity",
+        "over_capacity", "base_headers", "user_agent", "credential_headers", "credential_schemes",
+        "provider_headers", "ignored_or_disabled"
+      ],
+      "properties": {
+        "scheme": {"const": "https"},
+        "port": {"type": "integer", "const": 443},
+        "tls_minimum": {"const": "1.2"},
+        "http_version": {"const": "1.1"},
+        "custom_trust_anchors": {"$ref": "#/definitions/false"},
+        "connect_seconds": {"type": "integer", "const": 5},
+        "tls_seconds": {"type": "integer", "const": 5},
+        "first_byte_seconds": {"type": "integer", "const": 30},
+        "logical_request_seconds": {"type": "integer", "const": 120},
+        "logical_request_max_attempts": {"type": "integer", "const": 3},
+        "decoded_response_max_bytes": {"type": "integer", "const": 4194304},
+        "max_in_flight_per_account": {"type": "integer", "const": 4},
+        "max_in_flight_per_host_across_accounts": {"type": "integer", "const": 8},
+        "global_capacity": {"const": "FINITE_QUALIFIED_SEPARATE_CUSTOM_WORKER_BUDGET_REQUIRED"},
+        "over_capacity": {"const": "destination_busy"},
+        "base_headers": {"const": ["Host", "Content-Type", "Accept", "Content-Length", "User-Agent"]},
+        "user_agent": {"const": "FIXED_PRODUCT_STRING_NO_IDENTIFIERS"},
+        "credential_headers": {"const": {"authorization_bearer": "Authorization", "x_api_key": "x-api-key", "api_key": "api-key"}},
+        "credential_schemes": {"const": {"authorization_bearer": "Bearer", "x_api_key": null, "api_key": null}},
+        "provider_headers": {"const": "REVIEWED_DESTINATION_ENTRY_ONLY"},
+        "ignored_or_disabled": {"const": ["ALT_SVC", "HTTPS_SVCB", "ECH", "PRECONNECT", "HSTS", "PROXY_ENVIRONMENT", "PROXY_AUTOCONFIG", "HTTP2_COALESCING", "HTTP3_QUIC", "HAPPY_EYEBALLS", "HIDDEN_SDK_RETRY"]}
+      }
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner", "approval", "raw_key_returned", "operator_can_register_or_promote",
+        "registration_limit_per_hour", "registration_limit_per_day", "per_account_active_destinations",
+        "uniqueness", "risk_pending_activation_hours", "timer_alone_approves", "scheduled_revalidation_hours",
+        "revalidate_on", "authoritative_admission_state_required", "revoked_is_terminal",
+        "revocation_total_bound_seconds", "retention_authority", "erasure", "restore"
+      ],
+      "properties": {
+        "owner": {"const": "ACCOUNT_OWNER_ONLY_FRESH_STEP_UP"},
+        "approval": {"const": "ALL_CHECKS_CONSENT_GATE_EVIDENCE_AND_ACTIVE_STATE_NOT_JUST_PROBE"},
+        "raw_key_returned": {"$ref": "#/definitions/false"},
+        "operator_can_register_or_promote": {"$ref": "#/definitions/false"},
+        "registration_limit_per_hour": {"type": "integer", "const": 5},
+        "registration_limit_per_day": {"type": "integer", "const": 20},
+        "per_account_active_destinations": {"type": "integer", "const": 1},
+        "uniqueness": {"const": "DATABASE_CONSTRAINT"},
+        "risk_pending_activation_hours": {"type": "integer", "const": 24},
+        "timer_alone_approves": {"$ref": "#/definitions/false"},
+        "scheduled_revalidation_hours": {"type": "integer", "const": 24},
+        "revalidate_on": {"const": ["REGISTRATION_CHANGE", "POLICY_OR_INVENTORY_CHANGE", "FIRST_USE_AFTER_SUSPENSION", "EVERY_ATTEMPT"]},
+        "authoritative_admission_state_required": {"$ref": "#/definitions/true"},
+        "revoked_is_terminal": {"$ref": "#/definitions/true"},
+        "revocation_total_bound_seconds": {"type": "integer", "const": 60},
+        "retention_authority": {"const": "T-CMP-01_WITH_T-CMP-04_COUNSEL"},
+        "erasure": {"const": "SHRED_OR_PSEUDONYMIZE_PERSONAL_DESTINATION_FIELDS_RETAIN_AUDIT_CHAIN"},
+        "restore": {"const": "NO_RESURRECTED_KEYS_PINS_APPROVALS_OR_ON_FLAGS"}
+      }
+    },
+    "enums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DestinationClass", "CredentialHeader", "CustomDestinationState", "EgressDenialReason"],
+      "properties": {
+        "DestinationClass": {"const": ["code_managed_provider", "runtime_registered_custom"]},
+        "CredentialHeader": {"const": ["authorization_bearer", "x_api_key", "api_key"]},
+        "CustomDestinationState": {"const": ["pending_activation", "active", "suspended_resolution_changed", "suspended_validation_failed", "suspended_recovery", "suspended_kill_switch", "revoked"]},
+        "EgressDenialReason": {"const": ["destination_denied", "destination_not_registered", "destination_suspended", "destination_revoked", "destination_busy", "resolution_changed", "redirect_denied", "redirect_hop_limit", "tls_verification_failed", "unreachable", "kill_switch_active", "registration_rate_limited", "step_up_required", "pending_activation"]}
+      }
+    },
+    "state_denials": {
+      "const": {
+        "pending_activation": "pending_activation",
+        "suspended_resolution_changed": "resolution_changed",
+        "suspended_validation_failed": "destination_suspended",
+        "suspended_recovery": "destination_suspended",
+        "suspended_kill_switch": "kill_switch_active",
+        "revoked": "destination_revoked"
+      }
+    },
+    "kill_switch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store", "scopes", "seeded_global", "seeded_custom", "absent_malformed_or_deleted",
+        "runtime_or_admin_delete", "gateway_and_proxy_role", "freshness_seconds",
+        "stale_on_error_grace_seconds", "total_effect_bound_seconds", "global_off_stops", "off_operators",
+        "on", "single_operator_delayed_on", "startup", "suite_manifest"
+      ],
+      "properties": {
+        "store": {"const": "PRIMARY_DATABASE_PLATFORM_FLAG_STORE"},
+        "scopes": {"const": ["ai_egress_global", "custom_destinations_class", "destination"]},
+        "seeded_global": {"const": "off"},
+        "seeded_custom": {"const": "off"},
+        "absent_malformed_or_deleted": {"const": "OFF_AND_ALERT"},
+        "runtime_or_admin_delete": {"$ref": "#/definitions/false"},
+        "gateway_and_proxy_role": {"const": "READ_ONLY"},
+        "freshness_seconds": {"type": "integer", "const": 15},
+        "stale_on_error_grace_seconds": {"type": "integer", "const": 0},
+        "total_effect_bound_seconds": {"type": "integer", "const": 60},
+        "global_off_stops": {"const": ["INFERENCE_ALL_MODES", "DNS_TLS_PROBES", "REVALIDATION", "RETRIES", "OPEN_STREAMS"]},
+        "off_operators": {"const": ["ON_CALL_PLATFORM", "SECURITY_OPERATOR", "HOST_BREAK_GLASS_OFF", "OWNER_FOR_OWN_DESTINATION"]},
+        "on": {"const": "TWO_INDEPENDENT_ELIGIBLE_OPERATOR_PRINCIPALS_FRESH_STEP_UP_DURABLE_AUDIT_ALL_GATES"},
+        "single_operator_delayed_on": {"$ref": "#/definitions/false"},
+        "startup": {"const": "ALL_SCOPES_OFF_WITHOUT_FRESH_VERIFIED_STATE"},
+        "suite_manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signed_by", "max_lifetime_days", "bindings", "verify", "source_test_or_database_pass_row_is_proof"],
+          "properties": {
+            "signed_by": {"const": "RESTRICTED_RUNTIME_VERIFICATION_STAGE"},
+            "max_lifetime_days": {"type": "integer", "const": 7},
+            "bindings": {"const": ["environment", "build_image_digest", "source_consequences_digest", "policy_digest", "inventory_digest", "kernel_docker_nftables_configuration", "suite_run_id", "expires_at"]},
+            "verify": {"const": "PINNED_IDENTITY_OR_PUBLIC_KEY_AND_ACTUAL_RUNTIME_SUITE_EVIDENCE"},
+            "source_test_or_database_pass_row_is_proof": {"$ref": "#/definitions/false"}
+          }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload_forbidden", "question_redaction", "mode_a_shared_data", "mode_b_c_shared_data",
+        "transfer_consent", "provider_evidence", "durable_pre_egress_audit_required",
+        "emergency_off_blocked_by_audit_outage", "metrics", "restricted_audit"
+      ],
+      "properties": {
+        "payload_forbidden": {"const": ["RAW_MESSAGE_CONTENT", "RAW_DERIVED_DIGEST", "ACCOUNT_CARD_LOAN_NUMBER", "GOVERNMENT_IDENTIFIER", "UPI_VPA", "PHONE_OR_CONTACT", "INTERNAL_SUBJECT_IDENTIFIER", "COUNTERPARTY_OR_HOUSEHOLD_NAME", "DEVICE_ACCOUNT_SESSION_TENANT_IDENTIFIER", "CREDENTIAL_OR_KEY", "UNREDACTED_MEMO"]},
+        "question_redaction": {"const": "SAME_FINAL_EGRESS_BOUNDARY_REDACTION"},
+        "mode_a_shared_data": {"const": "EXISTING_LIVE_AUTHORIZED_GRANT"},
+        "mode_b_c_shared_data": {"const": "EXPLICIT_LIVE_PER_GRANT_AI_EGRESS_PERMISSION_DEFAULT_OFF"},
+        "transfer_consent": {"const": "VERSIONED_WITHDRAWABLE_NO_LEGAL_OR_OTHER_PRINCIPAL_OVERRIDE"},
+        "provider_evidence": {"const": ["retention_evidence_ref", "processor_agreement_ref"]},
+        "durable_pre_egress_audit_required": {"$ref": "#/definitions/true"},
+        "emergency_off_blocked_by_audit_outage": {"$ref": "#/definitions/false"},
+        "metrics": {"const": "BOUNDED_CLASS_MODE_REASON_ONLY_NO_HOST_ADDRESS_SUBJECT_OR_DESTINATION_LABELS"},
+        "restricted_audit": {"const": "ADR020_OPAQUE_STREAMS_SEPARATE_CLASSIFIED_ADDRESS_EVIDENCE"}
+      }
+    },
+    "audit_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_record", "authority_sha256", "implementation_state", "owner",
+        "foundational_event", "address_evidence", "custody_owners", "retention_owners",
+        "runtime_evidence_owners", "consumer_obligation"
+      ],
+      "properties": {
+        "authority_record": {"const": "ADR-020"},
+        "authority_sha256": {"const": "1beee6eb764fc61b9f8eca71e7eee8ddb5d0012908edaf8c1b3d13329d26a6c8"},
+        "implementation_state": {"const": "FUTURE_NOT_IMPLEMENTED"},
+        "owner": {"const": "T-SEC-03"},
+        "foundational_event": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store", "existing_fields", "schema", "reference_field", "resource_type",
+            "reference_kind", "address_values", "prohibited_evidence_forms", "origin",
+            "writer_bindings", "customer_actions", "system_actions", "system_writer_scope",
+            "projection", "erasure"
+          ],
+          "properties": {
+            "store": {"const": "audit.event"},
+            "existing_fields": {"const": ["audit_event_id", "occurred_at", "actor_class", "actor_principal_id", "subject_id", "action", "resource", "outcome", "reason_code", "policy_version", "data_classes", "origin", "related_event_id"]},
+            "schema": {"const": "ADR020_COMPLETE_TYPED_SCHEMA_NO_NEW_PAYLOAD_OR_ADDRESS_COLUMN"},
+            "reference_field": {"const": "resource.id"},
+            "resource_type": {"const": "ai_egress_evidence"},
+            "reference_kind": {"const": "SERVER_RANDOM_UUID_V4_NOT_VALUE_DERIVED"},
+            "address_values": {"const": "FORBIDDEN_IN_TRAIL_CHAIN_TRANSPARENCY_AND_COPIES"},
+            "prohibited_evidence_forms": {"const": ["ADDRESS_HOST_URL_DNS_ANSWER", "ADDRESS_HASH_OR_HMAC", "ADDRESS_CIPHERTEXT", "EVIDENCE_PLAINTEXT_DIGEST", "PACKET_OR_PROVIDER_PAYLOAD"]},
+            "origin": {"const": "ADR020_OPAQUE_OPERATOR_ORIGIN_NOT_DESTINATION"},
+            "writer_bindings": {"const": {"consent.*": "pennilogic_app", "audit.*": "chain_verifier", "admin.*": "admin_api_owner", "redaction.*": "redaction_service", "broker.*": "T-PLT-05"}},
+            "customer_actions": {"const": "CONSENT_EGRESS_LIFECYCLE_WITH_REAL_OWNER_AUTHORITY"},
+            "system_actions": {"const": "AUDIT_VERIFICATION_EGRESS_WITH_SYSTEM_ACTOR_AND_VERIFIED_JOB"},
+            "system_writer_scope": {"const": "VERIFICATION_EVENT_ONLY_NO_DOMAIN_STATE_OR_CIPHERTEXT_WRITE"},
+            "projection": {"const": "ADR020_EXISTING_NAMESPACE_SCOPE_NO_EVIDENCE_DEREFERENCE"},
+            "erasure": {"const": "TRAIL_CHAIN_UNCHANGED_ONLY_ADR020_TRANSPARENCY_ERASURE_STEP"}
+          }
+        },
+        "address_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store", "authority", "classification", "constrained_columns", "encrypted_values",
+            "payloads", "customer_key_scope", "system_key_scope", "system_key_originator_months",
+            "system_rows", "intake",
+            "maintenance_sealing", "write_order", "phase_order", "orphan_stage",
+            "value_read_access", "rls", "retention", "retention_profile_fields",
+            "missing_retention_profile", "expiry", "erasure", "restore", "missing_evidence"
+          ],
+          "properties": {
+            "store": {"const": "ai_egress_evidence"},
+            "authority": {"const": "NONAUTHORITATIVE_ERASABLE_EVIDENCE_NOT_FOURTH_AUDIT_STREAM"},
+            "classification": {"const": "PERSONAL_DESTINATION_NETWORK_METADATA_NOT_ANONYMOUS"},
+            "constrained_columns": {"const": ["evidence_id", "audit_event_id", "owner_id", "created_at", "expires_at", "retention_profile_version", "phase", "key_id"]},
+            "encrypted_values": {"const": ["REQUEST_JOB_DESTINATION_RESOLUTION_LINKS", "CANONICAL_HOST_AND_COMPLETE_ADDRESS_SET", "AUTHORIZED_PIN_AND_OBSERVED_SOCKET_PEER", "TLS_IDENTITY_AND_VERDICT", "NAMESPACE_RULE_PATH_AND_SYNTHETIC_SINK_OBSERVATIONS", "BYTE_STATUS_TIMING_AND_LAST_BYTE_CONFIRMED_CLOSE_EVIDENCE"]},
+            "payloads": {"const": "NO_KEYS_HEADERS_PROMPTS_RAW_LOCATION_RESPONSE_OR_PACKET_PAYLOAD"},
+            "customer_key_scope": {"const": "ADR018_OWNER_DEK_AND_AAD_NO_PLATFORM_REWRAP"},
+            "system_key_scope": {"const": "DEPLOYMENT_ONLY_SEPARATE_CUSTODIAN_WRAPPED_DEK_NO_CUSTOMER_LINKS"},
+            "system_key_originator_months": {"type": "integer", "const": 12},
+            "system_rows": {"const": "NO_CUSTOMER_OWNER_OR_LINKS_VERIFIED_DEPLOYMENT_JOB_ONLY"},
+            "intake": {"const": "AUTHENTICATED_TYPED_CORE_INTAKE_NO_GATEWAY_DATABASE_ROLE"},
+            "maintenance_sealing": {"const": "EVIDENCE_ONLY_VERIFIED_OWNER_KEYOPS_JOB_NO_USER_DELEGATION_OR_VERIFIER_UNWRAP"},
+            "write_order": {"const": "DURABLE_EVIDENCE_STAGE_THEN_EXISTING_WRITER_EVENT_COMMIT_BEFORE_ADMISSION"},
+            "phase_order": {"const": "COMMITTED_INTENT_BEFORE_NETWORK_OBSERVATIONS_AFTER_PHASE_NO_NEXT_PHASE_ON_RECORD_FAILURE"},
+            "orphan_stage": {"const": "NO_ADMISSION_RECEIPT_EXPIRE_AND_DELETE_NEVER_REUSE_REFERENCE"},
+            "value_read_access": {"const": "ADR020_RECORDED_CHAIN_CONFIRMED_REDACTION_PATH_NO_AUDIT_READER_DECRYPT"},
+            "rls": {"const": "FORCED_OWNER_OR_RECORDED_SUBJECT_SCOPE_NO_CROSS_OWNER_OR_ADMIN_CIPHERTEXT"},
+            "retention": {"const": "TCMP01_COUNSEL_APPROVED_INDEPENDENT_FINITE_EVIDENCE_AND_RESOLUTION_PROFILE"},
+            "retention_profile_fields": {"const": ["live_evidence_period", "post_revocation_evidence_period", "uncommitted_stage_period", "resolution_link_period", "backup_expiry_bound"]},
+            "missing_retention_profile": {"const": "DENY_NEW_EGRESS_KEEP_EMERGENCY_OFF_AVAILABLE"},
+            "expiry": {"const": "DELETE_EVIDENCE_AND_RESOLUTION_LINKS_AND_DERIVED_COPIES"},
+            "erasure": {"const": "ADR021_DELETE_EVIDENCE_AND_RESOLUTION_LINKS_SHRED_OWNER_DEK"},
+            "restore": {"const": "REPLAY_ERASURE_AND_EXPIRY_BEFORE_ACCESS_NO_RESOLUTION_OR_ACTIVE_STATE_RESURRECTION"},
+            "missing_evidence": {"const": "REPORT_EXPIRED_ERASED_OR_UNAVAILABLE_NEVER_RECONSTRUCT_OR_CLAIM_PROOF"}
+          }
+        },
+        "custody_owners": {"const": ["T-PLT-03", "T-PLT-02", "T-PLT-05"]},
+        "retention_owners": {"const": ["T-CMP-01", "T-CMP-04"]},
+        "runtime_evidence_owners": {"const": ["T-AI-01", "T-AI-02", "T-AI-03", "T-PLT-01"]},
+        "consumer_obligation": {"const": "VERSION_FORWARD_TYPED_EVENTS_AND_CRYPTO_ERASURE_INVENTORIES_NO_RUNTIME_COMPLETION_CLAIM"}
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revocation_measure", "verification_interval_hours", "missed_verification_alert_hours",
+        "failed_or_overdue_verification",
+        "verification_contexts", "config_file_or_unreachable_host_is_proof"
+      ],
+      "properties": {
+        "revocation_measure": {"const": "AUTHORITATIVE_CHANGE_TO_ALL_AFFECTED_CONNECTIONS_CLOSED_AND_NO_BYTES_EITHER_DIRECTION"},
+        "verification_interval_hours": {"type": "integer", "const": 24},
+        "missed_verification_alert_hours": {"type": "integer", "const": 25},
+        "failed_or_overdue_verification": {"const": "CLOSE_ADMISSION_REVOKE_WITHIN_TOTAL_BOUND_AND_ALERT_NO_RENEWAL"},
+        "verification_contexts": {"const": ["ACTUAL_GATEWAY_NAMESPACE", "ACTUAL_PROXY_NAMESPACE"]},
+        "config_file_or_unreachable_host_is_proof": {"$ref": "#/definitions/false"}
+      }
+    },
+    "runtime_gates": {
+      "type": "array", "minItems": 20, "maxItems": 20, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "evidence", "owners"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^T(?:[1-9]|1[0-9]|20)$"},
+          "evidence": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+          "owners": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/definitions/plan_identity"}}
+        }
+      }
+    },
+    "source_normalization_vectors": {
+      "type": "object", "additionalProperties": false,
+      "required": ["literal_hosts_denied", "post_idna_literal_outputs", "post_idna_test_scope"],
+      "properties": {
+        "literal_hosts_denied": {
+          "const": ["169.254.169.254", "169.254.170.2", "2852039166", "0251.0376.0251.0376", "0xA9FEA9FE", "0xA9.0xFE.0xA9.0xFE", "0x7f.0.0.1", "169.254.43518", "127.1", "0127.0.0.01", "[::1]", "::ffff:a9fe:a9fe", "::ffff:169.254.169.254", "fe80::1%eth0", "0x"]
+        },
+        "post_idna_literal_outputs": {
+          "const": [
+            {"input": "\uff11\uff12\uff17\u3002\uff10\u3002\uff10\u3002\uff11", "a_label": "127.0.0.1"},
+            {"input": "\uff10\uff58\uff17\uff46\u3002\uff10\u3002\uff10\u3002\uff11", "a_label": "0x7f.0.0.1"}
+          ]
+        },
+        "post_idna_test_scope": {"const": "LITERAL_GUARD_ON_PUBLISHED_OUTPUT_NOT_UTS46_EXECUTION"}
+      }
+    },
+    "delivery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prerequisites", "epics", "consumers", "unimplemented_gaps", "replacement_tickets", "remote_updates_claimed", "independent_approval_claimed"],
+      "properties": {
+        "prerequisites": {"const": ["PenniLogic/docs#141", "PenniLogic/docs#70", "PenniLogic/infra#3"]},
+        "epics": {"const": ["PenniLogic/docs#29", "PenniLogic/docs#18", "PenniLogic/docs#19", "PenniLogic/docs#27"]},
+        "consumers": {
+          "type": "array", "minItems": 31, "maxItems": 31, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["identity", "issue"],
+            "properties": {
+              "identity": {"$ref": "#/definitions/plan_identity"},
+              "issue": {"type": "string", "pattern": "^PenniLogic/(docs|api|infra|ai-service|contracts|admin|web|android)#[1-9][0-9]*$"}
+            }
+          }
+        },
+        "unimplemented_gaps": {"const": ["H1_APPLICATION_CONSUMERS", "H2_RUNTIME_AND_PIPELINE_CONSUMERS"]},
+        "replacement_tickets": {"$ref": "#/definitions/empty"},
+        "remote_updates_claimed": {"$ref": "#/definitions/false"},
+        "independent_approval_claimed": {"$ref": "#/definitions/false"}
+      }
+    }
+  },
+  "definitions": {
+    "false": {"type": "boolean", "const": false},
+    "true": {"type": "boolean", "const": true},
+    "empty": {"type": "array", "maxItems": 0},
+    "plan_identity": {"type": "string", "pattern": "^T-[A-Z]+(?:-[A-Z]+)*-[0-9]{2}$"}
+  }
+}

@@ -129,6 +129,10 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
     """Publish a typed policy table from the canonical catalogue, never hand-maintained client copies."""
     header = "Generated from spec/error-catalogue.v1.json by scripts/generate_clients.py; do not edit."
     entries = catalogue["codes"]
+    authentication = catalogue["authentication_codes"]
+    reason_codes = catalogue["egress_binding"]["reason_codes"]
+    if any(entry["state"] is not None or entry["classification"] != "authentication_owned" for entry in authentication):
+        raise PipelineError("authentication catalogue is outside the service-state projection")
     if language == "python":
         rows = "".join(
             f'    ProblemCode.{entry["code"].upper()}: ErrorPolicy('
@@ -137,6 +141,14 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             f'RetryClass.{entry["retry_class"].upper()}, IdempotencyTreatment.{entry["idempotency"].upper()}),\n'
             for entry in entries
         )
+        authentication_rows = "".join(
+            f'    ProblemCode.{entry["code"].upper()}: AuthenticationPolicy('
+            f'{entry["status"]}, {json.dumps(entry["title"])}, {json.dumps(entry["detail"])}, '
+            f'{json.dumps(entry["condition"])}, {json.dumps(entry["flow"])}),\n'
+            for entry in authentication
+        )
+        egress_rows = "".join(f"    EgressDenialReason.{reason.upper()}: ProblemCode.{code.upper()},\n"
+                              for reason, code in reason_codes.items())
         return "pennilogic_contracts/error_catalogue.py", (
             f'"""{header}"""\n\nfrom __future__ import annotations\n\n'
             "from dataclasses import dataclass\nfrom types import MappingProxyType\n"
@@ -146,13 +158,24 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "from pennilogic_contracts.models.client_state import ClientState\n"
             "from pennilogic_contracts.models.retry_class import RetryClass\n"
             "from pennilogic_contracts.models.idempotency_treatment import IdempotencyTreatment\n\n\n"
+            "from pennilogic_contracts.models.egress_denial_reason import EgressDenialReason\n\n\n"
             "@dataclass(frozen=True)\nclass ErrorPolicy:\n"
             "    status: int\n    title: str\n    detail: str\n    state: ClientState\n"
             "    retryable: bool\n    retry_class: RetryClass\n    idempotency: IdempotencyTreatment\n\n\n"
             f"ERROR_POLICIES: Final[Mapping[ProblemCode, ErrorPolicy]] = MappingProxyType({{\n{rows}}})\n\n\n"
+            "@dataclass(frozen=True)\nclass AuthenticationPolicy:\n"
+            "    status: int\n    title: str\n    detail: str\n    condition: str\n    flow: str\n    state: None = None\n\n\n"
+            f"AUTHENTICATION_POLICIES: Final[Mapping[ProblemCode, AuthenticationPolicy]] = MappingProxyType({{\n{authentication_rows}}})\n"
+            f"EGRESS_CODES: Final[Mapping[EgressDenialReason, ProblemCode]] = MappingProxyType({{\n{egress_rows}}})\n\n\n"
             "def error_policy(code: ProblemCode) -> ErrorPolicy:\n"
-            "    if not isinstance(code, ProblemCode):\n        raise TypeError('problem code rejected')\n"
+            "    if not isinstance(code, ProblemCode) or code not in ERROR_POLICIES:\n        raise TypeError('problem code rejected')\n"
             "    return ERROR_POLICIES[code]\n\n\n"
+            "def authentication_policy(code: ProblemCode) -> AuthenticationPolicy:\n"
+            "    if not isinstance(code, ProblemCode) or code not in AUTHENTICATION_POLICIES:\n        raise TypeError('authentication code rejected')\n"
+            "    return AUTHENTICATION_POLICIES[code]\n\n\n"
+            "def egress_problem_code(reason: EgressDenialReason) -> ProblemCode:\n"
+            "    if not isinstance(reason, EgressDenialReason):\n        raise TypeError('egress reason rejected')\n"
+            "    return EGRESS_CODES[reason]\n\n\n"
             "def error_status(code: ProblemCode, field: ProblemField | None = None) -> int:\n"
             "    if code == ProblemCode.VALIDATION_REJECTED and field == ProblemField.DUPLICATE_OVERRIDE:\n        return 400\n"
             "    return error_policy(code).status\n\n\n"
@@ -166,17 +189,32 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             f'RetryClass.{entry["retry_class"].upper()}, IdempotencyTreatment.{entry["idempotency"].upper()}),\n'
             for entry in entries
         )
+        authentication_rows = "".join(
+            f'        ProblemCode.{entry["code"].upper()} to AuthenticationPolicy('
+            f'{entry["status"]}, {json.dumps(entry["title"])}, {json.dumps(entry["detail"])}, '
+            f'{json.dumps(entry["condition"])}, {json.dumps(entry["flow"])}),\n'
+            for entry in authentication
+        )
+        egress_rows = "".join(f"        EgressDenialReason.{reason.upper()} to ProblemCode.{code.upper()},\n"
+                              for reason, code in reason_codes.items())
         return "src/main/kotlin/com/pennilogic/contracts/errors/ErrorCatalogue.kt", (
             f"// {header}\npackage com.pennilogic.contracts.errors\n\n"
             "import com.pennilogic.contracts.models.ProblemCode\nimport com.pennilogic.contracts.models.ClientState\n"
             "import com.pennilogic.contracts.models.ProblemField\n"
+            "import com.pennilogic.contracts.models.EgressDenialReason\n"
             "import com.pennilogic.contracts.models.RetryClass\nimport com.pennilogic.contracts.models.IdempotencyTreatment\n"
             "import java.util.UUID\n\n"
             "data class ErrorPolicy(val status: Int, val title: String, val detail: String, "
             "val state: ClientState, val retryable: Boolean, val retryClass: RetryClass, "
             "val idempotency: IdempotencyTreatment)\n\n"
+            "data class AuthenticationPolicy(val status: Int, val title: String, val detail: String, "
+            "val condition: String, val flow: String, val state: Nothing? = null)\n\n"
             f"object ErrorCatalogue {{\n    private val policies = mapOf(\n{rows}    )\n\n"
-            "    fun policy(code: ProblemCode): ErrorPolicy = policies.getValue(code)\n"
+            f"    private val authenticationPolicies = mapOf(\n{authentication_rows}    )\n"
+            f"    private val egressCodes = mapOf(\n{egress_rows}    )\n\n"
+            '    fun policy(code: ProblemCode): ErrorPolicy = policies[code] ?: throw IllegalArgumentException("problem code rejected")\n'
+            '    fun authenticationPolicy(code: ProblemCode): AuthenticationPolicy = authenticationPolicies[code] ?: throw IllegalArgumentException("authentication code rejected")\n'
+            "    fun egressProblemCode(reason: EgressDenialReason): ProblemCode = egressCodes.getValue(reason)\n"
             "    fun status(code: ProblemCode, field: ProblemField? = null): Int =\n"
             "        if (code == ProblemCode.VALIDATION_REJECTED && field == ProblemField.DUPLICATE_OVERRIDE) 400 else policy(code).status\n"
             '    fun newCorrelationId(): String = "cor_${UUID.randomUUID()}"\n}\n'
@@ -185,6 +223,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
         def symbol(value: str) -> str:
             return "".join(word.capitalize() for word in value.split("_"))
 
+        service_keys = " | ".join(f'ProblemCode.{symbol(entry["code"])}' for entry in entries)
         rows = "".join(
             f'    [ProblemCode.{symbol(entry["code"])}]: Object.freeze({{ status: {entry["status"]}, '
             f'title: {json.dumps(entry["title"])}, detail: {json.dumps(entry["detail"])}, '
@@ -193,19 +232,41 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             f'idempotency: IdempotencyTreatment.{symbol(entry["idempotency"])} }}),\n'
             for entry in entries
         )
+        authentication_rows = "".join(
+            f'    [ProblemCode.{symbol(entry["code"])}]: Object.freeze({{ status: {entry["status"]}, '
+            f'title: {json.dumps(entry["title"])}, detail: {json.dumps(entry["detail"])}, '
+            f'condition: {json.dumps(entry["condition"])}, flow: {json.dumps(entry["flow"])}, state: null }}),\n'
+            for entry in authentication
+        )
+        egress_rows = "".join(f"    [EgressDenialReason.{symbol(reason)}]: ProblemCode.{symbol(code)},\n"
+                              for reason, code in reason_codes.items())
         return "src/errorCatalogue.ts", (
             f"// {header}\nimport {{ ProblemCode }} from './models/ProblemCode.js';\n"
             "import { ProblemField } from './models/ProblemField.js';\n"
+            "import { EgressDenialReason } from './models/EgressDenialReason.js';\n"
             "import { ClientState } from './models/ClientState.js';\n"
             "import { RetryClass } from './models/RetryClass.js';\n"
             "import { IdempotencyTreatment } from './models/IdempotencyTreatment.js';\n\n"
             "export interface ErrorPolicy {\n    readonly status: number;\n    readonly title: string;\n"
             "    readonly detail: string;\n    readonly state: ClientState;\n    readonly retryable: boolean;\n"
             "    readonly retryClass: RetryClass;\n    readonly idempotency: IdempotencyTreatment;\n}\n\n"
-            f"export const ERROR_POLICIES: Readonly<Record<ProblemCode, ErrorPolicy>> = Object.freeze({{\n{rows}}});\n\n"
+            "export interface AuthenticationPolicy {\n    readonly status: number;\n    readonly title: string;\n"
+            "    readonly detail: string;\n    readonly condition: string;\n    readonly flow: string;\n    readonly state: null;\n}\n\n"
+            f"export type ServiceProblemCode = {service_keys};\n\n"
+            f"export const ERROR_POLICIES: Readonly<Record<ServiceProblemCode, ErrorPolicy> & Partial<Record<ProblemCode, ErrorPolicy>>> = Object.freeze({{\n{rows}}});\n"
+            f"export const AUTHENTICATION_POLICIES: Readonly<Partial<Record<ProblemCode, AuthenticationPolicy>>> = Object.freeze({{\n{authentication_rows}}});\n"
+            f"export const EGRESS_CODES: Readonly<Record<EgressDenialReason, ProblemCode>> = Object.freeze({{\n{egress_rows}}});\n\n"
             "export function errorPolicy(code: ProblemCode): ErrorPolicy {\n"
-            "    if (!Object.prototype.hasOwnProperty.call(ERROR_POLICIES, code)) throw new TypeError('problem code rejected');\n"
-            "    return ERROR_POLICIES[code];\n}\n\n"
+            "    const policy = ERROR_POLICIES[code];\n"
+            "    if (!Object.prototype.hasOwnProperty.call(ERROR_POLICIES, code) || policy === undefined) throw new TypeError('problem code rejected');\n"
+            "    return policy;\n}\n\n"
+            "export function authenticationPolicy(code: ProblemCode): AuthenticationPolicy {\n"
+            "    const policy = AUTHENTICATION_POLICIES[code];\n"
+            "    if (!Object.prototype.hasOwnProperty.call(AUTHENTICATION_POLICIES, code) || policy === undefined) throw new TypeError('authentication code rejected');\n"
+            "    return policy;\n}\n\n"
+            "export function egressProblemCode(reason: EgressDenialReason): ProblemCode {\n"
+            "    if (!Object.prototype.hasOwnProperty.call(EGRESS_CODES, reason)) throw new TypeError('egress reason rejected');\n"
+            "    return EGRESS_CODES[reason];\n}\n\n"
             "export function errorStatus(code: ProblemCode, field?: ProblemField): number {\n"
             "    return code === ProblemCode.ValidationRejected && field === ProblemField.DuplicateOverride ? 400 : errorPolicy(code).status;\n}\n\n"
             "export function newCorrelationId(): string {\n    return 'cor_' + globalThis.crypto.randomUUID();\n}\n"
@@ -478,6 +539,12 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
             "count": len(declarations["generation_examples"]),
             "budget": declarations["generation_budget"],
             "validated_generation_only_annotations": True,
+        }
+        manifest["generation_model_projection"] = {
+            "models": declarations["generation_model_projection"],
+            "input_sha256": sha256_bytes(generator_spec.read_bytes()),
+            "runtime_constraints_sha256": sha256_bytes(json.dumps(declarations["schemas"], sort_keys=True).encode("utf-8")),
+            "source_constraints_retained": True,
         }
     (output / MANIFEST_NAME).write_bytes((json.dumps(manifest, indent=2, sort_keys=False) + "\n").encode("utf-8"))
     return manifest

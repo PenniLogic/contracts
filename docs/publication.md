@@ -25,8 +25,8 @@ A GitHub Release with the same tag carries, for convenience and audit: the speci
 (specification version and SHA-256, commit, provider-source SHA-256 bindings, generator name/version/jar SHA-256, per-archive SHA-256
 and generated-tree SHA-256) and `SHA256SUMS`.
 
-The local `0.2.0` provider preparation does not authorise publication and is not a released
-client. Original consumer adoption, separate review, native CI/dependency conditions and
+The accepted `0.2.0` provider source and local combined `0.3.0` preparation do not authorise
+publication and are not released clients. Original consumer adoption, separate review, native CI/dependency conditions and
 the PenniLogic/infra#22 hold remain pending; see [provider-contracts.md](provider-contracts.md).
 The provider companions ship beside the standalone specification and inside each client
 archive, so a pinned consumer can run the same catalogue/import lint and conformance checks.
@@ -86,7 +86,7 @@ from it with the contracts-provided script, one invocation per language:
 ```text
 git clone --branch vX.Y.Z --depth 1 https://github.com/PenniLogic/contracts.git
 cd contracts
-npm ci --no-audit --no-fund          # only needed for lint; generation needs Python 3.14 and a JDK 21
+npm ci --no-audit --no-fund          # integrity-pinned parser and lint dependencies
 python scripts/toolchain.py install  # downloads and verifies the pinned generator
 python scripts/generate_clients.py --language kotlin      # or typescript / python
 ```
@@ -96,6 +96,24 @@ same tag (compare `contracts-manifest.json` `tree_sha256` with `release-manifest
 never generate from a branch and never edit generated output; the hand-written `Money` and `Instant`
 seams ship inside the generated client and are the only place money or instants are parsed or
 rendered (ADR-015 §2).
+
+### Unreleased combined source adoption
+
+AA8 (`aa8d90cb`) and accepted provider (`5b41d458`) source consumers remain pinned unchanged.
+The local `0.3.0` source/error-group `1.1.0` preparation is an expand candidate, not a migrated
+consumer, published tag, release or deployment. Future adoption requires actual regeneration
+and correct authentication-versus-service routing before new codes are emitted. Older consumer
+pins must not receive those new codes. No old wire shape has been removed, so no contract-stage
+acknowledgement is authorized or claimed.
+
+The `1ce4acd5` freeze's seven accepted-provider comparison findings and generated-public-API
+failures remain historical evidence. The correction restores total TypeScript service-policy
+lookups and the accepted Kotlin primary constructor/copy/component order and inline helper
+exports. A separate bounded source proof now demonstrates that the new fixed `egress_denied`
+branch, its nested import uses and shared response preserve the old domain. The genuine
+accepted-`5b41d458` comparison passes without an acknowledgement; the diff-only detector still
+reports all seven findings. This is not proof that old enum readers accept new values, binary
+ABI certification, consumer migration, independent final-head review or publication acceptance.
 
 ## Rollback
 
@@ -151,6 +169,42 @@ machine-readably.
 
 Adding optional properties, endpoints, enum values, registry currencies, examples or descriptions;
 relaxing a constraint; adding a response. These pass the check and need a MINOR bump.
+The response-schema proof recognizes complete, nonempty, duplicate-free scalar enum additions
+and inert description changes through otherwise unchanged properties/items and identified allOf
+members. Deleted/replaced values, new enum constraints, partial/malformed/unknown records,
+requiredness, type/ref/pattern changes, conditionals/`not`, changed compositions and response
+metadata remain unproved or breaking. Structured enum-value changes are also kept for review.
+
+### Bounded source-backed conditional expansion
+
+An appended `allOf` branch is not inherently additive. The additional proof in
+`scripts/schema_compatibility.py` uses both complete OpenAPI 3.1.0 documents and the exact pinned
+oasdiff records, including changed reference dependencies. It requires an unconditional object
+with a required finite, nonempty string discriminator, unchanged old constraints and composition
+prefix, and only exact `if`/`then` additions guarded by disjoint new tags outside the old upper
+bound. Consequences contain only fixed scalar `const`/`enum` property assertions. A positive
+enum intersection may retain the global public type while excluding unrelated new values.
+Every old permitted value and every other scalar constraint and reference identity is retained.
+
+The proof separately checks response envelope, media, metadata and metadata-reference closure.
+Unknown or partial records, duplicate values/identities, unsupported dialects or schema keywords,
+external/cyclic/dynamic references, evaluation-sensitive constructs and changes propagated
+through old `if`/`not`/unions do not qualify. Existing conditional constraints may remain only
+with their complete reference closures unchanged. Bounded-work/depth refusals remain findings;
+there is no component-name/code-value allowlist or blanket composition exemption.
+
+Before either detector runs, numeric source spans from the pinned parser's AST are compared
+exactly with its serialized numeric values using standard-library decimal arithmetic. Inputs
+whose precision, finiteness or numeric spelling cannot be preserved are refused rather than
+silently rounded into an apparently unchanged constraint. This is source-parse validation,
+not a runtime money codec or a request/JCS canonicalization implementation. Only JSON numeric
+spellings qualify in either JSON or YAML input; YAML-only forms such as hexadecimal and
+leading-zero numerals remain outside the cross-parser proof.
+
+This is a limited old-domain preservation proof, not a general JSON Schema implication engine
+or an assertion that every new branch is usable. Actual schema/native positive and negative
+controls remain necessary. No new operation-level oasdiff finding is waived, and the existing
+acknowledgement, version-bump and adoption rules are unchanged.
 
 ## Compatibility of the check itself
 

@@ -18,9 +18,12 @@ class ErrorProviderTest {
         }
     }
     private val fixture = Fixtures.load("error-provider.v1.json")
-    private val entries = PennilogicJson.json.parseToJsonElement(
-        File(Fixtures.root, "spec/error-catalogue.v1.json").readText()).jsonObject["codes"]!!.jsonArray
+    private val catalogue = PennilogicJson.json.parseToJsonElement(
+        File(Fixtures.root, "spec/error-catalogue.v1.json").readText()).jsonObject
+    private val entries = catalogue["codes"]!!.jsonArray
         .associate { it.jsonObject["code"]!!.jsonPrimitive.content to it.jsonObject }
+    private val authentication = catalogue["authentication_codes"]!!.jsonArray
+        .map { it.jsonObject["code"]!!.jsonPrimitive.content }.toSet()
 
     private fun examples(): Map<String, JsonObject> =
         fixture["examples"]!!.jsonArray.associate { value ->
@@ -35,7 +38,13 @@ class ErrorProviderTest {
         }
 
     @Test fun codesExposeTypedStateAndSafeRetryPolicy() {
-        assertEquals(entries.keys, ProblemCode.entries.map { it.value }.toSet())
+        assertEquals(entries.keys + authentication, ProblemCode.entries.map { it.value }.toSet())
+        assertTrue(entries.keys.intersect(authentication).isEmpty())
+        ProblemCode.entries.filter { it.value in authentication }.forEach { code ->
+            assertNull(ErrorCatalogue.authenticationPolicy(code).state)
+            assertEquals("authentication_required", ErrorCatalogue.authenticationPolicy(code).flow)
+            assertFailsWith<IllegalArgumentException> { ErrorCatalogue.policy(code) }
+        }
         val state: ClientState = ErrorCatalogue.policy(ProblemCode.DEPENDENCY_UNAVAILABLE).state
         assertEquals(ClientState.ERROR, state)
         val mismatch = ErrorCatalogue.policy(ProblemCode.IDEMPOTENCY_PAYLOAD_MISMATCH)

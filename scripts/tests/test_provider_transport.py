@@ -59,7 +59,7 @@ class ProviderTransportSchemaTest(unittest.TestCase):
         schemas = schema_document()["components"]["schemas"]
         marked = {name for name, schema in schemas.items() if schema.get("x-pennilogic-strict-provider") is True}
         self.assertEqual(marked, {name for name, _ in samples()})
-        self.assertEqual(len(marked), 19)
+        self.assertEqual(len(marked), 29)
         self.assertNotIn("Money", marked)
         self.assertNotIn("ProblemDetail", marked)
         for name in marked:
@@ -73,6 +73,8 @@ class ProviderTransportSchemaTest(unittest.TestCase):
         for name, wire in samples():
             cases.append({"name": name, "schema": name, "wire": wire})
             expected.append(True)
+            cases.append({"name": name + " null root", "schema": name, "wire": None})
+            expected.append(False)
             for invalid in ({**wire, "provider_detail": "PRIVATE_SYNTHETIC_CANARY"},
                             {**wire, "PRIVATE_SYNTHETIC_CANARY": "synthetic"}):
                 cases.append({"name": name + " unknown member", "schema": name, "wire": invalid})
@@ -110,12 +112,12 @@ class ProviderTransportSchemaTest(unittest.TestCase):
             if isinstance(value, list)
         }
         self.assertEqual(represented, declared)
-        self.assertEqual(len(declared), 7)
+        self.assertEqual(len(declared), 11)
         cases = [
             {"name": name + " null array entry", "schema": name, "wire": invalid}
             for name, wire in samples(arrays=True) for invalid in null_array_entries(wire)
         ]
-        self.assertEqual(len(cases), 11)
+        self.assertEqual(len(cases), 15)
         self.assertFalse(any(result["valid"] for result in schema_results(cases)))
 
     def test_generated_models_wire_guards_on_every_closed_provider(self) -> None:
@@ -148,7 +150,9 @@ class ProviderWiringNegativeTest(unittest.TestCase):
                 text = replace_once(spec_text(), anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
                 result = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("strict generated conversion and serialization", result.stderr)
+                expected = ("must select x-pennilogic-strict-provider" if name.startswith("CustomDestination")
+                            else "strict generated conversion and serialization")
+                self.assertIn(expected, result.stderr)
 
     def test_a_local_copy_without_runtime_metadata_still_fails_inline_duplicate_guard(self) -> None:
         shape = schema_document()["components"]["schemas"]["DedupOutcome"]

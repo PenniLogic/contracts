@@ -46,6 +46,16 @@ const codecs: Readonly<Record<string, Codec>> = {
     ImportCommitRow: codec(models.ImportCommitRowFromJSON, models.ImportCommitRowToJSON),
     ImportCommitCounts: codec(models.ImportCommitCountsFromJSON, models.ImportCommitCountsToJSON),
     ImportCommitResult: codec(models.ImportCommitResultFromJSON, models.ImportCommitResultToJSON),
+    CustomDestinationRegistrationRequest: codec(models.CustomDestinationRegistrationRequestFromJSON, models.CustomDestinationRegistrationRequestToJSON),
+    CustomDestinationLifecycleRequest: codec(models.CustomDestinationLifecycleRequestFromJSON, models.CustomDestinationLifecycleRequestToJSON),
+    CustomDestination: codec(models.CustomDestinationFromJSON, models.CustomDestinationToJSON),
+    CustomDestinationValidationResult: codec(models.CustomDestinationValidationResultFromJSON, models.CustomDestinationValidationResultToJSON),
+    CustomDestinationModel: codec(models.CustomDestinationModelFromJSON, models.CustomDestinationModelToJSON),
+    CustomDestinationList: codec(models.CustomDestinationListFromJSON, models.CustomDestinationListToJSON),
+    EgressDeniedProblemDetail: codec(models.EgressDeniedProblemDetailFromJSON, models.EgressDeniedProblemDetailToJSON),
+    AuthenticationProblemDetail: codec(models.AuthenticationProblemDetailFromJSON, models.AuthenticationProblemDetailToJSON),
+    AuthenticationRequiredProblemDetail: codec(models.AuthenticationRequiredProblemDetailFromJSON, models.AuthenticationRequiredProblemDetailToJSON),
+    OperationProblemDetail: codec(models.OperationProblemDetailFromJSON, models.OperationProblemDetailToJSON),
 };
 function sample(entry: Specimen): Record<string, unknown> {
     let value: unknown = loadFixture<unknown>(entry.fixture);
@@ -191,7 +201,18 @@ test('every nested marked-provider model and primitive array rejects absent and 
             cases += 1;
         }
     }
-    assert.equal(cases, 33);
+    assert.equal(cases, 45);
+});
+
+test('all marked roots reject null in ordinary conversion and generated response transport', async () => {
+    assert.equal(transport.models.length, 29);
+    for (const entry of transport.models) {
+        const transform = codecs[entry.schema]; assert.ok(transform);
+        assert.throws(() => transform.decode(null), safe, entry.schema);
+        assert.throws(() => transform.encode(null), safe, entry.schema);
+        await assert.rejects(new JSONApiResponse(new Response('null'), transform.decode).value(), safe);
+    }
+    assert.equal(models.ProblemDetailFromJSON(null), null);
 });
 
 test('optional undefined properties still omit normally while null and unknown members stay strict', () => {
@@ -239,7 +260,7 @@ test('ordinary generated import conversion rejects nested closed-provider extras
 });
 
 test('every closed provider rejects original extras through ordinary conversion, write and transport', async () => {
-    assert.equal(transport.models.length, 19);
+    assert.equal(transport.models.length, 29);
     assert.deepEqual(Object.keys(codecs).sort(), transport.models.map((item) => item.schema).sort());
     for (const entry of transport.models) {
         const transform = codecs[entry.schema];

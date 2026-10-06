@@ -6,6 +6,7 @@ import json
 import pprint
 from enum import Enum
 from typing import Any, ClassVar, Mapping, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ModelWrapValidatorHandler, ValidationError, model_serializer, model_validator
 
@@ -25,6 +26,8 @@ def _wire_value(value: Any) -> Any:
         return value._provider_payload()
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, (Money, Instant, LocalDate)):
         return value.to_wire()
     if isinstance(value, list):

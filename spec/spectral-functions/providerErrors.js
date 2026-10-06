@@ -2,7 +2,35 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { HTTP_METHODS } = require("./_shared");
+const Ajv = require("ajv/dist/2020");
+const addFormats = require("ajv-formats");
+const { HTTP_METHODS, resolveLocalRef } = require("./_shared");
+
+const FAMILIES = new Set(["ServiceProblemDetail", "EgressDeniedProblemDetail",
+  "AuthenticationProblemDetail", "AuthenticationRequiredProblemDetail", "OperationProblemDetail"]);
+
+function resolve(value, document, visited = new Set()) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (value.$ref === undefined) return value;
+  if (visited.has(value.$ref)) return undefined;
+  visited.add(value.$ref);
+  return resolve(resolveLocalRef(value.$ref, document), document, visited);
+}
+
+function referencesStrictFamily(schema, document, visited = new Set()) {
+  if (!schema || typeof schema !== "object") return false;
+  if (schema.$ref !== undefined) {
+    if (typeof schema.$ref !== "string") return false;
+    if (FAMILIES.has(schema.$ref.slice("#/components/schemas/".length)) &&
+        schema.$ref.startsWith("#/components/schemas/")) return true;
+    if (visited.has(schema.$ref)) return false;
+    visited.add(schema.$ref);
+    if (referencesStrictFamily(resolveLocalRef(schema.$ref, document), document, visited)) return true;
+  }
+  if (schema.allOf?.some((branch) => referencesStrictFamily(branch, document, new Set(visited)))) return true;
+  return ["anyOf", "oneOf"].some((keyword) => Array.isArray(schema[keyword]) && schema[keyword].length > 0 &&
+    schema[keyword].every((branch) => referencesStrictFamily(branch, document, new Set(visited))));
+}
 
 function load(context, name) {
   const source = context.document.source;
@@ -16,7 +44,7 @@ module.exports = function providerErrors(document, _options, context) {
   const schemas = document.components && document.components.schemas || {};
   const problems = [];
   const add = (message, location = ["components", "schemas"]) => problems.push({ message, path: location });
-  for (const name of ["ValidationIssue", "Allowance", "EntitlementDenial", "ServiceProblemDetail", "AiRefusal"]) {
+  for (const name of ["ValidationIssue", "Allowance", "EntitlementDenial", "AiRefusal", ...FAMILIES]) {
     if (schemas[name]?.["x-pennilogic-strict-provider"] !== true) {
       add("Every new closed error/content provider must select strict generated conversion and serialization", ["components", "schemas", name]);
     }
@@ -25,9 +53,13 @@ module.exports = function providerErrors(document, _options, context) {
     add("The accepted legacy scaffold keeps its existing DTO and money serializer bindings");
   }
   const codes = catalogue.codes;
-  if (!Array.isArray(codes) || !codes.length) {
-    add("error-catalogue.v1.json must publish a non-empty code catalogue");
+  const authentication = catalogue.authentication_codes;
+  if (!Array.isArray(codes) || !codes.length || !Array.isArray(authentication) || !authentication.length) {
+    add("error-catalogue.v1.json must publish service and separately classified authentication rows");
     return problems;
+  }
+  if (catalogue.group_version !== "1.1.0" || document["x-pennilogic-contract-metadata"]?.error_group_version !== catalogue.group_version) {
+    add("The shared error source group must bind catalogue version 1.1.0");
   }
   if (catalogue.taxonomy_version !== bindings.taxonomy_version || bindings.taxonomy_version !== "1.1.0") {
     add("error catalogue must bind the accepted taxonomy 1.1.0 projection");
@@ -35,9 +67,10 @@ module.exports = function providerErrors(document, _options, context) {
   if (JSON.stringify(schemas.ClientState && schemas.ClientState.enum) !== JSON.stringify(bindings.states)) {
     add("ClientState must equal the accepted taxonomy identifiers in client-state-bindings.v1.json");
   }
-  const vocabulary = codes.map((entry) => entry.code);
+  const vocabulary = [...codes, ...authentication].map((entry) => entry.code).sort();
   if (new Set(vocabulary).size !== vocabulary.length ||
-      JSON.stringify(vocabulary) !== JSON.stringify([...vocabulary].sort()) ||
+      [codes, authentication].some((rows) => JSON.stringify(rows.map((entry) => entry.code)) !==
+        JSON.stringify(rows.map((entry) => entry.code).sort())) ||
       JSON.stringify(schemas.ProblemCode && schemas.ProblemCode.enum) !== JSON.stringify(vocabulary)) {
     add("ProblemCode must equal the unique, sorted error catalogue; adding an unclassified code fails");
   }
@@ -49,6 +82,10 @@ module.exports = function providerErrors(document, _options, context) {
     return problems;
   }
   const properties = problem.properties || {};
+  if (JSON.stringify(properties.code?.enum) !== JSON.stringify(codes.map((entry) => entry.code)) ||
+      properties.code?.type !== "string" || properties.code?.not !== undefined) {
+    add("ServiceProblemDetail.code must intersect the one global ProblemCode with exactly the positive catalogue service subset");
+  }
   for (const [member, reference] of Object.entries({
     code: "ProblemCode", correlation_id: "PublicCorrelationId", field: "ProblemField",
     reason: "ValidationReason", instance: "PublicProblemInstance",
@@ -108,22 +145,22 @@ module.exports = function providerErrors(document, _options, context) {
           !/^[\x20-\x7e]+$/.test(text) || /[0-9$]/.test(text))) {
       add("Catalogue status and diagnostic text must be safe static literals, never amounts or provider input");
     }
-    const branches = (problem.allOf || []).filter((branch) =>
-      branch.if && branch.if.properties && branch.if.properties.code &&
-      branch.if.properties.code.const === entry.code && branch.then && branch.then.properties &&
-      branch.then.properties.type);
     const expected = {
       type: `urn:pennilogic:problem:${entry.code}`, title: entry.title,
       status: entry.status, detail: entry.detail,
     };
-    if (branches.length !== 1 || Object.entries(expected).some(([member, value]) => {
-      const binding = branches[0].then.properties[member];
-      if (member === "status" && entry.status_by_field) {
-        return !binding || JSON.stringify(binding.enum) !== JSON.stringify([value, ...Object.values(entry.status_by_field)].sort());
+    for (const name of new Set(["ServiceProblemDetail", entry.schema || "ServiceProblemDetail"])) {
+      const branches = (schemas[name]?.allOf || []).filter((branch) =>
+        branch.if?.properties?.code?.const === entry.code && branch.then?.properties?.type);
+      if (branches.length !== 1 || Object.entries(expected).some(([member, value]) => {
+        const binding = branches[0].then.properties[member];
+        if (member === "status" && entry.status_by_field) {
+          return !binding || JSON.stringify(binding.enum) !== JSON.stringify([value, ...Object.values(entry.status_by_field)].sort());
+        }
+        return !binding || binding.const !== value;
+      })) {
+        add("Every ServiceProblemDetail code must bind exactly its catalogue type/title/status/detail constants");
       }
-      return !binding || binding.const !== value;
-    })) {
-      add("Every ServiceProblemDetail code must bind exactly its catalogue type/title/status/detail constants");
     }
   }
   const mismatch = codes.find((entry) => entry.code === "idempotency_payload_mismatch");
@@ -147,17 +184,144 @@ module.exports = function providerErrors(document, _options, context) {
         JSON.stringify([catalogue.content_outcomes[0].message])) {
     add("AiRefusal must retain its separate successful code and fixed safe message");
   }
+  for (const entry of authentication) {
+    if (entry.classification !== "authentication_owned" || entry.state !== null ||
+        entry.flow !== "authentication_required" || !bindings.excluded_conditions.includes(entry.flow) ||
+        entry.condition !== entry.code ||
+        entry.status !== { authentication_required: 401, step_up_required: 403 }[entry.code]) {
+      add("Authentication codes require their own 401/403 classification and excluded flow, with NONE/null service state");
+    }
+  }
+  const union = schemas.OperationProblemDetail;
+  const expectedUnion = ["ServiceProblemDetail", "EgressDeniedProblemDetail", "AuthenticationProblemDetail"]
+    .map((name) => ({ $ref: `#/components/schemas/${name}` }));
+  const stepUpBinding = { if: { properties: { code: { enum: ["egress_denied", "step_up_required"] } }, required: ["code"] },
+    then: { required: ["egress_denial_reason"] } };
+  if (JSON.stringify(union?.allOf) !== JSON.stringify([{ oneOf: expectedUnion }, stepUpBinding]) ||
+      schemas.EgressDeniedProblemDetail?.properties?.egress_denial_reason?.$ref !== "#/components/schemas/EgressDenialReason" ||
+      !schemas.EgressDeniedProblemDetail?.required?.includes("egress_denial_reason") ||
+      schemas.AuthenticationProblemDetail?.properties?.egress_denial_reason?.$ref !== "#/components/schemas/EgressDenialReason" ||
+      schemas.ValidationReason?.enum?.some((reason) => schemas.EgressDenialReason?.enum?.includes(reason))) {
+    add("The closed shared transport union must separate service, typed egress and authentication without forking ValidationReason");
+  }
+  for (const name of FAMILIES) {
+    if (schemas[name]?.type !== "object" || schemas[name]?.additionalProperties !== false ||
+        required.some((member) => !schemas[name]?.required?.includes(member)) ||
+        schemas[name]?.properties?.code?.$ref !== "#/components/schemas/ProblemCode") {
+      add("Every shared error family must be closed, require the public problem members and reuse the one ProblemCode");
+    }
+  }
+  const reasons = schemas.EgressDenialReason?.enum || [];
+  const binding = catalogue.egress_binding;
+  const reasonCodes = binding?.reason_codes || {};
+  if (binding?.consequence !== "adr-022-ai-egress-consequences@1.1.0" ||
+      binding?.policy_version !== "2026-10-05.2" ||
+      binding?.service_schema !== "EgressDeniedProblemDetail" || binding?.authentication_schema !== "AuthenticationProblemDetail" ||
+      binding?.member !== "egress_denial_reason" || binding?.schema !== "EgressDenialReason" ||
+      JSON.stringify(Object.keys(reasonCodes).sort()) !== JSON.stringify([...reasons].sort()) ||
+      reasons.some((reason) => !vocabulary.includes(reasonCodes[reason]))) {
+    add("The owning catalogue must bind every exact canonical egress reason to one shared classified code");
+  }
+  const egress = codes.find((entry) => entry.code === "egress_denied");
+  if (egress?.schema !== "EgressDeniedProblemDetail" || egress?.status !== 403 ||
+      egress?.condition !== "request_failed" || egress?.state !== "error" || egress?.retryable !== false ||
+      egress?.retry_class !== "never" || egress?.idempotency !== "reuse_unchanged") {
+    add("egress_denied is the non-retryable 403 request_failed/error policy, never a new state or automatic fallback");
+  }
+  const ajv = new Ajv({ strict: false });
+  addFormats(ajv);
+  ajv.addSchema({ components: document.components }, "error-contract");
+  const validators = {};
+  try {
+    for (const name of FAMILIES) validators[name] = ajv.getSchema(`error-contract#/components/schemas/${name}`);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    add("Shared error family validation failed: malformed or unresolved source schema");
+    return problems;
+  }
+  const example = (entry) => ({
+    type: `urn:pennilogic:problem:${entry.code}`, title: entry.title, status: entry.status,
+    detail: entry.detail, code: entry.code, correlation_id: "cor_00000000-0000-4000-8000-000000000001",
+  });
+  if (egress) {
+    const wire = example(egress);
+    if (!validators.ServiceProblemDetail(wire) || validators.OperationProblemDetail(wire) ||
+        validators.EgressDeniedProblemDetail(wire) || validators.AuthenticationProblemDetail(wire) ||
+        validators.ServiceProblemDetail({ ...wire, status: 401 }) ||
+        validators.ServiceProblemDetail({ ...wire, detail: "PRIVATE_SYNTHETIC_CANARY" })) {
+      add("The positive service subset preserves safe egress_denied while the egress-aware union still requires its typed reason");
+    }
+  }
+  for (const entry of authentication) {
+    const wire = example(entry);
+    if (!validators.AuthenticationProblemDetail(wire) ||
+        validators.OperationProblemDetail(wire) !== (entry.status === 401) ||
+        validators.ServiceProblemDetail(wire) || validators.EgressDeniedProblemDetail(wire) ||
+        validators.AuthenticationRequiredProblemDetail(wire) !== (entry.status === 401) ||
+        validators.AuthenticationProblemDetail({ ...wire, status: entry.status === 401 ? 403 : 401 }) ||
+        validators.AuthenticationProblemDetail({ ...wire, detail: "PRIVATE_SYNTHETIC_CANARY" }) ||
+        validators.AuthenticationProblemDetail({ ...wire, provider: "PRIVATE_SYNTHETIC_CANARY" })) {
+      add("Authentication family must enforce exact catalogue constants, safe closure and 401-versus-step-up discrimination");
+    }
+  }
+  for (const reason of reasons) {
+    const entry = [...codes, ...authentication].find((row) => row.code === reasonCodes[reason]);
+    if (!entry) continue;
+    const wire = { ...example(entry), egress_denial_reason: reason };
+    if (entry.code === "rate_limited") {
+      wire.retry_after_seconds = 30;
+      wire.allowance = { limit: 5, unit: "requests", window: "hour" };
+    }
+    const family = reason === "step_up_required" ? "AuthenticationProblemDetail" : "EgressDeniedProblemDetail";
+    const other = reason === "step_up_required" ? "EgressDeniedProblemDetail" : "AuthenticationProblemDetail";
+    if (!validators[family](wire) || !validators.OperationProblemDetail(wire) || validators[other](wire) ||
+        validators.ServiceProblemDetail(wire) || validators[family]({ ...wire, detail: "PRIVATE_SYNTHETIC_CANARY" }) ||
+        validators[family]({ ...wire, host: "PRIVATE_SYNTHETIC_CANARY" }) ||
+        (family === "EgressDeniedProblemDetail" && validators[family](example(entry)))) {
+      add(`Canonical ${reason} must select exactly its safe, closed ${family} and catalogue code/status`);
+    }
+    for (const candidate of [...codes, ...authentication]) {
+      if (candidate.code !== entry.code &&
+          validators[family]({ ...wire, ...example(candidate) })) {
+        add(`Canonical ${reason} cannot be remapped to another global code/status`);
+      }
+    }
+  }
   for (const [route, item] of Object.entries(document.paths || {})) {
     for (const method of HTTP_METHODS) {
       const operation = item[method];
       if (!operation) continue;
       for (const [status, response] of Object.entries(operation.responses || {})) {
-        if (!/^[45][0-9]{2}$/.test(status)) continue;
-        const body = response.content && response.content["application/problem+json"];
-        if (response.$ref !== "#/components/responses/ServiceProblem" &&
-            (!body || !body.schema || body.schema.$ref !== "#/components/schemas/ServiceProblemDetail")) {
-          add("Service error responses must reference ServiceProblemDetail, not inline or permissive problems",
-            ["paths", route, method, "responses", status]);
+        if (status !== "default" && !/^[45](?:[0-9]{2}|XX)$/.test(status)) continue;
+        const location = ["paths", route, method, "responses", status];
+        const resolved = resolve(response, document);
+        const body = resolved?.content?.["application/problem+json"];
+        if (!referencesStrictFamily(body?.schema, document) ||
+            Object.keys(resolved?.content || {}).some((media) => media !== "application/problem+json")) {
+          add("Service error responses must reference a resolved strict shared error family, not inline or permissive problems", location);
+        }
+        if (status === "401") {
+          const schema = resolve(body?.schema, document);
+          const authenticate = resolve(resolved?.headers?.["WWW-Authenticate"], document);
+          if (schema?.properties?.code?.const !== "authentication_required" || schema?.properties?.status?.const !== 401 ||
+              resolved?.["x-response-status"] !== 401 || authenticate?.required !== true ||
+              resolved?.headers?.["WWW-Authenticate"]?.$ref !== "#/components/headers/DPoPAuthenticate" ||
+              resolved?.headers?.["DPoP-Nonce"]?.$ref !== "#/components/headers/DPoPNonce" ||
+              resolved?.["x-dpop-nonce-challenge"]?.authenticate !== 'DPoP error="use_dpop_nonce"' ||
+              resolved?.["x-dpop-nonce-challenge"]?.["required-header"] !== "DPoP-Nonce") {
+            add("401 requires the closed authentication-only family and exact DPoP challenge/fresh-nonce header contract", location);
+          }
+        }
+        if (operation.tags?.includes("CustomDestinations")) {
+          const noStore = resolve(resolved?.headers?.["Cache-Control"], document);
+          if (!resolved?.["x-required-response-headers"]?.includes("Cache-Control") ||
+              noStore?.required !== true || noStore?.schema?.const !== "no-store") {
+            add("Custom-destination error responses require no-store, never cached provider or account data", location);
+          }
+          if (status === "default" && (resolved?.headers?.["Retry-After"]?.$ref !== "#/components/headers/RetryAfter" ||
+              resolved?.["x-response-header-bindings"]?.retry_after_seconds !== "Retry-After")) {
+            add("A supplied retry_after_seconds requires the equal Retry-After delay without authorizing automatic retry", location);
+          }
         }
       }
     }

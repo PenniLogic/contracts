@@ -90,6 +90,7 @@ function equal(left: unknown, right: unknown): boolean {
     return false;
 }
 function format(value: string, name: string): boolean {
+    if (name === 'uuid') return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u.exec(value)?.[0] === value;
     if (name === 'date-time' || name === 'date') {
         try {
             if (name === 'date-time') Instant.fromWire(value); else LocalDate.fromWire(value);

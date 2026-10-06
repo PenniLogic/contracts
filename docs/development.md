@@ -12,12 +12,16 @@ against the last published tag (oasdiff + a component guard), deterministic gene
 Kotlin, TypeScript and Python clients (openapi-generator, one pinned version), and three smoke
 consumers that compile, type-check and run the money/instant conformance vectors. Publication is a
 versioned git tag plus a GitHub Release built by the owner outside CI (see
-[publication.md](publication.md)). Business endpoints are **not** part of this scaffold; the
-document carries the shared components only (`Money`, `CurrencyCode`, `Instant`, `LocalDate`,
-`TimeZone`, `ProblemDetail`, the `IdempotencyKey` parameter and the `IdempotentReplayed` header).
+[publication.md](publication.md)). The accepted scaffold provides shared components (`Money`,
+`CurrencyCode`, `Instant`, `LocalDate`, `TimeZone`, `ProblemDetail`, the `IdempotencyKey` parameter
+and the `IdempotentReplayed` header). The additive [custom-destination source contract](custom-destinations.md)
+is not runtime or release acceptance. Its closed generated models and shared error families
+are composed locally with accepted provider source; global/custom AI remain OFF.
 
-The local `0.2.0` source adds proposed T-CON-12 error and T-CON-10 import/dedup providers
-ahead of endpoint consumers. They are not an accepted release or current service adoption.
+The local `0.3.0` source retains the T-CON-12 error and T-CON-10 import/dedup provider source
+accepted at `5b41d4580c85be3cc1617074c0f3052b1f7b02cd`, and adds the six custom-destination
+operations. Error group `1.1.0` composes Root's auth/egress decision; import remains `1.0.0`.
+These are not a release or current service adoption.
 Their source authority, safe diagnostics, group version, replay/override rules, conformance
 entry points and remaining rollout obligations are in [provider-contracts.md](provider-contracts.md).
 The accepted scaffold components themselves are unchanged.
@@ -26,14 +30,15 @@ The accepted scaffold components themselves are unchanged.
 
 | Path | Owner / purpose |
 | --- | --- |
-| `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is the published version (`vX.Y.Z` tag). |
+| `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is a source candidate until the owner publishes the matching `vX.Y.Z` tag. |
 | `spec/currency-registry.v1.json` | ISO 4217 codes and minor-unit exponents accepted by the codecs (ADR-015 §1.4); rendered into every client. |
 | `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json`, `spec/import-group.v1.json` | Proposed provider diagnostics/retry/key policy, accepted taxonomy 1.1.0 identifier projection and new T-CON-10 import/dedup group policy. Copied/hash-bound into each client and prepared as standalone release assets. |
 | `spec/fixtures/*.json` | Money and instant wire vectors (hand-written) and `money-roundtrip-generated.v1.json` (10 000 seeded values + boundaries, regenerated deterministically by `scripts/generate_money_fixtures.py`), consumed unchanged by all three smoke consumers (ADR-015 §7). Synthetic values only. |
 | `spec/.spectral.yaml`, `spec/spectral-functions/` | Committed lint ruleset and its custom functions. |
+| `spec/adr022/` | Byte-identical accepted consequence and closed-schema inputs; provenance and immutable digests are documented in custom-destinations.md. |
 | `spec/breaking-change-acknowledgement.json` | Present only while a deliberate breaking change is being published (see publication.md). |
 | `toolchain/versions.json` | Exact versions and SHA-256 digests of every downloaded tool. |
-| `generator/*.json`, `generator/openapi-generator-ignore`, `generator/templates/` | Generator configuration per target, the output ignore list and the drift-guarded template overrides (Python model; Kotlin `ApiClient` and `build.gradle`). |
+| `generator/*.json`, `generator/openapi-generator-ignore`, `generator/templates/` | Generator configuration per target, the output ignore list and exact pinned/drift-guarded model/API/transport template overrides. |
 | `generator/golden.json` | SHA-256 of each generated tree and of every file in it; CI fails when generation drifts. |
 | `runtime/<language>/` | Hand-written seams copied into every generated client: money/time, strict service problems, pure import receipt/mapping verification and the Kotlin `PennilogicJson` converter configuration. |
 | `smoke/<language>/` | Smoke consumers: they compile/type-check the generated client and run the conformance tests. |
@@ -98,10 +103,18 @@ Cold runs download Gradle and the Kotlin toolchain (several minutes).
 | `pl-operation-security` | Every operation has a non-empty security requirement, at operation level or root level (ADR-019 §16; the root DPoP scheme is contracts#1's). |
 | `pl-money-example-registry-scale` | Every Money example uses a registry currency with exactly the registry exponent of fraction digits. |
 | `pl-problem-detail-no-money` | `ProblemDetail` never carries a monetary value. |
+| `pl-custom-destination-contract` | Direct accepted ADR-022 byte/schema/provenance validation, four exactly-once enum definitions, closed registration fields and canonical state-denial mapping. Schema-map member names remain inspectable even when named `example(s)` or `default`; genuine annotation data is not a schema. |
+| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no named or registration-role-derived address scalar, explicit URI/IRI/host/IP format, header, open-map or encoded-argument escape. Bounded source implication preserves registration roles across annotations, matching types, equal/looser bounds and equivalent local ref/`allOf` wrappers. A non-equivalent shared base remains separate only when its complete supported constraints prove unrestricted strings; proper narrowing alone never proves general text. Request-schema refs must target named component-schema roots, not inline/subschema positions, in marked and unmarked requests alike; OpenAPI body/parameter/path references retain their own contexts. Negative `not` request compositions beyond plain scalar exclusions are explicitly unsupported, including under scalar types; the DPoP newline exclusion is preserved. Ordinary prompt strings and owner-bound IDs remain allowed. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
 
 `oas3-unused-component` is off: the shared components are published before any operation
 references them. The money-example rule reads `currency-registry.v1.json` from the linted
 document's directory.
+
+The custom guards' schema-versus-data distinction does not certify the stock example resolver.
+The unchanged `oas3-valid-schema-example` path has a known limitation with AJV-valid example
+payloads combining `enum`, `example`/`default` keys and literal `$ref` data. Keep that full-source
+failure distinct from a custom-guard positive; neither the stock rule nor its dependencies are
+disabled or overridden.
 
 ## Generation and the seams
 
@@ -137,7 +150,16 @@ wire format nor ledger admission: registry acceptance of JPY/KWD does not admit 
 
 ### Generator templates
 
-Nine templates/partials are overridden; stock portions remain bound to the pinned generator:
+Twelve templates/partials are overridden; stock portions remain bound to the pinned generator:
+
+- `generator/templates/python/api.mustache`, `api_client.mustache`, `rest.mustache`: precise
+  parameter/body/return types, actual typed Pydantic `ApiResponse` validation and urllib3's real
+  `BaseHTTPResponse` interface. Non-2xx model-validation failures propagate safely rather than
+  being masked by a `finally` block that echoes an invalid raw response. Marked model targets
+  reject null before the stock deserializer shortcut; explicit Optional wrappers, legacy models
+  and no-content responses keep their existing behavior. API argument validation hides input
+  in normal exception text; structured diagnostics must still use `errors(include_input=False)`.
+  No mypy setting is relaxed.
 
 - `generator/templates/python/model_generic.mustache`: the `Instant` and `LocalDate` imports (a
   type-mapped, non-model type gets no generated import), `Any -> Any` annotations on the generated
@@ -161,11 +183,15 @@ Nine templates/partials are overridden; stock portions remain bound to the pinne
   normal nested/outbound serialization, including reference-array patterns absent from field annotations.
   Its payload serializer reuses the unchanged `Money.to_wire` Pydantic JSON seam, alongside the
   time and enum seams, rather than letting an untyped payload serializer lose the Money codec.
+  Scalar UUID fields use the shared typed wire converter; actual source patterns still enforce
+  version/case restrictions. Kotlin registers its equivalent UUID serializer in the existing module.
 - `generator/templates/typescript/modelGeneric.mustache`: provider-only original-wire/native-model
   guards and original-wire/emitted-wire declaration checks around the generator conversion bodies.
   This rejects private Money member names before calling the unchanged dependency codec.
   Optional referenced properties are omitted
   before invoking a required child writer; required references and explicit null remain guarded.
+  Declared undefined optional output members are omitted after native-field validation and before
+  validating the emitted object, so closed union branches see actual JSON rather than phantom keys.
 - `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
   for marked models, including model-valued array items. Array indices must be present and their
   values non-null/non-undefined before conversion; property omission is not array-item omission.
@@ -181,9 +207,13 @@ would change generated bytes between Windows and Linux. The runtime copy already
 
 ### Provider conformance
 
-`pl-error-provider` binds the code enumeration to the machine catalogue, explicit retry/key
-classification, one accepted state and exact safe diagnostic constants. It requires service
-error responses to reference the strict subtype, while preserving the permissive scaffold.
+`pl-error-provider` binds the single code enumeration to the machine catalogue, explicit retry/key
+classification and exact safe diagnostic constants. Service rows bind one accepted state;
+authentication-owned rows bind NONE/null and the excluded authentication flow. Error responses
+resolve strict families through local references/compositions, including default/range responses,
+with a strict 401 family, no-store and conditional nonce/delay contracts. The open scaffold remains
+available but is not an admitted service response. Canonical egress reasons use their shared typed
+member and exact source-derived mappings, not a duplicate catalogue or ValidationReason union.
 `pl-import-provider` binds version, public identifiers/override, closed confidence, row/column
 limits, source-pair windows and component references; it rejects inline/local duplicates and
 raw-content/open-map escape hatches. Tagged import consumers declare separate preview/commit
@@ -197,12 +227,15 @@ check enum typing, decode shared synthetic fixtures through the provider conform
 and reject unsafe errors, invalid mappings/counts/decisions, changed replay receipts and
 unknown confidence. JSON Schema checks and semantic-only checks are reported separately.
 Neither proves a running service's ownership, atomic commit, metrics or no-duplicate effects.
-The provider-transport inventory additionally binds all 19 new closed model paths and tests
+The provider-transport inventory retains the 19 accepted closed model paths and adds the six
+destination and four shared error models, testing all 29 with
 ordinary conversion, native construction/serialization, nested models and actual generated
 transport. Missing strict wiring fails lint. Runtime-only generator metadata is ignored by the
 inline-equivalence fingerprint, so removing it does not let an equivalent local schema pass.
-The array controls enumerate all seven declared provider array fields, including optional nested
-validation issues. Actual TypeScript `BaseAPI` mock requests prove that undefined/sparse model
+The array controls enumerate all eleven declared provider array fields, including optional nested
+validation issues. All 15 recursive null controls run through Python/Kotlin conversion and transport,
+and all 45 native TypeScript absent/null/invalid-array controls must fail before writing.
+Actual TypeScript `BaseAPI` mock requests prove that undefined/sparse model
 arrays fail before JSON emission, with normal optional-property omission retained.
 `scripts/tests/test_provider_composition.py` extends the existing scratch-generation tests with
 closed synthetic DTOs that reference Money, every accepted primitive seam, optional strict
@@ -219,12 +252,24 @@ Kotlin and Python validate recursive scalar/item constraints before conversion a
 construction, generic/nested serialization and actual client writes. TypeScript preflights the
 original body and validates projected output before transport, retaining dense-array prechecks,
 optional-property omission and the registered static enum diagnostic.
+The destination and egress-error suites add the six closed destination models and four shared
+error families through that same path, with all canonical reasons and ordinary service controls.
+The named breaking probes preserve the complete live operation/security/response document.
+They exercise the supported allOf optional-inheritance proof separately from the live oneOf
+family, whose unproven changes still require review; no detector is relaxed to make a fixture pass.
+
+For marked closed objects the generation-only layout uses the declared properties/required
+list, without the source composition/constant keywords that the pinned generator incorrectly
+flattens into extra required fields or scalar enums. The full original constraints are compiled
+first and remain the runtime authority. `generation_model_projection` binds the effective input,
+selected models and retained constraint digest; no source field or runtime guard is dropped.
 
 The supported subset is explicit: objects/arrays/strings/integers/booleans; local acyclic schema
 references; string enums and scalar constants; anchored portable ASCII regular expressions;
 code-point string lengths; inclusive/exclusive safe-integer bounds; nested min/max/unique item
 rules (including zero upper bounds); required/closed members and allOf/anyOf/oneOf/not/conditional
-assertions. The accepted date/date-time codecs and integer formats remain registered; URI
+assertions. The accepted date/date-time codecs and integer formats remain registered; UUIDs
+use the shared hyphenated-hex wire shape plus their owning source pattern. URI
 references receive ASCII/escape/parser checks, not an arbitrary format or IRI certification.
 Enum/constant predicates may constrain integer/boolean fields without introducing a new scalar
 enum serializer. Referencing an unmarked legacy DTO does not make that DTO globally strict.
@@ -243,10 +288,13 @@ whole-value outer anchors, printable ASCII literals and portable literal escapes
 nonempty groups with grouped alternatives, nonempty flat character classes/ranges (optional
 negation), dot, and greedy `?`/`*`/`+`/bounded repetitions. Empty whole-value `^$` is supported.
 Malformed/empty/nested/set-operation classes, ambiguous shared-endpoint ranges, ungrouped alternatives,
-internal anchors, empty group alternatives, shorthand/property/backreference escapes,
+internal anchors, empty group alternatives, property/backreference escapes and unsupported shorthand,
 lookarounds/inline flags, lazy/possessive modifiers and invalid/unrepresentable repetitions
 are refused before any target output is removed or emitted. This intentionally conservative
 subset does not promise universal regular-expression syntax.
+The one shorthand extension is `\s` inside a character class: all three runtimes use the exact
+25 ECMAScript whitespace code points, not Python/JVM default whitespace. It cannot serve as
+a range endpoint. No other shorthand or outside-class `\s` is admitted.
 Groups are limited to 64 levels so accepted syntax does not depend on a host parser's
 recursion limit; repetition counts use canonical nonnegative decimals within signed 32-bit bounds.
 That count range is a syntax limit, not a guarantee that the pinned generator can construct
@@ -322,10 +370,10 @@ the first publication defines the baseline. Acknowledging a break and the expand
 protocol are described in [publication.md](publication.md#breaking-changes).
 
 Dereferenced `allOf` inheritance and response schemas can repeat a base component's optional
-property addition. The guard recognises only proven optional-addition diffs there as additive;
-removed/required/narrowed/conditional/unknown changes and response metadata changes still fail.
-Adding an `allOf` constraint also fails. The composition and partial/stale/blanket acknowledgement
-regressions prevent this source-provider inheritance fix from becoming a bypass.
+property addition. The diff-only guard recognises proven optional additions and the separately
+bounded enum/description response case; arbitrary added `allOf` constraints still fail.
+Removed/required/narrowed/unknown changes and response metadata changes remain findings.
+The composition and partial/stale/blanket acknowledgement regressions remain in place.
 
 The optional-inheritance proof is fail-closed at every record boundary: modified
 records have exactly base/revision/diff, matching well-formed member identities,
@@ -335,6 +383,25 @@ Direct malformed-record cases and real pinned-oasdiff paired documents cover bot
 the positive inheritance seam and retained removal/required/narrowing/response
 metadata failures. An absent published baseline is still explicitly not a release
 compatibility result.
+
+The additional [source-backed conditional proof](publication.md#bounded-source-backed-conditional-expansion)
+parses both complete documents with the existing pinned Spectral parser, rejecting duplicate
+source mapping names and numeric precision loss before either detector runs. Exact AST numeric
+spans are checked with standard-library decimal arithmetic; no parser or dependency pin changes.
+It binds full use-site and dependency records, resolves only bounded local
+references and unconditional allOf intersections, and proves new fixed-scalar branches cannot
+apply to any old required finite discriminator value. Old conditional/negative-position
+closures and all other constraints must stay unchanged. The implementation is capped at
+64 levels, 16,384 work steps per proof and 256 finite members; cached closures retain depth and
+cycle checks. Unsupported cases stay RED rather than receiving an acknowledgement.
+
+The generic paired fixtures retain the actual operations, root security, shared responses and
+version. Actual pinned comparisons, malformed-record/source controls, old/new AJV witnesses,
+all 14 old service examples and the import two-code intersection exercise the shipped checker.
+Separate generated-public-API regressions compile total TypeScript service-key lookups and the
+old positional Kotlin constructor/copy/component consumer; a golden-bound snapshot covers all
+22 accepted model primary signatures. These are source/native checks, not external consumer
+adoption or binary compatibility certification.
 
 ## Smoke consumers and conformance vectors
 
@@ -348,6 +415,11 @@ wire); comparison across currencies or against a float never coerces. The Python
 type-checks with `mypy --strict` (the generated transport modules `api_client`, `rest`,
 `exceptions`, `configuration` and `api_response` use openapi-generator's own baseline through
 per-module overrides in `smoke/python/mypy.ini`; every model and seam is strict).
+
+The namespaced custom-destination tests also use real generated transports and decoders.
+Unlike schema-only controls, they currently expose shared generator defects; failed T6 controls
+must remain failures, not be skipped or replaced with a separate strict decoder. See
+[the source-only boundary and reproduction commands](custom-destinations.md#generated-runtime-gaps).
 
 ### CrossLanguageMoneyRoundTripTest
 

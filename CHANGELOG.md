@@ -1,5 +1,84 @@
-# Contract source changes
+# Changelog
 
+## Unreleased combined source candidate 0.3.0
+
+- Ordinarily compose original contracts#27's immutable `c296ebbc` failure freeze with accepted
+  provider MAIN `5b41d4580c85be3cc1617074c0f3052b1f7b02cd`. Preserve all original provider,
+  Money/time and failed AA8 evidence; do not import an unaccepted branch or rewrite history.
+- Wire all closed destination boundaries through the accepted marked-model machinery. Add
+  source-derived UUID/ECMAScript-whitespace validation and shared UUID wire conversion, and fix
+  precise Python API transport/return types at the pinned canonical templates.
+- Retain full source constraints while projecting exact marked object layouts for code generation.
+  Avoid union-requiredness and synthetic scalar-enum bugs. Preserve optional omissions and reject
+  unknown members/duplicate array entries before conversion and before wire emission.
+- Advance the one shared error catalogue to `1.1.0`: typed egress reasons, shared service/auth
+  families, authentication-owned codes with NONE/null service state, exact safe diagnostics and
+  resolved response/header lint. Preserve every accepted service policy, ValidationReason,
+  eight-state taxonomy binding and import-group version. Correct Python's invalid-error masking
+  rather than putting raw rejected bodies into API exceptions.
+- Repair actual additive probe/breaking helpers and extend source, native/generic and real
+  three-language mock transport controls. Canonical generation alone updates the goldens.
+- Keep one global `ProblemCode` and a positive catalogue-derived service field subset with the
+  old 14 codes plus `egress_denied`. Preserve its actual generated public type and fixed safe
+  diagnostics. Preserve the genuine `1ce4acd5` seven-finding RED comparison as historical evidence.
+- Restore total TypeScript service-policy lookup typing and Kotlin's published primary
+  constructor/copy/component order through canonical generation. Preserve the old inline
+  helper exports and all 22 accepted primary signatures without weakening strict validation.
+- Add a generic bounded full-source proof for exact new-tag conditional expansions, including
+  complete diff/dependency binding and unchanged response metadata. The genuine accepted-base
+  comparison now passes without an acknowledgement; malformed, unsupported, negative-position
+  and ordinary breaking changes remain blocked. Old enum readers are not claimed to accept
+  new values, and no consumer migration or binary ABI certification is asserted.
+- Refuse source numeric precision loss before comparison, including an author-reproduced
+  exclusive-bound counterexample that would otherwise be rounded into a false compatibility pass.
+- Reject complete canonical enum copies even when widened, reordered or padded with duplicates.
+  Actual Spectral controls cover all four families and retain ref-only and partial-overlap positives.
+- Reject registration-address scalar aliases and explicit address formats in inference/tool requests.
+  Preserve ordinary prompt text, owner-bound IDs and the exact six enrollment exceptions.
+- Preserve registration provenance across the strict compiler's existing supported annotations.
+  Inspect copied enums in schema maps independently of member names without treating annotation
+  payloads as schemas. Neither correction expands the compiler vocabulary or enables runtime routing.
+- Explicitly refuse negative request-schema compositions beyond plain scalar exclusions, including
+  double-negated address references/formats. Preserve the DPoP newline exclusion, natural member
+  names, example data and existing response constraints.
+- Preserve registration roles through source-proved equivalent local aliases, scalar conjunctions,
+  matching types and equal/looser bounds. Keep proved narrower general-text bases separate and
+  refuse ambiguous provenance rather than silently admitting it. Clarify that custom-guard data
+  handling does not waive the unchanged stock Spectral example/resolution limitation.
+- Correct the earlier proper-narrowing exemption: only a proved unrestricted string base can
+  remain separate from a non-equivalent enrollment role. Stronger bounds, patterns or finite
+  restrictions do not establish that a specialized base is general text. Explicitly refuse
+  non-component-root request-schema pointers, including unmarked inline conjunction references;
+  preserve context-correct OpenAPI body/parameter refs and the unchanged compiler boundary.
+- Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
+  retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
+  validation diagnostics; add actual three-language root-null and Python error-path controls.
+
+This is a local source candidate, not issue27 completion, independent review, hosted CI,
+consumer rollout, a release or AI approval. No provider, credential, destination, issuer,
+gateway, admin UI or production tool integration is activated. See
+[the combined-source guide](docs/custom-destinations.md) for exact boundaries.
+
+## 0.2.0 - C296 source-only failure freeze (historical)
+
+The following entry records the original AA8-only freeze; its failed gates remain history,
+not the current composition's result.
+
+- Add the isolated `CustomDestinations` registration/list/validate/activate/suspend/revoke
+  operation group for original [contracts#27](https://github.com/PenniLogic/contracts/issues/27),
+  preserving ADR-015 money, currency, time and idempotency components.
+- Consume exact accepted ADR-022 consequence/schema bytes from
+  [PenniLogic/docs#42](https://github.com/PenniLogic/docs/issues/42), with pinned source
+  commit/digests, four canonical enum definitions, closed enrollment schemas and recursive
+  inference/tool no-address lint. No replacement policy or redundant Docs edit is introduced.
+- Add coordinated DPoP raw-header mapping, operation-scoped step-up contract, finite
+  `step-up-request@1` vectors, real lint controls and genuine three-language generated
+  transport/decoder tests. Regenerate golden hashes through the managed generator only.
+
+**Not accepted or released:** generated-runtime T6 and Python typing/UUID/enum conversion
+gaps, shared typed-refusal integration and shared pipeline-test integration remain blocking.
+See [the source-only guide](docs/custom-destinations.md). This change does not complete
+contracts#27, enable AI, approve destinations/providers, deploy anything or publish a tag.
 ## 0.2.0 - local provider preparation, not released
 
 Source corrections after the frozen `fd7ef0a` draft: wire strict ingress/egress

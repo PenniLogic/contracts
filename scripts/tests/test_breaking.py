@@ -7,7 +7,7 @@ import copy
 import subprocess
 import unittest
 
-from support import ROOT, SPEC, SpecDir, replace_once, run_script, spec_text, with_probe_paths
+from support import ROOT, SPEC, SpecDir, replace_in_section, replace_once, replace_section, run_script, section_text, spec_text, with_probe_paths
 import toolchain
 
 import check_breaking_changes as cbc
@@ -16,6 +16,38 @@ import check_breaking_changes as cbc
 def published_tags_exist() -> bool:
     completed = subprocess.run(["git", "tag", "--list", "v*"], cwd=str(ROOT), capture_output=True, text=True, check=False)
     return bool(completed.stdout.strip())
+
+
+def with_inheritance_probe(text: str) -> str:
+    """Isolate the supported allOf proof without deleting live union consumers or their responses."""
+    base = section_text(text, ("components", "schemas", "ProblemDetail"))
+    base = base.replace("    ProblemDetail:\n", "    BreakingProbeBase:\n", 1)
+    provider = """    BreakingProbeProvider:
+      type: object
+      additionalProperties: false
+      required: [type, title, status]
+      allOf:
+        - $ref: '#/components/schemas/BreakingProbeBase'
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        correlation_id: {type: string}
+"""
+    response = """    BreakingProbeResponse:
+      description: Synthetic inherited optional-property probe.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/BreakingProbeProvider'
+"""
+    text = replace_section(text, ("components", "schemas"),
+                           section_text(text, ("components", "schemas")) + base + provider)
+    text = replace_section(text, ("components", "responses"),
+                           section_text(text, ("components", "responses")) + response)
+    return replace_section(with_probe_paths(text), ("paths", "/probe", "get", "responses", "200"),
+                           "        '200':\n          $ref: '#/components/responses/BreakingProbeResponse'\n")
 
 
 class BaselineTest(unittest.TestCase):
@@ -62,8 +94,12 @@ class PlantedRemovalTest(unittest.TestCase):
         text = replace_once(text, "    TimeZone:\n      type: string\n      pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'\n      maxLength: 64\n      examples: [Asia/Kolkata]\n", "")
         text = replace_once(text, "          maxLength: 21\n", "          maxLength: 20\n")
         text = replace_once(text, "      required: [amount, currency]\n", "      required: [amount, currency, scale]\n")
-        text = replace_once(text, "  headers:\n    IdempotentReplayed:", "  headers:\n    IdempotentReplayedRenamed:")
+        text = replace_in_section(text, ("components", "headers", "IdempotentReplayed"),
+                                  "    IdempotentReplayed:\n", "    IdempotentReplayedRenamed:\n")
+        text = text.replace("#/components/headers/IdempotentReplayed'", "#/components/headers/IdempotentReplayedRenamed'")
         completed = self.check(text, "--format", "json")
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn('"findings"', completed.stdout, completed.stdout + completed.stderr)
         report = json.loads(completed.stdout[completed.stdout.index("{"):])
         ids = {(f["id"], f["location"]) for f in report["findings"]}
         self.assertIn(("component-schemas-removed", "components/schemas/TimeZone"), ids)
@@ -73,13 +109,17 @@ class PlantedRemovalTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
 
     def test_additive_change_passes(self) -> None:
-        added = replace_once(spec_text(), "      examples:\n        - type: about:blank\n", "        hint:\n          type: string\n          description: Additive optional member.\n      examples:\n        - type: about:blank\n")
+        base = with_inheritance_probe(spec_text())
+        self.base = self.spec.write(base, "base.yaml")
+        added = replace_in_section(base, ("components", "schemas", "BreakingProbeBase"),
+                                   "      examples:\n        - type: about:blank\n",
+                                   "        hint:\n          type: string\n          description: Additive optional member.\n      examples:\n        - type: about:blank\n")
         completed = self.check(added)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_operation_removal_is_detected_by_oasdiff(self) -> None:
         base = self.spec.write(with_probe_paths(spec_text()), "base.yaml")
-        revision = replace_once(with_probe_paths(spec_text()), "    post:\n      operationId: postProbe\n      description: Probe write.\n      tags: [probe]\n      parameters:\n        - $ref: '#/components/parameters/IdempotencyKey'\n      requestBody:\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                total:\n                  $ref: '#/components/schemas/Money'\n      responses:\n        '204':\n          description: ok\n", "")
+        revision = replace_section(with_probe_paths(spec_text()), ("paths", "/probe", "post"), "")
         completed = run_script("check_breaking_changes.py", "--base", str(base), "--revision", str(self.spec.write(revision, "revision.yaml")), "--acknowledgement", str(self.spec.path / "ack.json"))
         self.assertEqual(completed.returncode, 1)
         self.assertIn("[api-removed-without-deprecation] POST /probe", completed.stdout)
@@ -183,23 +223,28 @@ class CompositionRegressionTest(unittest.TestCase):
     def test_real_pinned_oasdiff_pair_matrix_preserves_proofs_and_refuses_constraints(self) -> None:
         specs = SpecDir()
         self.addCleanup(specs.cleanup)
-        base_text = spec_text()
+        base_text = with_inheritance_probe(spec_text())
         base = specs.write(base_text, "base.yaml")
         tools = toolchain.ensure_installed()
-        added = replace_once(base_text, "      examples:\n        - type: about:blank\n",
-                             "        diagnostic_hint:\n          type: string\n      examples:\n        - type: about:blank\n")
+        findings, _ = cbc.compare(SPEC, base, tools["oasdiff"])
+        self.assertEqual(findings, [], "the named probe must preserve every genuine operation, security and shared response")
+        probe = ("components", "schemas", "BreakingProbeBase")
+        added = replace_in_section(base_text, probe, "      examples:\n        - type: about:blank\n",
+                                   "        diagnostic_hint:\n          type: string\n      examples:\n        - type: about:blank\n")
         matrix = [
             ("optional inherited addition", added, False),
-            ("required inherited detail", replace_once(base_text, "      required: [type, title, status]\n",
-                                                     "      required: [type, title, status, detail]\n"), True),
-            ("narrowed inherited title", replace_once(base_text, "          maxLength: 200\n          description: Short human-readable summary",
-                                                     "          maxLength: 100\n          description: Short human-readable summary"), True),
-            ("removed inherited correlation", replace_once(base_text, "        correlation_id:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n",
-                                                          "        correlation_renamed:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n"), True),
-            ("new allOf constraint", replace_once(base_text, "        - $ref: '#/components/schemas/ProblemDetail'\n",
-                                                 "        - $ref: '#/components/schemas/ProblemDetail'\n        - required: [instance]\n"), True),
-            ("response metadata", replace_once(base_text, "      description: Published safe problem detail; the HTTP status equals the catalogue status for its typed code.\n",
-                                              "      description: Changed response metadata requiring review.\n"), True),
+            ("required inherited detail", replace_in_section(base_text, probe, "      required: [type, title, status]\n",
+                                                            "      required: [type, title, status, detail]\n"), True),
+            ("narrowed inherited title", replace_in_section(base_text, probe, "          maxLength: 200\n          description: Short human-readable summary",
+                                                            "          maxLength: 100\n          description: Short human-readable summary"), True),
+            ("removed inherited correlation", replace_in_section(base_text, probe, "        correlation_id:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n",
+                                                                 "        correlation_renamed:\n          type: string\n          pattern: '^[A-Za-z0-9._-]{1,128}$'\n"), True),
+            ("new allOf constraint", replace_in_section(base_text, ("components", "schemas", "BreakingProbeProvider"),
+                                                        "        - $ref: '#/components/schemas/BreakingProbeBase'\n",
+                                                        "        - $ref: '#/components/schemas/BreakingProbeBase'\n        - required: [instance]\n"), True),
+            ("response metadata", replace_in_section(base_text, ("components", "responses", "ServiceProblem"),
+                                                     "      description: Published safe problem detail; the HTTP status equals the catalogue status for its typed code.\n",
+                                                     "      description: Changed response metadata requiring review.\n"), True),
         ]
         for name, text, should_break in matrix:
             with self.subTest(pair=name):
@@ -211,9 +256,21 @@ class CompositionRegressionTest(unittest.TestCase):
         self.assertEqual(cbc.component_findings(real_diff), [])
         for key in ("metadata", "unknownConstraint"):
             mutated = copy.deepcopy(real_diff)
-            record = mutated["components"]["schemas"]["modified"]["ServiceProblemDetail"]["allOf"]["modified"][0]
+            record = mutated["components"]["schemas"]["modified"]["BreakingProbeProvider"]["allOf"]["modified"][0]
             record[key] = {"from": False, "to": True}
             self.assertTrue(cbc.component_findings(mutated))
+
+    def test_live_oneof_inheritance_is_not_silently_promoted_to_an_optional_addition_proof(self) -> None:
+        specs = SpecDir()
+        self.addCleanup(specs.cleanup)
+        added = replace_in_section(spec_text(), ("components", "schemas", "ProblemDetail"),
+                                   "      examples:\n        - type: about:blank\n",
+                                   "        hint:\n          type: string\n      examples:\n        - type: about:blank\n")
+        findings, _ = cbc.compare(SPEC, specs.write(added), toolchain.ensure_installed()["oasdiff"])
+        self.assertEqual({finding.key() for finding in findings}, {
+            ("component-schema-allof-changed", "components/schemas/OperationProblemDetail"),
+            ("component-responses-changed", "components/responses/CustomDestinationProblem"),
+        })
 
     def test_unknown_record_metadata_is_not_an_optional_addition_proof(self) -> None:
         for key in ("unknownConstraint", "metadata"):
@@ -251,6 +308,103 @@ class CompositionRegressionTest(unittest.TestCase):
             "responses": {"modified": {"Problem": {"headers": {"deleted": ["Retry-After"]}}}},
         }})
         self.assertEqual({finding.id for finding in findings}, {"component-schema-allof-added", "component-responses-changed"})
+
+
+class EnumResponseRegressionTest(unittest.TestCase):
+    def test_only_complete_scalar_enum_additions_and_inert_descriptions_prove_response_compatibility(self) -> None:
+        def response(leaf: object) -> dict:
+            return {"content": {"modified": {"application/json": {
+                "schema": {"properties": {"modified": {"choice": leaf}}},
+            }}}}
+
+        valid = {"enum": {"added": ["next"]}, "description": {"from": "Before.", "to": "After."}}
+        self.assertTrue(cbc._only_additive_response_schema(response(valid)))
+        self.assertFalse(cbc._only_optional_property_additions(valid))
+        self.assertTrue(cbc._only_additive_response_schema(response({"enum": {"added": [1, True, None, "1"]}})))
+        for change in (
+            None, [], {}, {"added": []}, {"added": "next"}, {"added": ["next", "next"]},
+            {"added": [1, 1.0]}, {"added": [float("nan")]}, {"added": [float("inf")]},
+            {"added": [{}]}, {"added": [["next"]]}, {"added": ["next"], "deleted": ["old"]},
+            {"added": ["next"], "deleted": []}, {"added": ["next"], "enumAdded": True},
+            {"added": ["next"], "metadata": {}}, {"deleted": ["old"]}, {"modified": ["next"]},
+        ):
+            with self.subTest(enum=change):
+                self.assertFalse(cbc._only_additive_response_schema(response({**valid, "enum": change})))
+        for description in (
+            None, "", {}, {"to": "After."}, {"from": "Before."}, {"from": 1, "to": "After."},
+            {"from": "Same.", "to": "Same."}, {"from": None, "to": None},
+            {"from": "Before.", "to": "After.", "metadata": {}},
+        ):
+            self.assertFalse(cbc._only_additive_response_schema(response({**valid, "description": description})))
+        for defect in (
+            {"required": {"added": ["choice"]}}, {"required": {"deleted": ["choice"]}},
+            {"type": {"from": "string", "to": "integer"}}, {"format": {"from": None, "to": "uuid"}},
+            {"pattern": {"from": None, "to": "^next$"}}, {"maxLength": {"from": 10, "to": 5}},
+            {"$ref": {"from": "#/components/schemas/Before", "to": "#/components/schemas/After"}},
+            {"not": {"schemaAdded": True}}, {"if": {"schemaAdded": True}}, {"then": {"required": ["choice"]}},
+            {"allOf": {"added": [{"required": ["choice"]}]}}, {"oneOf": {"modified": []}},
+            {"anyOf": {"deleted": [0]}}, {"unknownConstraint": True},
+        ):
+            self.assertFalse(cbc._only_additive_response_schema(response({**valid, **defect})), defect)
+        self.assertFalse(cbc._only_additive_response_schema({**response(valid), "description": {"from": "a", "to": "b"}}))
+        self.assertFalse(cbc._only_additive_response_schema({**response(valid), "headers": {"deleted": ["Retry-After"]}}))
+
+    def test_real_generic_enum_response_expansion_passes_without_a_model_or_value_whitelist(self) -> None:
+        specs = SpecDir()
+        self.addCleanup(specs.cleanup)
+        text = with_inheritance_probe(spec_text())
+        text = replace_section(text, ("components", "schemas"),
+                               section_text(text, ("components", "schemas")) + """    BreakingProbeChoice:
+      type: string
+      enum: [first]
+      description: First explanation.
+""")
+        text = replace_section(text, ("components", "schemas", "BreakingProbeProvider", "properties", "detail"),
+                               "        detail:\n          $ref: '#/components/schemas/BreakingProbeChoice'\n")
+        base = specs.write(text, "base.yaml")
+        enum = ("components", "schemas", "BreakingProbeChoice")
+        added = replace_in_section(text, enum, "      enum: [first]\n      description: First explanation.\n",
+                                   "      enum: [first, second]\n      description: Second explanation.\n")
+        tools = toolchain.ensure_installed()
+        findings, _ = cbc.compare(base, specs.write(added, "addition.yaml"), tools["oasdiff"])
+        self.assertEqual(findings, [])
+        for declaration in (
+            "      enum: [second]\n", "      enum: [first, second]\n      pattern: '^first$'\n",
+            "      enum: [first, second]\n      not: {const: first}\n",
+        ):
+            narrowed = replace_in_section(text, enum, "      enum: [first]\n", declaration)
+            findings, _ = cbc.compare(base, specs.write(narrowed, "narrowed.yaml"), tools["oasdiff"])
+            self.assertTrue(findings, declaration)
+
+    def test_actual_accepted_enum_delta_and_source_backed_branch_preserve_diff_only_red_history(self) -> None:
+        specs = SpecDir()
+        self.addCleanup(specs.cleanup)
+        accepted = subprocess.run(
+            ["git", "show", "5b41d4580c85be3cc1617074c0f3052b1f7b02cd:spec/openapi.yaml"],
+            cwd=ROOT, capture_output=True, check=True,
+        ).stdout.decode("utf-8")
+        enum_only = replace_section(accepted, ("components", "schemas", "ProblemCode"),
+                                    section_text(spec_text(), ("components", "schemas", "ProblemCode")))
+        code = ("components", "schemas", "ServiceProblemDetail", "properties", "code")
+        enum_only = replace_section(enum_only, code, section_text(spec_text(), code))
+        base = specs.write(accepted, "accepted.yaml")
+        revision = specs.write(enum_only, "enum-only.yaml")
+        tools = toolchain.ensure_installed()
+        findings, _ = cbc.compare(base, revision, tools["oasdiff"])
+        self.assertEqual(findings, [])
+        diff = cbc.oasdiff_json(tools["oasdiff"], "diff", base, revision)
+        response = diff["components"]["responses"]["modified"]["ServiceProblem"]
+        self.assertTrue(cbc._only_additive_response_schema(response))
+        self.assertFalse(cbc._only_optional_property_additions(response["content"]["modified"]["application/problem+json"]["schema"]))
+        actual_diff = cbc.oasdiff_json(tools["oasdiff"], "diff", base, SPEC)
+        findings = cbc.component_findings(actual_diff)
+        self.assertEqual(len(findings), 7, "the preserved diff-only classifier has no authority to waive these records")
+        self.assertIn(("component-schema-allof-added", "components/schemas/ServiceProblemDetail"),
+                      {finding.key() for finding in findings})
+        self.assertIn(("component-responses-changed", "components/responses/ServiceProblem"),
+                      {finding.key() for finding in findings})
+        findings, _ = cbc.compare(base, SPEC, tools["oasdiff"])
+        self.assertEqual(findings, [], "complete sources and exact records, not an acknowledgement, prove this expansion")
 
 
 if __name__ == "__main__":

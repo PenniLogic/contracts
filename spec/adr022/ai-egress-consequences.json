@@ -1,0 +1,511 @@
+{
+  "schema_version": 1,
+  "consequences_version": "1.1.0",
+  "artifact_id": "adr-022-ai-egress-consequences",
+  "record": "ADR-022",
+  "ticket": "T-ADR-AIEGRESS-08",
+  "source_issue": "https://github.com/PenniLogic/docs/issues/42",
+  "schema": "adr/ai-egress-consequences.schema.json",
+  "decision_date": "2026-10-05",
+  "effective_on": "PROTECTED_MERGE",
+  "evidence_scope": "SOURCE_ONLY_NOT_RUNTIME_ENFORCEMENT",
+  "authority": "OWNER_DELEGATED_TECHNICAL_SELECTION_NO_DEPLOYMENT_OR_SPEND",
+  "policy_version": "2026-10-05.2",
+  "runtime": {
+    "id": "R4_LINUX_DOCKER_NFTABLES",
+    "state": "FUTURE_NOT_DEPLOYED",
+    "container_runtime": "DOCKER_ENGINE_COMPOSE",
+    "supervisor": "HOST_SYSTEMD",
+    "network_boundary": "SEPARATE_PREPARED_GATEWAY_AND_PROXY_NETWORK_NAMESPACES",
+    "packet_enforcement": "HOST_OWNED_NAMESPACE_OUTPUT_AND_HOST_INPUT_FORWARD_NFTABLES",
+    "internet_path": "AUTHENTICATED_DESTINATION_AWARE_PROXY_ALL_MODES",
+    "provider_or_custom_direct_path": false,
+    "kubernetes_network_policy": false,
+    "workload_network_admin": false,
+    "metadata_exception": false,
+    "native_ipv4_required": true,
+    "ipv6": "BLOCKED_UNTIL_NATIVE_PARITY_QUALIFIED",
+    "residency": "INDIA_COUNSEL_APPROVED_PROFILE_BEFORE_PROVISIONING",
+    "production_key_custodian": "UNPROVISIONED_ADR018_NONEXPORTABLE_CUSTODIAN_GATE",
+    "admin_host_separation": "ADR020_REQUIRED",
+    "startup": "NO_NETWORK_HOLDER_THEN_RULES_THEN_VETH_THEN_WORKLOAD",
+    "ordered_packet_rules": [
+      "DROP_INVALID_SPOOFED_AND_HARD_DENIED",
+      "ALLOW_EXACT_ROLE_BOUND_CONTROL_TUPLES_AND_ADMITTED_REPLIES",
+      "DROP_REMAINING_DENIED_PRIVATE_AND_SELF",
+      "PROXY_ONLY_PUBLIC_TCP443_CURRENT_LEASE_MEMBERSHIP_EVERY_PACKET",
+      "DROP_ALL_OTHER_TRAFFIC"
+    ],
+    "blanket_established_accept": false,
+    "lease_seconds": 15,
+    "lease_authority": "HOST_CONTROLLER_INDEPENDENT_CAPABILITY_REGISTRY_DNS_AND_FLAG_CHECK",
+    "lease_refresh_on_failure": "DENY",
+    "control_exception": "EXACT_INVENTORIED_ROLE_UNICAST_TUPLE_NEVER_HARD_DENIED",
+    "control_exception_address_scope": "RFC1918_OR_SELF_ULA_OR_SELF_NATIVE_GLOBAL_UNICAST",
+    "controlled_resolver": "ADMITTED_NAMES_ONLY_COMPLETE_A_AAAA_CNAME_RESULTS",
+    "atomic_ruleset_install": "NFT_TRANSACTION_READBACK_AND_NAMESPACE_IDENTITY_CHECK"
+  },
+  "enablement": {
+    "global_default": "off",
+    "custom_default": "off",
+    "approved_providers": [],
+    "approved_custom_destinations": [],
+    "deployment_inventory": [],
+    "missing_empty_or_stale_inventory": "DENY_STARTUP_AND_EGRESS",
+    "runtime_implementation_claimed": false,
+    "source_tests_are_network_evidence": false,
+    "spend_authorized": false,
+    "prerequisite_evaluation": "CLASS_READINESS_BEFORE_ON_OWNER_AND_DESTINATION_CHECKS_PER_OPERATION",
+    "required_prerequisites": [
+      "PINNED_SOURCE_GENERATED_AND_LOADED_CONTRACT_EQUALITY",
+      "H1_APPLICATION_CONSUMERS_IMPLEMENTED",
+      "H2_REAL_LINUX_RUNTIME_AND_PIPELINE_CONSUMERS_IMPLEMENTED",
+      "COMPLETE_CURRENT_DEPLOYMENT_INVENTORY",
+      "ALL_APPLICABLE_RUNTIME_GATES_PASS_IN_EXACT_ENVIRONMENT",
+      "VERIFIED_UNEXPIRED_ENVIRONMENT_BOUND_SUITE_MANIFEST",
+      "VALID_TRANSFER_CONSENT_AND_LIVE_SHARING_GRANTS",
+      "ADR018_QUALIFIED_CUSTODIAN_BEFORE_REAL_DATA_OR_KEYS",
+      "RETENTION_ERASURE_RESTORE_AND_LOG_REDACTION_QUALIFIED",
+      "TWO_INDEPENDENT_ELIGIBLE_OPERATOR_PRINCIPALS",
+      "NATIVE_CI_PROTECTED_MERGE_AND_SEPARATE_NONAUTHOR_REVIEW"
+    ],
+    "provider_inference_prerequisites": [
+      "APPROVED_PROVIDER_RETENTION_REGION_FEATURE_AND_DPA_EVIDENCE",
+      "REVIEWED_PROVIDER_ENTRY_LIVE_APPROVAL_AND_REQUEST_PIN"
+    ],
+    "custom_inference_prerequisites": [
+      "REGISTERED_OWNER_BOUND_DESTINATION_ID",
+      "CURRENT_VALIDATION_APPROVAL_ACTIVE_STATE_AND_EXACT_PIN_SET",
+      "AUTHENTICATING_PROXY_AND_KERNEL_LEASE_PATH_PRESENT",
+      "ALL_T1_THROUGH_T20_GATES_PASS"
+    ]
+  },
+  "wire": {
+    "route": ["client", "core_api", "ai_gateway", "egress_proxy", "approved_destination"],
+    "client_direct": false,
+    "client_provider_routing_url": false,
+    "client_key_persistence": false,
+    "request_schema_additional_properties": false,
+    "inference_target_fields": ["destinationId", "custom_model_id"],
+    "inference_address_fields": [],
+    "forbidden_inference_fields": [
+      "url", "uri", "base_url", "baseUrl", "api_base", "endpoint", "host", "port",
+      "pathPrefix", "providerKey", "headers", "proxy"
+    ],
+    "registration_fields": ["host", "pathPrefix", "credentialHeader", "providerKeyRef", "models"],
+    "registration_raw_key": false,
+    "registration_full_base_url": false,
+    "registration_scheme": "https",
+    "registration_port": 443,
+    "key_enrollment": "SEPARATE_ADR019_STEP_UP_OPERATION",
+    "quota_authority": "ADR-023",
+    "byok_custom_requests": "CONSUMED_SERVER_SIDE",
+    "byok_custom_tokens": "RECORDED_UNCHARGED",
+    "fallback_to_managed": false,
+    "workload_identity": "ADR019_WL_PLUS_API_MINTED_DLG",
+    "custom_models": "ADR023_REGISTERED_CUSTOM_MODEL_ID_ONLY",
+    "denials": "T_CON_12_PROBLEM_DETAIL_NO_UPSTREAM_ADDRESS_OR_EXCEPTION"
+  },
+  "proxy_authorization": {
+    "capability_type": "egress+jwt",
+    "audience": "pennilogic-ai-egress",
+    "issuer": "api",
+    "presenter": "ai-service",
+    "separate_signing_key_class": true,
+    "gateway_can_mint": false,
+    "operations": ["inference", "tls_probe"],
+    "actor_kinds": ["user_request", "scheduled_revalidation"],
+    "bindings": [
+      "sub", "azp", "actor_kind", "originating_request_digest", "admission_id", "destination_id", "destination_class",
+      "destination_version", "operation", "hop", "policy_version", "jti", "iat", "exp"
+    ],
+    "max_lifetime_seconds": 120,
+    "user_capability_bounded_by_request_and_delegation": true,
+    "single_use": true,
+    "request_or_maintenance_admission_check": true,
+    "maintenance_authority": "EXISTING_REGISTRATION_TLS_ONLY_NO_INFERENCE_ENROLLMENT_REPIN_OR_DELEGATION",
+    "probe_admission": "REGISTRATION_OR_MAINTENANCE_RATE_BUDGET_NOT_INFERENCE_RESERVATION",
+    "replay_enforcement": "CONTROLLER_ATOMIC_JTI_CLAIM_PROXY_SINGLE_CONNECTION_RECEIPT",
+    "independent_registry_read": true,
+    "state_max_age_seconds": 15,
+    "stale_state": "DENY_AND_CLOSE",
+    "connect_target": "CANONICAL_VALIDATED_IP_LITERAL_TCP443",
+    "name_check": "BOUNDED_CLIENT_HELLO_REGISTERED_SNI",
+    "client_hello_max_bytes": 65536,
+    "client_hello_seconds": 5,
+    "reject": ["NON_TLS", "UNPARSEABLE_CLIENT_HELLO", "MISSING_SNI", "WRONG_SNI", "ECH"],
+    "tls_interception": false,
+    "validation_candidate_seconds": 120,
+    "tls_probe": "PROXY_OWN_HANDSHAKE_NO_HTTP_KEY_PROMPT_OR_GENERIC_TUNNEL"
+  },
+  "normalization": {
+    "order": [
+      "STRICT_HTTPS_PARSE",
+      "REJECT_LITERAL_HOST",
+      "UTS46_NONTRANSITIONAL_STD3_LOWERCASE_A_LABEL",
+      "REPEAT_LITERAL_SPECIAL_USE_AND_SELF_NAME_CHECKS",
+      "RESOLVE_ALL_A_AAAA_AND_CNAME",
+      "CANONICAL_PACKED_ADDRESS_DENY_AND_GLOBAL_CHECK",
+      "PIN_NUMERIC_ADDRESS_THROUGH_TLS_AND_REQUEST"
+    ],
+    "address_text": "CANONICAL_ROUNDTRIP_ONLY",
+    "comparison": "PACKED_BINARY",
+    "mapped_and_transition_addresses": "DENY_WITHOUT_UNMAPPING",
+    "literal_numeric_last_label": "ASCII_DIGITS_OR_0X_HEXADECIMAL_INCLUDING_EMPTY_0X",
+    "platform_literal_parser_accepted_forms": "DENY",
+    "reapply_literal_guard_after_idna": true,
+    "strip_trailing_dots": 1,
+    "host_label_max_bytes": 63,
+    "host_max_bytes": 253,
+    "path_prefix_max_bytes": 256,
+    "path_percent_decode_count": 1,
+    "reject_nested_percent_encoding": true,
+    "path_prefix_match": "NORMALIZED_SEGMENT_BOUNDARY",
+    "denied_uri_parts": [
+      "USERINFO", "QUERY_EVEN_EMPTY", "FRAGMENT", "WHITESPACE", "CONTROLS",
+      "BACKSLASH", "PERCENT_ENCODED_HOST", "EMPTY_LABEL", "ZONE_ID",
+      "ENCODED_PATH_SEPARATOR", "DOT_PATH_SEGMENT", "MALFORMED_PERCENT_ESCAPE"
+    ],
+    "resolver_timeout_seconds": 5,
+    "max_dns_answers": 64,
+    "max_cname_hops": 8,
+    "any_denied_answer": "DENY_WHOLE_DESTINATION",
+    "empty_partial_failed_or_timed_out_resolution": "DENY",
+    "special_use_or_self_cname": "DENY",
+    "interpreter_is_global": "ADDITIONAL_FAIL_CLOSED_NOT_SOLE_POLICY"
+  },
+  "address_policy": {
+    "denied_ipv4": [
+      "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+      "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+      "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+      "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4"
+    ],
+    "denied_ipv6": [
+      "::/128", "::1/128", "::/96", "::ffff:0:0/96", "64:ff9b::/96",
+      "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16",
+      "3fff::/20", "5f00::/16", "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8"
+    ],
+    "ipv6_allowed_scope": "2000::/3",
+    "named_metadata_and_credentials": [
+      "169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"
+    ],
+    "metadata_denied_all_ports": true,
+    "denied_name_suffixes": [
+      "localhost", "local", "internal", "arpa", "localdomain", "onion", "test", "example", "invalid"
+    ],
+    "suffix_comparison": "EXACT_OR_DNS_LABEL_BOUNDARY",
+    "single_label_names": "DENY",
+    "self_scope": [
+      "ALL_PRODUCT_DOMAINS", "PRIVATE_DEPENDENCIES", "HOST_AND_BRIDGE_ADDRESSES",
+      "PUBLIC_INGRESS", "LOAD_BALANCERS", "NAT_EGRESS", "GLOBAL_UNICAST_IPV6_PREFIXES"
+    ],
+    "ai_destination_control_plane_exceptions": false
+  },
+  "pinning": {
+    "custom_dns_set": "EXACT_EQUALITY_WITH_REGISTRATION_PIN_SET",
+    "any_custom_set_change": "SUSPEND_NOTIFY_ALERT_REQUIRE_FRESH_STEP_UP",
+    "provider_dns_set": "FRESH_VALIDATION_PER_ATTEMPT",
+    "gateway_proxy_controller_disagreement": "DENY",
+    "current_policy_check_before_connect": true,
+    "numeric_dial_no_second_resolution": true,
+    "peer_equals_authorized_address": true,
+    "sni_host_and_certificate_name": "REGISTERED_A_LABEL",
+    "lifetime": "THROUGH_CONNECTION_TLS_REQUEST_RESPONSE_AND_TEARDOWN",
+    "connection_pool_reuse": false,
+    "cross_origin_coalescing": false,
+    "happy_eyeballs": false
+  },
+  "redirects": {
+    "automatic_following": false,
+    "hop_limit": 2,
+    "allowed_status": [307, 308],
+    "location": "SINGLE_ABSOLUTE_HTTPS_TCP443",
+    "all_modes_origin": "SAME_REGISTERED_A_LABEL_AND_CREDENTIAL_AUDIENCE",
+    "path": "APPROVED_NORMALIZED_SEGMENT_BOUNDARY",
+    "revalidate_all_rules_each_hop": true,
+    "new_single_use_capability_each_hop": true,
+    "changed_custom_answers": "REFUSE_WITHOUT_DIAL_AND_SUSPEND",
+    "headers": "REBUILD_REGISTERED_SET_NEVER_CROSS_ORIGIN_FORWARD",
+    "reset_deadline_or_quota": false
+  },
+  "transport": {
+    "scheme": "https",
+    "port": 443,
+    "tls_minimum": "1.2",
+    "http_version": "1.1",
+    "custom_trust_anchors": false,
+    "connect_seconds": 5,
+    "tls_seconds": 5,
+    "first_byte_seconds": 30,
+    "logical_request_seconds": 120,
+    "logical_request_max_attempts": 3,
+    "decoded_response_max_bytes": 4194304,
+    "max_in_flight_per_account": 4,
+    "max_in_flight_per_host_across_accounts": 8,
+    "global_capacity": "FINITE_QUALIFIED_SEPARATE_CUSTOM_WORKER_BUDGET_REQUIRED",
+    "over_capacity": "destination_busy",
+    "base_headers": ["Host", "Content-Type", "Accept", "Content-Length", "User-Agent"],
+    "user_agent": "FIXED_PRODUCT_STRING_NO_IDENTIFIERS",
+    "credential_headers": {
+      "authorization_bearer": "Authorization",
+      "x_api_key": "x-api-key",
+      "api_key": "api-key"
+    },
+    "credential_schemes": {"authorization_bearer": "Bearer", "x_api_key": null, "api_key": null},
+    "provider_headers": "REVIEWED_DESTINATION_ENTRY_ONLY",
+    "ignored_or_disabled": [
+      "ALT_SVC", "HTTPS_SVCB", "ECH", "PRECONNECT", "HSTS", "PROXY_ENVIRONMENT",
+      "PROXY_AUTOCONFIG", "HTTP2_COALESCING", "HTTP3_QUIC", "HAPPY_EYEBALLS", "HIDDEN_SDK_RETRY"
+    ]
+  },
+  "registration": {
+    "owner": "ACCOUNT_OWNER_ONLY_FRESH_STEP_UP",
+    "approval": "ALL_CHECKS_CONSENT_GATE_EVIDENCE_AND_ACTIVE_STATE_NOT_JUST_PROBE",
+    "raw_key_returned": false,
+    "operator_can_register_or_promote": false,
+    "registration_limit_per_hour": 5,
+    "registration_limit_per_day": 20,
+    "per_account_active_destinations": 1,
+    "uniqueness": "DATABASE_CONSTRAINT",
+    "risk_pending_activation_hours": 24,
+    "timer_alone_approves": false,
+    "scheduled_revalidation_hours": 24,
+    "revalidate_on": ["REGISTRATION_CHANGE", "POLICY_OR_INVENTORY_CHANGE", "FIRST_USE_AFTER_SUSPENSION", "EVERY_ATTEMPT"],
+    "authoritative_admission_state_required": true,
+    "revoked_is_terminal": true,
+    "revocation_total_bound_seconds": 60,
+    "retention_authority": "T-CMP-01_WITH_T-CMP-04_COUNSEL",
+    "erasure": "SHRED_OR_PSEUDONYMIZE_PERSONAL_DESTINATION_FIELDS_RETAIN_AUDIT_CHAIN",
+    "restore": "NO_RESURRECTED_KEYS_PINS_APPROVALS_OR_ON_FLAGS"
+  },
+  "enums": {
+    "DestinationClass": ["code_managed_provider", "runtime_registered_custom"],
+    "CredentialHeader": ["authorization_bearer", "x_api_key", "api_key"],
+    "CustomDestinationState": [
+      "pending_activation", "active", "suspended_resolution_changed",
+      "suspended_validation_failed", "suspended_recovery", "suspended_kill_switch", "revoked"
+    ],
+    "EgressDenialReason": [
+      "destination_denied", "destination_not_registered", "destination_suspended",
+      "destination_revoked", "destination_busy", "resolution_changed", "redirect_denied",
+      "redirect_hop_limit", "tls_verification_failed", "unreachable", "kill_switch_active",
+      "registration_rate_limited", "step_up_required", "pending_activation"
+    ]
+  },
+  "state_denials": {
+    "pending_activation": "pending_activation",
+    "suspended_resolution_changed": "resolution_changed",
+    "suspended_validation_failed": "destination_suspended",
+    "suspended_recovery": "destination_suspended",
+    "suspended_kill_switch": "kill_switch_active",
+    "revoked": "destination_revoked"
+  },
+  "kill_switch": {
+    "store": "PRIMARY_DATABASE_PLATFORM_FLAG_STORE",
+    "scopes": ["ai_egress_global", "custom_destinations_class", "destination"],
+    "seeded_global": "off",
+    "seeded_custom": "off",
+    "absent_malformed_or_deleted": "OFF_AND_ALERT",
+    "runtime_or_admin_delete": false,
+    "gateway_and_proxy_role": "READ_ONLY",
+    "freshness_seconds": 15,
+    "stale_on_error_grace_seconds": 0,
+    "total_effect_bound_seconds": 60,
+    "global_off_stops": ["INFERENCE_ALL_MODES", "DNS_TLS_PROBES", "REVALIDATION", "RETRIES", "OPEN_STREAMS"],
+    "off_operators": ["ON_CALL_PLATFORM", "SECURITY_OPERATOR", "HOST_BREAK_GLASS_OFF", "OWNER_FOR_OWN_DESTINATION"],
+    "on": "TWO_INDEPENDENT_ELIGIBLE_OPERATOR_PRINCIPALS_FRESH_STEP_UP_DURABLE_AUDIT_ALL_GATES",
+    "single_operator_delayed_on": false,
+    "startup": "ALL_SCOPES_OFF_WITHOUT_FRESH_VERIFIED_STATE",
+    "suite_manifest": {
+      "signed_by": "RESTRICTED_RUNTIME_VERIFICATION_STAGE",
+      "max_lifetime_days": 7,
+      "bindings": [
+        "environment", "build_image_digest", "source_consequences_digest", "policy_digest",
+        "inventory_digest", "kernel_docker_nftables_configuration", "suite_run_id", "expires_at"
+      ],
+      "verify": "PINNED_IDENTITY_OR_PUBLIC_KEY_AND_ACTUAL_RUNTIME_SUITE_EVIDENCE",
+      "source_test_or_database_pass_row_is_proof": false
+    }
+  },
+  "privacy": {
+    "payload_forbidden": [
+      "RAW_MESSAGE_CONTENT", "RAW_DERIVED_DIGEST", "ACCOUNT_CARD_LOAN_NUMBER",
+      "GOVERNMENT_IDENTIFIER", "UPI_VPA", "PHONE_OR_CONTACT", "INTERNAL_SUBJECT_IDENTIFIER",
+      "COUNTERPARTY_OR_HOUSEHOLD_NAME", "DEVICE_ACCOUNT_SESSION_TENANT_IDENTIFIER",
+      "CREDENTIAL_OR_KEY", "UNREDACTED_MEMO"
+    ],
+    "question_redaction": "SAME_FINAL_EGRESS_BOUNDARY_REDACTION",
+    "mode_a_shared_data": "EXISTING_LIVE_AUTHORIZED_GRANT",
+    "mode_b_c_shared_data": "EXPLICIT_LIVE_PER_GRANT_AI_EGRESS_PERMISSION_DEFAULT_OFF",
+    "transfer_consent": "VERSIONED_WITHDRAWABLE_NO_LEGAL_OR_OTHER_PRINCIPAL_OVERRIDE",
+    "provider_evidence": ["retention_evidence_ref", "processor_agreement_ref"],
+    "durable_pre_egress_audit_required": true,
+    "emergency_off_blocked_by_audit_outage": false,
+    "metrics": "BOUNDED_CLASS_MODE_REASON_ONLY_NO_HOST_ADDRESS_SUBJECT_OR_DESTINATION_LABELS",
+    "restricted_audit": "ADR020_OPAQUE_STREAMS_SEPARATE_CLASSIFIED_ADDRESS_EVIDENCE"
+  },
+  "audit_evidence": {
+    "authority_record": "ADR-020",
+    "authority_sha256": "1beee6eb764fc61b9f8eca71e7eee8ddb5d0012908edaf8c1b3d13329d26a6c8",
+    "implementation_state": "FUTURE_NOT_IMPLEMENTED",
+    "owner": "T-SEC-03",
+    "foundational_event": {
+      "store": "audit.event",
+      "existing_fields": [
+        "audit_event_id", "occurred_at", "actor_class", "actor_principal_id",
+        "subject_id", "action", "resource", "outcome", "reason_code",
+        "policy_version", "data_classes", "origin", "related_event_id"
+      ],
+      "schema": "ADR020_COMPLETE_TYPED_SCHEMA_NO_NEW_PAYLOAD_OR_ADDRESS_COLUMN",
+      "reference_field": "resource.id",
+      "resource_type": "ai_egress_evidence",
+      "reference_kind": "SERVER_RANDOM_UUID_V4_NOT_VALUE_DERIVED",
+      "address_values": "FORBIDDEN_IN_TRAIL_CHAIN_TRANSPARENCY_AND_COPIES",
+      "prohibited_evidence_forms": [
+        "ADDRESS_HOST_URL_DNS_ANSWER", "ADDRESS_HASH_OR_HMAC", "ADDRESS_CIPHERTEXT",
+        "EVIDENCE_PLAINTEXT_DIGEST", "PACKET_OR_PROVIDER_PAYLOAD"
+      ],
+      "origin": "ADR020_OPAQUE_OPERATOR_ORIGIN_NOT_DESTINATION",
+      "writer_bindings": {
+        "consent.*": "pennilogic_app",
+        "audit.*": "chain_verifier",
+        "admin.*": "admin_api_owner",
+        "redaction.*": "redaction_service",
+        "broker.*": "T-PLT-05"
+      },
+      "customer_actions": "CONSENT_EGRESS_LIFECYCLE_WITH_REAL_OWNER_AUTHORITY",
+      "system_actions": "AUDIT_VERIFICATION_EGRESS_WITH_SYSTEM_ACTOR_AND_VERIFIED_JOB",
+      "system_writer_scope": "VERIFICATION_EVENT_ONLY_NO_DOMAIN_STATE_OR_CIPHERTEXT_WRITE",
+      "projection": "ADR020_EXISTING_NAMESPACE_SCOPE_NO_EVIDENCE_DEREFERENCE",
+      "erasure": "TRAIL_CHAIN_UNCHANGED_ONLY_ADR020_TRANSPARENCY_ERASURE_STEP"
+    },
+    "address_evidence": {
+      "store": "ai_egress_evidence",
+      "authority": "NONAUTHORITATIVE_ERASABLE_EVIDENCE_NOT_FOURTH_AUDIT_STREAM",
+      "classification": "PERSONAL_DESTINATION_NETWORK_METADATA_NOT_ANONYMOUS",
+      "constrained_columns": [
+        "evidence_id", "audit_event_id", "owner_id", "created_at", "expires_at",
+        "retention_profile_version", "phase", "key_id"
+      ],
+      "encrypted_values": [
+        "REQUEST_JOB_DESTINATION_RESOLUTION_LINKS",
+        "CANONICAL_HOST_AND_COMPLETE_ADDRESS_SET",
+        "AUTHORIZED_PIN_AND_OBSERVED_SOCKET_PEER",
+        "TLS_IDENTITY_AND_VERDICT",
+        "NAMESPACE_RULE_PATH_AND_SYNTHETIC_SINK_OBSERVATIONS",
+        "BYTE_STATUS_TIMING_AND_LAST_BYTE_CONFIRMED_CLOSE_EVIDENCE"
+      ],
+      "payloads": "NO_KEYS_HEADERS_PROMPTS_RAW_LOCATION_RESPONSE_OR_PACKET_PAYLOAD",
+      "customer_key_scope": "ADR018_OWNER_DEK_AND_AAD_NO_PLATFORM_REWRAP",
+      "system_key_scope": "DEPLOYMENT_ONLY_SEPARATE_CUSTODIAN_WRAPPED_DEK_NO_CUSTOMER_LINKS",
+      "system_key_originator_months": 12,
+      "system_rows": "NO_CUSTOMER_OWNER_OR_LINKS_VERIFIED_DEPLOYMENT_JOB_ONLY",
+      "intake": "AUTHENTICATED_TYPED_CORE_INTAKE_NO_GATEWAY_DATABASE_ROLE",
+      "maintenance_sealing": "EVIDENCE_ONLY_VERIFIED_OWNER_KEYOPS_JOB_NO_USER_DELEGATION_OR_VERIFIER_UNWRAP",
+      "write_order": "DURABLE_EVIDENCE_STAGE_THEN_EXISTING_WRITER_EVENT_COMMIT_BEFORE_ADMISSION",
+      "phase_order": "COMMITTED_INTENT_BEFORE_NETWORK_OBSERVATIONS_AFTER_PHASE_NO_NEXT_PHASE_ON_RECORD_FAILURE",
+      "orphan_stage": "NO_ADMISSION_RECEIPT_EXPIRE_AND_DELETE_NEVER_REUSE_REFERENCE",
+      "value_read_access": "ADR020_RECORDED_CHAIN_CONFIRMED_REDACTION_PATH_NO_AUDIT_READER_DECRYPT",
+      "rls": "FORCED_OWNER_OR_RECORDED_SUBJECT_SCOPE_NO_CROSS_OWNER_OR_ADMIN_CIPHERTEXT",
+      "retention": "TCMP01_COUNSEL_APPROVED_INDEPENDENT_FINITE_EVIDENCE_AND_RESOLUTION_PROFILE",
+      "retention_profile_fields": [
+        "live_evidence_period", "post_revocation_evidence_period",
+        "uncommitted_stage_period", "resolution_link_period", "backup_expiry_bound"
+      ],
+      "missing_retention_profile": "DENY_NEW_EGRESS_KEEP_EMERGENCY_OFF_AVAILABLE",
+      "expiry": "DELETE_EVIDENCE_AND_RESOLUTION_LINKS_AND_DERIVED_COPIES",
+      "erasure": "ADR021_DELETE_EVIDENCE_AND_RESOLUTION_LINKS_SHRED_OWNER_DEK",
+      "restore": "REPLAY_ERASURE_AND_EXPIRY_BEFORE_ACCESS_NO_RESOLUTION_OR_ACTIVE_STATE_RESURRECTION",
+      "missing_evidence": "REPORT_EXPIRED_ERASED_OR_UNAVAILABLE_NEVER_RECONSTRUCT_OR_CLAIM_PROOF"
+    },
+    "custody_owners": ["T-PLT-03", "T-PLT-02", "T-PLT-05"],
+    "retention_owners": ["T-CMP-01", "T-CMP-04"],
+    "runtime_evidence_owners": ["T-AI-01", "T-AI-02", "T-AI-03", "T-PLT-01"],
+    "consumer_obligation": "VERSION_FORWARD_TYPED_EVENTS_AND_CRYPTO_ERASURE_INVENTORIES_NO_RUNTIME_COMPLETION_CLAIM"
+  },
+  "observability": {
+    "revocation_measure": "AUTHORITATIVE_CHANGE_TO_ALL_AFFECTED_CONNECTIONS_CLOSED_AND_NO_BYTES_EITHER_DIRECTION",
+    "verification_interval_hours": 24,
+    "missed_verification_alert_hours": 25,
+    "failed_or_overdue_verification": "CLOSE_ADMISSION_REVOKE_WITHIN_TOTAL_BOUND_AND_ALERT_NO_RENEWAL",
+    "verification_contexts": ["ACTUAL_GATEWAY_NAMESPACE", "ACTUAL_PROXY_NAMESPACE"],
+    "config_file_or_unreachable_host_is_proof": false
+  },
+  "runtime_gates": [
+    {"id": "T1", "evidence": "METADATA_ALL_PORTS_BOTH_NAMESPACES_BYPASSED_VALIDATOR", "owners": ["T-AI-02", "T-AI-03"]},
+    {"id": "T2", "evidence": "EVERY_DENIED_CLASS_BOUNDARY_AND_MIXED_FAMILY", "owners": ["T-AI-02", "T-AI-03"]},
+    {"id": "T3", "evidence": "REAL_IDNA_URL_AND_ALTERNATE_ADDRESS_NORMALIZATION", "owners": ["T-AI-03"]},
+    {"id": "T4", "evidence": "REBINDING_CNAME_MIXED_AND_OVERLAPPING_CUSTOM_SETS", "owners": ["T-AI-03", "T-AI-02"]},
+    {"id": "T5", "evidence": "EVERY_REDIRECT_HOP_ORIGIN_CREDENTIAL_AND_BUDGET_CHECK", "owners": ["T-AI-03"]},
+    {"id": "T6", "evidence": "STRICT_GENERATED_CONTRACT_NESTED_FIELDS_ENUMS_AND_DRIFT", "owners": ["T-CON-EGRESS-01", "T-SCA-CON-01", "T-QA-02", "T-CON-06"]},
+    {"id": "T7", "evidence": "KILL_SWITCH_PARTITION_EVIDENCE_FORGERY_AND_OPERATOR_GATES", "owners": ["T-AI-03", "T-ADM-08", "T-PLT-01"]},
+    {"id": "T8", "evidence": "EXACT_CONTROL_EXCLUSIONS_AND_REAL_NAMESPACE_PACKET_PATH", "owners": ["T-AI-02"]},
+    {"id": "T9", "evidence": "NUMERIC_SOCKET_PEER_TLS_PIN_NO_RESOLVE_OR_POOL_BYPASS", "owners": ["T-AI-03", "T-AI-02"]},
+    {"id": "T10", "evidence": "RAW_SOCKET_PROXY_CAPABILITY_SNI_DNS_AND_STATE_BYPASSES", "owners": ["T-AI-02", "T-AI-03", "T-AUTH-DLG-01"]},
+    {"id": "T11", "evidence": "TLS_FAILURES_AND_BODYLESS_NONTUNNEL_REGISTRATION_PROBES", "owners": ["T-AI-03", "T-AI-02"]},
+    {"id": "T12", "evidence": "SELF_PUBLIC_PRIVATE_IPV6_INVENTORY_AND_STARTUP_DENIAL", "owners": ["T-AI-03", "T-PLT-01"]},
+    {"id": "T13", "evidence": "REGISTRATION_ABUSE_RACE_COOLING_AND_COARSE_ERRORS", "owners": ["T-AI-03"]},
+    {"id": "T14", "evidence": "CAPTURED_EGRESS_RAW_IDENTIFIER_KEY_SHARED_DATA_AND_OPAQUE_AUDIT_PROJECTION_HYGIENE", "owners": ["T-AI-05", "T-AI-01", "T-AI-03", "T-FAM-01", "T-SEC-03"]},
+    {"id": "T15", "evidence": "HEADER_KEY_OWNER_AUDIENCE_AND_REDIRECT_ISOLATION", "owners": ["T-AI-01", "T-AI-03", "T-AI-07"]},
+    {"id": "T16", "evidence": "CLASS_ALLOWLIST_AND_NO_MANAGED_FALLBACK", "owners": ["T-AI-02", "T-AI-03", "T-ADM-08"]},
+    {"id": "T17", "evidence": "REVOCATION_RECOVERY_EVIDENCE_UNLINK_ERASURE_RESTORE_AND_STREAM_BOUND", "owners": ["T-AI-03", "T-AI-01", "T-PLT-02", "T-SEC-03"]},
+    {"id": "T18", "evidence": "DECOMPRESSION_SLOW_STREAM_GLOBAL_AND_CROSS_ACCOUNT_CAPS", "owners": ["T-AI-03"]},
+    {"id": "T19", "evidence": "CLOSED_STARTUP_DOCKER_CRASH_NFTABLES_CONNTRACK_AND_LEASES", "owners": ["T-AI-02", "T-PLT-01"]},
+    {"id": "T20", "evidence": "ACTUAL_CONSUMER_PIPELINE_DIGEST_AND_DEPLOYMENT_GATE_ENFORCEMENT", "owners": ["T-AI-02", "T-PLT-01", "T-QA-02", "T-AI-06"]}
+  ],
+  "source_normalization_vectors": {
+    "literal_hosts_denied": [
+      "169.254.169.254", "169.254.170.2", "2852039166", "0251.0376.0251.0376",
+      "0xA9FEA9FE", "0xA9.0xFE.0xA9.0xFE", "0x7f.0.0.1", "169.254.43518",
+      "127.1", "0127.0.0.01", "[::1]", "::ffff:a9fe:a9fe",
+      "::ffff:169.254.169.254", "fe80::1%eth0", "0x"
+    ],
+    "post_idna_literal_outputs": [
+      {"input": "\uff11\uff12\uff17\u3002\uff10\u3002\uff10\u3002\uff11", "a_label": "127.0.0.1"},
+      {"input": "\uff10\uff58\uff17\uff46\u3002\uff10\u3002\uff10\u3002\uff11", "a_label": "0x7f.0.0.1"}
+    ],
+    "post_idna_test_scope": "LITERAL_GUARD_ON_PUBLISHED_OUTPUT_NOT_UTS46_EXECUTION"
+  },
+  "delivery": {
+    "prerequisites": ["PenniLogic/docs#141", "PenniLogic/docs#70", "PenniLogic/infra#3"],
+    "epics": ["PenniLogic/docs#29", "PenniLogic/docs#18", "PenniLogic/docs#19", "PenniLogic/docs#27"],
+    "consumers": [
+      {"identity": "T-AI-01", "issue": "PenniLogic/ai-service#2"},
+      {"identity": "T-AUTH-DLG-01", "issue": "PenniLogic/api#87"},
+      {"identity": "T-SEC-03", "issue": "PenniLogic/api#39"},
+      {"identity": "T-AI-02", "issue": "PenniLogic/infra#30"},
+      {"identity": "T-PLT-01", "issue": "PenniLogic/infra#25"},
+      {"identity": "T-AI-03", "issue": "PenniLogic/ai-service#3"},
+      {"identity": "T-AI-05", "issue": "PenniLogic/ai-service#4"},
+      {"identity": "T-AI-04", "issue": "PenniLogic/api#36"},
+      {"identity": "T-AI-06", "issue": "PenniLogic/ai-service#7"},
+      {"identity": "T-AI-07", "issue": "PenniLogic/ai-service#8"},
+      {"identity": "T-CON-EGRESS-01", "issue": "PenniLogic/contracts#27"},
+      {"identity": "T-SCA-CON-01", "issue": "PenniLogic/contracts#2"},
+      {"identity": "T-QA-02", "issue": "PenniLogic/contracts#3"},
+      {"identity": "T-CON-06", "issue": "PenniLogic/contracts#10"},
+      {"identity": "T-CON-03", "issue": "PenniLogic/contracts#7"},
+      {"identity": "T-CON-12", "issue": "PenniLogic/contracts#16"},
+      {"identity": "T-CON-04", "issue": "PenniLogic/contracts#8"},
+      {"identity": "T-FAM-01", "issue": "PenniLogic/api#34"},
+      {"identity": "T-CON-09", "issue": "PenniLogic/contracts#14"},
+      {"identity": "T-CMP-01", "issue": "PenniLogic/api#24"},
+      {"identity": "T-CMP-04", "issue": "PenniLogic/docs#44"},
+      {"identity": "T-ADM-08", "issue": "PenniLogic/admin#5"},
+      {"identity": "T-PLT-03", "issue": "PenniLogic/infra#27"},
+      {"identity": "T-PLT-02", "issue": "PenniLogic/infra#26"},
+      {"identity": "T-PLT-05", "issue": "PenniLogic/infra#32"},
+      {"identity": "T-PLT-04", "issue": "PenniLogic/api#21"},
+      {"identity": "T-AIP-04", "issue": "PenniLogic/web#15"},
+      {"identity": "T-UXA-11", "issue": "PenniLogic/docs#97"},
+      {"identity": "T-UXW-08", "issue": "PenniLogic/docs#110"},
+      {"identity": "T-QA-09", "issue": "PenniLogic/android#16"},
+      {"identity": "T-ADR-ENT-09", "issue": "PenniLogic/docs#47"}
+    ],
+    "unimplemented_gaps": ["H1_APPLICATION_CONSUMERS", "H2_RUNTIME_AND_PIPELINE_CONSUMERS"],
+    "replacement_tickets": [],
+    "remote_updates_claimed": false,
+    "independent_approval_claimed": false
+  }
+}

@@ -83,7 +83,10 @@ class ImportSchemaTest(unittest.TestCase):
         for kind, members in base["components"].items():
             for name, schema in members.items():
                 self.assertEqual(current["components"][kind][name], schema, f"existing {kind}/{name} changed")
-        self.assertEqual(current["paths"], {})
+        for route, operations in base["paths"].items():
+            self.assertEqual(current["paths"][route], operations, f"existing path {route} changed")
+        self.assertFalse(any("/import" in route for route in current["paths"]),
+                         "the shared import provider does not publish a product operation")
 
     def test_source_pins_and_taxonomy_projection_are_explicit(self) -> None:
         policy = json.loads((ROOT / "spec" / "import-group.v1.json").read_text(encoding="utf-8"))

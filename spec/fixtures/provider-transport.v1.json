@@ -20,11 +20,28 @@
     {"schema": "ImportCommitRequest", "fixture": "import-provider.v1.json", "path": ["request"]},
     {"schema": "ImportCommitRow", "fixture": "import-provider.v1.json", "path": ["result", "rows", 0]},
     {"schema": "ImportCommitCounts", "fixture": "import-provider.v1.json", "path": ["result", "counts"]},
-    {"schema": "ImportCommitResult", "fixture": "import-provider.v1.json", "path": ["result"]}
+    {"schema": "ImportCommitResult", "fixture": "import-provider.v1.json", "path": ["result"]},
+    {"schema": "CustomDestinationRegistrationRequest", "fixture": "custom-destination-wire.v1.json", "path": ["registration"]},
+    {"schema": "CustomDestinationLifecycleRequest", "fixture": "custom-destination-wire.v1.json", "path": ["lifecycle"]},
+    {"schema": "CustomDestination", "fixture": "custom-destination-wire.v1.json", "path": ["destination"]},
+    {"schema": "CustomDestinationValidationResult", "fixture": "custom-destination-wire.v1.json", "path": ["validation"]},
+    {"schema": "CustomDestinationModel", "fixture": "custom-destination-wire.v1.json", "path": ["destination", "models", 0]},
+    {"schema": "CustomDestinationList", "fixture": "custom-destination-wire.v1.json", "path": ["list"]},
+    {"schema": "EgressDeniedProblemDetail", "fixture": "egress-errors.v1.json", "path": ["wire_examples", "destination_denied"]},
+    {"schema": "AuthenticationProblemDetail", "fixture": "egress-errors.v1.json", "path": ["wire_examples", "authentication_required"]},
+    {"schema": "AuthenticationRequiredProblemDetail", "fixture": "egress-errors.v1.json", "path": ["wire_examples", "authentication_required"]},
+    {"schema": "OperationProblemDetail", "fixture": "import-provider.v1.json", "path": ["override_rejection"]}
   ],
   "array_controls": [
     {
       "schema": "ServiceProblemDetail", "fixture": "allocation-refusal.v1.json", "path": ["problem"],
+      "set": {
+        "direction": "shortfall",
+        "validation_errors": [{"field": "allocation", "reason": "allocation_sum_mismatch", "direction": "shortfall"}]
+      }
+    },
+    {
+      "schema": "OperationProblemDetail", "fixture": "allocation-refusal.v1.json", "path": ["problem"],
       "set": {
         "direction": "shortfall",
         "validation_errors": [{"field": "allocation", "reason": "allocation_sum_mismatch", "direction": "shortfall"}]

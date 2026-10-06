@@ -73,6 +73,16 @@ class ProviderTransportTest {
         "ImportCommitRow" to codec<ImportCommitRow>(),
         "ImportCommitCounts" to codec<ImportCommitCounts>(),
         "ImportCommitResult" to codec<ImportCommitResult>(),
+        "CustomDestinationRegistrationRequest" to codec<CustomDestinationRegistrationRequest>(),
+        "CustomDestinationLifecycleRequest" to codec<CustomDestinationLifecycleRequest>(),
+        "CustomDestination" to codec<CustomDestination>(),
+        "CustomDestinationValidationResult" to codec<CustomDestinationValidationResult>(),
+        "CustomDestinationModel" to codec<CustomDestinationModel>(),
+        "CustomDestinationList" to codec<CustomDestinationList>(),
+        "EgressDeniedProblemDetail" to codec<EgressDeniedProblemDetail>(),
+        "AuthenticationProblemDetail" to codec<AuthenticationProblemDetail>(),
+        "AuthenticationRequiredProblemDetail" to codec<AuthenticationRequiredProblemDetail>(),
+        "OperationProblemDetail" to codec<OperationProblemDetail>(),
     )
     private fun sample(entry: JsonObject): JsonElement {
         var value: JsonElement = Fixtures.load(entry.getValue("fixture").jsonPrimitive.content)
@@ -109,7 +119,17 @@ class ProviderTransportTest {
                 cases += 1
             }
         }
-        assertEquals(11, cases)
+        assertEquals(15, cases)
+    }
+
+    @Test fun everyMarkedRootRejectsNullInOrdinaryAndGeneratedTransportButNullableLegacyRemains() = runBlocking<Unit> {
+        val transforms = codecs()
+        assertEquals(29, transforms.size)
+        transforms.forEach { (name, transform) ->
+            assertSafe(assertFails(name) { transform.decode(JsonNull) })
+            assertSafe(assertFails(name) { transform.transport(JsonNull) })
+        }
+        assertNull(json.decodeFromJsonElement<ProblemDetail?>(JsonNull))
     }
 
     @Test fun refusalIsStrictInOrdinaryDecodeAndActualGeneratedTransport() = runBlocking {
@@ -152,7 +172,7 @@ class ProviderTransportTest {
     @Test fun everyClosedProviderUsesStrictOrdinarySerializationAndActualGeneratedTransport() = runBlocking {
         val declared = Fixtures.load("provider-transport.v1.json").getValue("models").jsonArray
         val transforms = codecs()
-        assertEquals(19, declared.size)
+        assertEquals(29, declared.size)
         assertEquals(transforms.keys, declared.map { it.jsonObject.getValue("schema").jsonPrimitive.content }.toSet())
         declared.forEach { entry ->
             val name = entry.jsonObject.getValue("schema").jsonPrimitive.content

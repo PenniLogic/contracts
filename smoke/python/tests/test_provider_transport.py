@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from io import BytesIO
 import json
 import unittest
 from typing import Any, Callable, Iterator
@@ -12,7 +13,9 @@ from fixtures import load
 from pennilogic_contracts import ApiClient
 from pennilogic_contracts.models import AiRefusal, ImportPreview, ServiceProblemDetail
 from pennilogic_contracts.provider_model import ProviderModel
+from pennilogic_contracts.rest import RESTResponse
 from pydantic import BaseModel
+from urllib3 import HTTPResponse
 
 
 def transport_write(value: object) -> object:
@@ -58,6 +61,27 @@ def null_array_entries(value: Any) -> Iterator[Any]:
 
 
 class ProviderTransportTest(unittest.TestCase):
+    def test_marked_null_roots_fail_before_transport_conversion_but_explicit_optional_and_legacy_remain(self) -> None:
+        client = ApiClient()
+        count = 0
+        for name, _wire in specimens():
+            model = getattr(generated_models, name)
+            for raw, response_type in (
+                ("null", name), ("null", model), ("[null]", f"List[{name}]"),
+                ('{"value":null}', f"Dict[str, {name}]"),
+            ):
+                with self.subTest(name=name, response_type=response_type), self.assertRaises(ValueError):
+                    client.deserialize(raw, response_type, "application/json")
+            self.assertIsNone(client.deserialize("null", f"Optional[{name}]", "application/json"))
+            self.assertEqual(client.deserialize("[null]", f"List[Optional[{name}]]", "application/json"), [None])
+            count += 1
+        self.assertEqual(count, 29)
+        for legacy in ("ProblemDetail", "object"):
+            self.assertIsNone(client.deserialize("null", legacy, "application/json"))
+        response = RESTResponse(HTTPResponse(body=BytesIO(b""), status=204, preload_content=False))
+        response.read()
+        self.assertIsNone(client.response_deserialize(response, {"204": None}).data)
+
     def test_every_nested_model_and_primitive_array_rejects_null_before_transport(self) -> None:
         cases = 0
         for name, wire in specimens(arrays=True):
@@ -68,7 +92,7 @@ class ProviderTransportTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         read(invalid)
                 cases += 1
-        self.assertEqual(cases, 11)
+        self.assertEqual(cases, 15)
 
     def test_successful_refusal_rejects_unknown_content_in_ordinary_conversion_and_transport(self) -> None:
         valid = load("error-provider.v1.json")["refusal"]
@@ -138,7 +162,7 @@ class ProviderTransportTest(unittest.TestCase):
                         write()
                     self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(caught.exception), name)
             count += 1
-        self.assertEqual(count, 19)
+        self.assertEqual(count, 29)
 
     def test_every_integer_and_boolean_leaf_rejects_quoted_values_before_model_conversion(self) -> None:
         cases = 0

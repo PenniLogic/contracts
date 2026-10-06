@@ -19,7 +19,13 @@ internal object ProviderConstraints {
             var escaped = false
             source.forEach { character ->
                 when {
-                    escaped -> { translated.append(character); escaped = false }
+                    escaped -> {
+                        if (character == 's' && inClass) {
+                            translated.setLength(translated.length - 1)
+                            translated.append("\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff")
+                        } else translated.append(character)
+                        escaped = false
+                    }
                     character == '\\' -> { translated.append(character); escaped = true }
                     character == '[' -> { translated.append(character); inClass = true }
                     character == ']' -> { translated.append(character); inClass = false }
@@ -49,6 +55,7 @@ internal object ProviderConstraints {
                 if (value.content.any { it.code !in 33..126 } || Regex("%(?![0-9a-fA-F]{2})").containsMatchIn(value.content)) false
                 else try { URI(value.content); true } catch (_: URISyntaxException) { false }
             }
+            "uuid" -> UuidSerializer.accepts(value.content)
             else -> throw ProviderWireException()
         }
     }

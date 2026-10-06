@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,7 @@ class TreeHashTest(unittest.TestCase):
         self.assertEqual(len(digest), 64)
 
     def test_spec_version_regex(self) -> None:
-        self.assertEqual(pl_contracts.spec_version(spec_text()), "0.2.0")
+        self.assertEqual(pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: 0.2.0\npaths: {}\n"), "0.2.0")
         self.assertEqual(pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: '2.10.3'\npaths: {}\n"), "2.10.3")
         with self.assertRaises(pl_contracts.PipelineError):
             pl_contracts.spec_version("openapi: 3.1.0\ninfo:\n  title: x\n  version: 1.0\n")
@@ -239,6 +240,85 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
         return text.replace(old, new)
 
+    def test_python_api_override_adds_precise_types_typed_responses_and_private_diagnostics(self) -> None:
+        expected = self.stock("python/api.mustache")
+        response_type = "ApiResponse[{{{returnType}}}{{^returnType}}None{{/returnType}}]"
+        edits = [
+            ("    @validate_call\n", '    @validate_call(config={"hide_input_in_errors": True})\n', 10),
+            ("def __init__(self, api_client=None) -> None:",
+             "def __init__(self, api_client: Optional[ApiClient] = None) -> None:", 1),
+            ("return self.api_client.response_deserialize(",
+             f"return {response_type}.model_validate(self.api_client.response_deserialize(", 4),
+            ("            response_types_map=_response_types_map,\n        ).data",
+             "            response_types_map=_response_types_map,\n        ), from_attributes=True).data", 2),
+            ("            response_types_map=_response_types_map,\n        )\n",
+             "            response_types_map=_response_types_map,\n        ), from_attributes=True)\n", 2),
+            ("        {{paramName}},\n", "        {{paramName}}: {{{vendorExtensions.x-py-typing}}},\n", 1),
+            ("        _request_auth,\n", "        _request_auth: Optional[Dict[str, object]],\n", 1),
+            ("        _content_type,\n", "        _content_type: Optional[str],\n", 1),
+            ("        _headers,\n", "        _headers: Optional[Dict[str, object]],\n", 1),
+            ("        _host_index,\n", "        _host_index: int,\n", 1),
+            ("_path_params: Dict[str, str]", "_path_params: Dict[str, object]", 1),
+            ("_query_params: List[Tuple[str, str]]", "_query_params: List[Tuple[str, object]]", 1),
+            ("_header_params: Dict[str, Optional[str]]", "_header_params: Dict[str, object]", 1),
+            ("_form_params: List[Tuple[str, str]]", "_form_params: List[Tuple[str, object]]", 1),
+            ("_body_params: Optional[bytes]", "_body_params: object", 1),
+        ]
+        for old, new, count in edits:
+            self.assertEqual(expected.count(old), count, old)
+            expected = expected.replace(old, new)
+        actual = (ROOT / "generator" / "templates" / "python" / "api.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
+    def test_python_api_client_override_types_the_existing_transport_not_string_named_models(self) -> None:
+        expected = self.stock("python/api_client.mustache")
+        edits = [
+            ("from {{packageName}}.api_response import ApiResponse, T as ApiResponseT",
+             "from {{packageName}}.api_response import ApiResponse"),
+            ("RequestSerialized = Tuple[str, str, Dict[str, str], Optional[str], List[str]]",
+             "RequestSerialized = Tuple[str, str, Dict[str, str], object, List[Tuple[str, object]]]"),
+            ("def get_default(cls):", 'def get_default(cls) -> "ApiClient":'),
+            ("response_types_map: Optional[Dict[str, ApiResponseT]]=None\n    ) -> ApiResponse[ApiResponseT]:",
+             "response_types_map: Optional[Dict[str, Optional[str]]]=None\n    ) -> ApiResponse[object]:"),
+            ("        assert response_data.data is not None, msg\n",
+             "        assert response_data.data is not None, msg\n"
+             '        if response_types_map is None:\n            raise ValueError("response type binding required")\n'),
+            ("def select_header_content_type(self, content_types):",
+             "def select_header_content_type(self, content_types: List[str]) -> Optional[str]:"),
+            ("def sanitize_for_serialization(self, obj):",
+             "def sanitize_for_serialization(self, obj: object) -> object:"),
+            ("        if data is None:\n            return None\n",
+             "        if data is None:\n"
+             "            from {{packageName}}.provider_model import ProviderModel, ProviderWireError\n"
+             "            candidate: object = getattr({{modelPackage}}, klass, None) if isinstance(klass, str) else klass\n"
+             "            if isinstance(candidate, type) and issubclass(candidate, ProviderModel):\n"
+             "                raise ProviderWireError()\n"
+             "            return None\n"),
+        ]
+        for old, new in edits:
+            expected = self.replace_once(expected, old, new)
+        start = expected.index('        try:\n            if response_type in ("bytearray", "bytes"):')
+        end = expected.index("\n        return ApiResponse(", start)
+        block = expected[start:end]
+        self.assertEqual(block.count("        finally:\n"), 1)
+        lines = block.replace("        try:\n", "", 1).replace("        finally:\n", "", 1).splitlines(keepends=True)
+        expected = expected[:start] + "".join(line[4:] if line.startswith("            ") else line for line in lines) + expected[end:]
+        actual = (ROOT / "generator" / "templates" / "python" / "api_client.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
+    def test_python_rest_override_types_the_actual_urllib3_base_response_and_bytes(self) -> None:
+        expected = self.stock("python/rest.mustache")
+        for old, new in [
+            ("import ssl\n", "import ssl\nfrom typing import Optional\n"),
+            ("RESTResponseType = urllib3.HTTPResponse", "RESTResponseType = urllib3.response.BaseHTTPResponse"),
+            ("def __init__(self, resp) -> None:", "def __init__(self, resp: RESTResponseType) -> None:"),
+            ("        self.data = None\n", "        self.data: Optional[bytes] = None\n"),
+            ("    def read(self):", "    def read(self) -> bytes:"),
+        ]:
+            expected = self.replace_once(expected, old, new)
+        actual = (ROOT / "generator" / "templates" / "python" / "rest.mustache").read_text(encoding="utf-8")
+        self.assertEqual(actual, expected)
+
     def test_python_model_override_is_stock_plus_known_edits(self) -> None:
         stock = self.stock("python/model_generic.mustache")
         override = (ROOT / "generator" / "templates" / "python" / "model_generic.mustache").read_text(encoding="utf-8")
@@ -302,7 +382,9 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
         self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
                                     "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "python/api.mustache", "python/api_client.mustache",
                                     "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
+                                    "python/rest.mustache",
                                     "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache",
                                     "typescript/providerField.mustache"])
 
@@ -375,7 +457,8 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         ending = "        {{/isReadOnly}}\n        {{/vars}}\n    };\n"
         expected = self.replace_once(expected, ending, ending +
                                      "    {{#vendorExtensions.x-pennilogic-strict-provider}}\n"
-                                     '    providerWire(result, "{{name}}", true);\n    return result;\n'
+                                     "    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));\n"
+                                     '    providerWire(wire, "{{name}}");\n    return wire;\n'
                                      "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
         self.assertEqual(override, expected)
         self.assertIn("{{>providerField}}", field_block)
@@ -436,6 +519,66 @@ class DeterminismTest(unittest.TestCase):
         completed = run_script("generate_clients.py", "--verify")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("byte-identical double generation", completed.stdout)
+
+
+class PublishedApiCompatibilityTest(unittest.TestCase):
+    def test_all_accepted_kotlin_primary_parameters_defaults_and_order_are_preserved(self) -> None:
+        fixture = json.loads((ROOT / "scripts" / "tests" / "accepted-kotlin-constructors.json").read_bytes())
+        self.assertEqual(fixture["generator_version"], pl_contracts.versions()["openapi_generator"]["version"])
+        self.assertEqual(len(fixture["constructors"]), 22)
+        models = ROOT / "build" / "generated" / "kotlin" / "src" / "main" / "kotlin" / "com" / "pennilogic" / "contracts" / "models"
+        for name, expected in fixture["constructors"].items():
+            with self.subTest(model=name):
+                source = (models / f"{name}.kt").read_text(encoding="utf-8")
+                match = re.search(r"data class " + re.escape(name) + r"\s*\((.*?)\n\)", source, re.S)
+                self.assertIsNotNone(match)
+                body = re.sub(r"/\*.*?\*/", "", match[1], flags=re.S)
+                actual = [field.rstrip(",").strip() for field in re.findall(r"\bval ([^\n]+)", body)]
+                self.assertEqual(actual, expected)
+
+    def test_old_service_policies_and_total_key_typing_with_authentication_excluded(self) -> None:
+        accepted = json.loads(subprocess.run(
+            ["git", "show", "5b41d4580c85be3cc1617074c0f3052b1f7b02cd:spec/error-catalogue.v1.json"],
+            cwd=ROOT, capture_output=True, check=True,
+        ).stdout)
+        current = json.loads((ROOT / "spec" / "error-catalogue.v1.json").read_bytes())
+        current_rows = {entry["code"]: entry for entry in current["codes"]}
+        self.assertEqual(len(accepted["codes"]), 14)
+        for entry in accepted["codes"]:
+            self.assertEqual(current_rows[entry["code"]], entry)
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.path / "consumer.ts"
+        config = spec.path / "tsconfig.json"
+        (spec.path / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
+        config.write_text(json.dumps({
+            "compilerOptions": {
+                "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+                "strict": True, "noEmit": True, "skipLibCheck": False,
+                "paths": {"@contract/*": [str(ROOT / "build" / "generated" / "typescript" / "src" / "*")]},
+            },
+            "files": [str(source)],
+        }), encoding="utf-8")
+        imports = ('import { ERROR_POLICIES, type ErrorPolicy } from "@contract/errorCatalogue.js";\n'
+                   'import { ProblemCode } from "@contract/models/ProblemCode.js";\n')
+        source.write_text(imports +
+            "const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.RequestFailed];\n"
+            "const status: number = ERROR_POLICIES[ProblemCode.RequestFailed].status;\n"
+            "export { policy, status };\n" +
+            "".join(f'const old{index}: ErrorPolicy = ERROR_POLICIES[ProblemCode.'
+                    f'{"".join(word.capitalize() for word in entry["code"].split("_"))}];\n'
+                    for index, entry in enumerate(accepted["codes"])), encoding="utf-8")
+        command = [pl_contracts.node_executable(), str(ROOT / "node_modules" / "typescript" / "bin" / "tsc"),
+                   "--project", str(config)]
+        positive = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(positive.returncode, 0, positive.stdout + positive.stderr)
+        for entry in current["authentication_codes"]:
+            name = "".join(word.capitalize() for word in entry["code"].split("_"))
+            source.write_text(imports + f"const policy: ErrorPolicy = ERROR_POLICIES[ProblemCode.{name}];\n",
+                              encoding="utf-8")
+            negative = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(negative.returncode, 1, negative.stdout + negative.stderr)
+            self.assertIn("TS2322", negative.stdout)
 
 
 if __name__ == "__main__":

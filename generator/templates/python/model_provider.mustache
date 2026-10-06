@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import ClassVar
+from pydantic import field_validator
 {{#vendorExtensions.x-py-other-imports}}
 {{{.}}}
 {{/vendorExtensions.x-py-other-imports}}
@@ -10,6 +11,7 @@ from pennilogic_contracts.models.instant import Instant
 from pennilogic_contracts.models.local_date import LocalDate
 from pennilogic_contracts.provider_model import ProviderModel, ProviderWireError
 from pennilogic_contracts.provider_constraints import pattern_matches
+from pennilogic_contracts.uuid_wire import uuid_from_wire
 
 
 class {{classname}}(ProviderModel):
@@ -19,6 +21,13 @@ class {{classname}}(ProviderModel):
     {{name}}: {{{vendorExtensions.x-py-typing}}}
 {{/vars}}
 {{#vars}}
+    {{#isUuid}}
+
+    @field_validator('{{{name}}}', mode="before")
+    @classmethod
+    def {{{name}}}_from_wire(cls, value: object) -> UUID:
+        return uuid_from_wire(value)
+    {{/isUuid}}
     {{#vendorExtensions.x-regex}}
 
     @field_validator('{{{name}}}', mode="before")

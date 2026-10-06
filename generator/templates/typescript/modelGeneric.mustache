@@ -238,8 +238,9 @@ export function {{classname}}ToJSONTyped(value?: {{#hasReadOnly}}Omit<{{classnam
         {{/vars}}
     };
     {{#vendorExtensions.x-pennilogic-strict-provider}}
-    providerWire(result, "{{name}}", true);
-    return result;
+    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));
+    providerWire(wire, "{{name}}");
+    return wire;
     {{/vendorExtensions.x-pennilogic-strict-provider}}
     {{/hasVars}}
     {{^hasVars}}

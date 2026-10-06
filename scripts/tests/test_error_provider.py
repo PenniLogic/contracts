@@ -8,7 +8,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from support import ROOT, SPEC, SpecDir, replace_once, run_script, spec_text, with_probe_paths
+from support import ROOT, SPEC, SpecDir, replace_in_section, replace_once, run_script, spec_text, with_probe_paths
 from pl_contracts import node_executable
 
 
@@ -37,10 +37,11 @@ def schema_results(cases: list[dict], *, spec: Path = SPEC) -> list[dict]:
 
 
 class ErrorSchemaTest(unittest.TestCase):
-    def test_every_catalogue_code_has_a_valid_documented_example(self) -> None:
+    def test_every_ordinary_service_catalogue_code_has_a_valid_documented_example(self) -> None:
         examples = error_examples()
         catalogue = json.loads((ROOT / "spec" / "error-catalogue.v1.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(examples), {entry["code"] for entry in catalogue["codes"]})
+        self.assertEqual(set(examples), {entry["code"] for entry in catalogue["codes"]
+                                         if entry.get("schema", "ServiceProblemDetail") == "ServiceProblemDetail"})
         cases = [{"name": code, "schema": "ServiceProblemDetail", "wire": wire} for code, wire in examples.items()]
         for result in schema_results(cases):
             self.assertTrue(result["valid"], result)
@@ -98,7 +99,8 @@ class ErrorCatalogueNegativeTest(unittest.TestCase):
         self.reject_catalogue(lambda value: value["codes"][0].update(idempotency="new_after_edit"))
 
     def test_new_code_without_catalogue_fails(self) -> None:
-        text = replace_once(spec_text(), "        - dependency_unavailable\n", "        - unclassified_code\n        - dependency_unavailable\n")
+        text = replace_in_section(spec_text(), ("components", "schemas", "ProblemCode"),
+                                  "        - dependency_unavailable\n", "        - unclassified_code\n        - dependency_unavailable\n")
         completed = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertIn("adding an unclassified code fails", completed.stderr)

@@ -1,11 +1,13 @@
 # Shared error and import providers
 
-**Authority and status:** local source preparation through original
+**Authority and status:** provider source through original
 [#16 (T-CON-12)](https://github.com/PenniLogic/contracts/issues/16) and
-[#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13), not an accepted
-release or implemented service. Repository source version is `0.2.0`; both new
-component groups start at `1.0.0`. `paths` remains empty. No replacement issue,
-endpoint, backend import/dedup algorithm or client screen is supplied.
+[#13 (T-CON-10)](https://github.com/PenniLogic/contracts/issues/13) was accepted at
+`5b41d4580c85be3cc1617074c0f3052b1f7b02cd`, not released or implemented as a service.
+The local combined source version is `0.3.0`: import group remains `1.0.0`, while
+the one error catalogue becomes `1.1.0` for Root's auth/egress decision. The six operations
+belong to original [#27](https://github.com/PenniLogic/contracts/issues/27);
+no import/dedup endpoint, backend algorithm, replacement issue or client screen is supplied.
 
 The coordinator re-sequenced only this provider slice against accepted contracts
 `ea56c63d5c9b679537bd9205b04626049c20c572` and accepted Docs
@@ -20,7 +22,8 @@ value-key correction from contracts `aa8d90cb98cec9b6dd08c91b3a4d869e47362662`.
 Its exact accepted source replaces the earlier Money byte binding explicitly;
 the wrapper API, wire format, currency/range rules and financial arithmetic are
 unchanged. Canonical generation reconciles that runtime change with the proposed
-providers, without accepting those providers or clearing their remaining holds.
+providers. The later `5b41d458` acceptance is source acceptance only: original owning issues,
+their native dependencies, runtime adoption and integration holds are not completed by it.
 
 ## Sources and machine catalogues
 
@@ -34,8 +37,9 @@ identifier binding, replay/count/decision rules and accepted ADR source bindings
 Accepted inputs are ADR-015 sections 1.5, 4.2-4.8, 7 and 8; ADR-016 sections 4.2,
 4.3, 4.5 and 10/14; ADR-017's rejection reasons and INR-only ledger admission;
 ADR-018 sections 7.3/7.4 and 10; and ADR-019 section 16's safe error consequences.
-ADR-019 authentication-owned flows/codes remain T-AUTH-01 work: this catalogue
-does not invent their taxonomy states or apply 30-day financial response replay
+The group-1.1.0 catalogue adds Root's two authentication-owned source codes with null
+service state and the already excluded authentication flow. Actual ADR-019 authentication
+remains T-AUTH-01 work: no new taxonomy state or 30-day financial response replay is applied
 to token rotation. Money codecs still admit INR/JPY/KWD at exponents 2/0/3;
 that is not admission of JPY/KWD to the MVP ledger.
 
@@ -70,10 +74,43 @@ An operation inlining a problem or referencing only the permissive base fails li
 | `quota_exhausted` | 429 | `quota_exhausted` / `quota_exceeded` | Conditional retry only after a stated reset, same key/bytes and P14D. |
 | `rate_limited` | 429 | `rate_limited` / `quota_exceeded` | Required delay and allowance/window, same request. Not ADR-019's accepted-and-dropped recovery limiters. |
 
-Every error code binds to **one** accepted state. A supplementary region's `error`
+Every service error code binds to **one** accepted state. A supplementary region's `error`
 can compose to a `degraded` surface under the taxonomy, but this is not a second
 code mapping. Offline is a platform observation, not an invented server code.
 Missing retry/key/state bindings or an unclassified enum addition fail lint/build.
+
+The combined [custom-destination contract](custom-destinations.md#shared-error-composition)
+adds `egress_denied` (403, `request_failed` / `error`, no automatic retry), with the fixed safe
+title/detail and unchanged-key same-intent rule. Its shared `EgressDeniedProblemDetail`
+also binds the canonical busy/unreachable reasons to existing `dependency_unavailable`,
+and registration limiting to existing `rate_limited`; those accepted policies do not change.
+`AuthenticationProblemDetail` carries global `authentication_required` (401) and
+`step_up_required` (403), classified separately as authentication-owned with NONE/null state.
+The generated catalogue has separate typed service/auth projections from this one source;
+asking for a service policy for an auth code fails explicitly. Egress reasons never join
+`ValidationReason`. `ServiceProblemDetail.code` positively intersects the one global reference
+with the catalogue's service subset: all 14 old values plus `egress_denied`, excluding both auth
+codes. Its fixed diagnostics apply to that new code too. The egress-aware operation union still
+requires the typed reason, so an ordinary reason-free service body cannot replace a destination
+refusal. The actual generated public field type remains `ProblemCode` in all three languages.
+
+TypeScript's `ERROR_POLICIES` remains total for `ServiceProblemCode`, a type-level union derived
+from this same catalogue, intersected with a partial global-code record. All 14 old service-key
+lookups retain nonoptional `ErrorPolicy` typing and their unchanged runtime rows. Authentication
+codes have no invented service policy and the helper still rejects them. Kotlin retains
+`ImportRowError(problem, sourceRow, columnIndex)`, positional `copy`, and `component1/2/3`;
+the other accepted primary signatures and generator-owned inline helper exports are preserved.
+The generic layout projection retains only unconditional scalar-enum object refinements for
+those helpers; deeper constraints stay in the registered validator, not lossy field flattening.
+
+Current AA8/5b source consumers stay pinned unchanged. Adoption of the local `0.3.0` source needs
+real consumer regeneration and correct authentication routing before any new code is emitted;
+old consumer pins must not receive new codes. No old shape is removed, no consumer migration is
+asserted and no contract-stage acknowledgement or publication is authorized. The accepted-base
+check now proves the bounded fixed new-tag expansion from complete sources and exact records;
+the earlier seven RED findings and public-API failures remain preserved evidence. Final-head
+independent review, hosted CI and integration are still required. See
+[the exact compatibility boundary](custom-destinations.md#generated-consumers-and-preserved-failure-history).
 
 **AI refusal is successful content**, as the accepted taxonomy explicitly says.
 `AiRefusal.code = ai_refusal` has its own typed enum and fixed safe message, never
@@ -109,7 +146,7 @@ allowances have no reset; an absent reset permits no automatic quota retry. Own-
 token usage is not a quota exhaustion. Services do not compute reset boundaries
 on a client.
 
-All 19 new closed object providers select `x-pennilogic-strict-provider`, including
+All 19 accepted closed object providers select `x-pennilogic-strict-provider`, including
 the successful refusal and the nested allowance, validation, mapping, row and link
 types. This is generator wiring, not a new wire policy. Ordinary generated conversion
 and serialization enforce closure and primitive kinds; callers do not have to opt
@@ -144,7 +181,8 @@ and boolean leaf is checked by kind, not by six field names or leniency flags.
 It also checks closed members, enum spellings, patterns and bounds, and validates
 construction and serialization. `ServiceProblemDetail` invokes its existing wire
 guard through the registered serializer on ordinary, nested and actual generated
-`ApiClient` converter paths. Refusal failures use static diagnostics rather than
+`ApiClient` converter paths, and its constructor also applies the source constraints.
+Refusal failures use static diagnostics rather than
 stock enum diagnostics that can echo a rejected message.
 All direct and item string bounds use code-point lengths, not JVM UTF-16 units.
 The supported pattern grammar is checked before generation touches target output;
