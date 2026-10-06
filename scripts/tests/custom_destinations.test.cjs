@@ -31,7 +31,13 @@ function probe() {
 
 function withRequest(shape) {
   const doc = structuredClone(base);
-  doc.paths["/ai/inference"] = { post: { requestBody: { content: { "application/json": { schema: shape } } } } };
+  doc.paths["/ai/inference"] = { post: {
+    operationId: "inferenceLintProbe", description: "Synthetic source-admission control only.",
+    tags: ["CustomDestinations"],
+    parameters: [{ $ref: "#/components/parameters/DPoPProof" }, { $ref: "#/components/parameters/IdempotencyKey" }],
+    requestBody: { required: true, content: { "application/json": { schema: shape } } },
+    responses: { "204": { description: "Synthetic response only." } },
+  } };
   return doc;
 }
 
@@ -277,6 +283,135 @@ test("real Spectral CLI fails nested address fixtures actionably and passes the 
     doc.components.schemas.CustomDestinationLintTarget.properties = {};
     const result = lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+});
+
+test("real Spectral CLI refuses enrollment address provenance through benign aliases, compositions and nested arrays", () => {
+  withLintProbe((lint) => {
+    const host = base.components.schemas.CustomDestinationRegistrationRequest.properties.host;
+    const prefix = base.components.schemas.CustomDestinationRegistrationRequest.properties.pathPrefix;
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+      target: structuredClone(host),
+      segment: structuredClone(prefix),
+      chain: { $ref: "#/components/schemas/ScalarAliasFirst" },
+      combined: { allOf: [structuredClone(host), { type: "string" }] },
+      alternatives: { anyOf: [structuredClone(prefix), { type: "null" }] },
+      choice: { oneOf: [structuredClone(host), { type: "null" }] },
+      entries: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+        value: structuredClone(host),
+      } } },
+      tuple: { type: "array", items: false, prefixItems: [structuredClone(prefix)] },
+      sibling: { $ref: "#/components/schemas/PlainText", allOf: [structuredClone(host)] },
+    } });
+    doc.components.schemas.ScalarAliasFirst = { $ref: "#/components/schemas/ScalarAlias~1Second~0" };
+    doc.components.schemas["ScalarAlias/Second~"] = { $ref: "#/components/schemas/%43ustomDestinationHost" };
+    doc.components.schemas.PlainText = { type: "string" };
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const lines = result.stderr.split(/\r?\n/);
+    for (const suffix of [
+      "properties.target.$ref", "properties.segment.$ref", "ScalarAlias/Second~.$ref",
+      "properties.combined.allOf.0.$ref", "properties.alternatives.anyOf.0.$ref",
+      "properties.choice.oneOf.0.$ref", "properties.entries.items.properties.value.$ref",
+      "properties.tuple.prefixItems.0.$ref", "properties.sibling.allOf.0.$ref",
+    ]) {
+      assert.ok(lines.some((line) => line.includes("[pl-no-inference-address]") &&
+        line.includes(`${suffix})`) && line.includes("registration-only") &&
+        line.includes("destinationId/custom_model_id")), `${suffix}: ${result.stdout}${result.stderr}`);
+    }
+  });
+});
+
+test("real Spectral CLI refuses explicit URI, IRI, host and IP formats under innocuous field names", () => {
+  withLintProbe((lint) => {
+    const formats = ["uri", "uri-reference", "uri-template", "iri", "iri-reference",
+      "url", "hostname", "idn-hostname", "ipv4", "ipv6"];
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
+    formats.forEach((format, index) => {
+      doc.components.schemas[`FormattedScalar${index}`] = { type: "string", format };
+      doc.paths["/ai/inference"].post.requestBody.content["application/json"].schema.properties[`value${index}`] = {
+        allOf: [{ $ref: `#/components/schemas/FormattedScalar${index}` }],
+      };
+    });
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const lines = result.stderr.split(/\r?\n/);
+    formats.forEach((format, index) => assert.ok(lines.some((line) =>
+      line.includes("[pl-no-inference-address]") && line.includes(`(components.schemas.FormattedScalar${index}.format)`) &&
+      line.includes(`address-bearing format "${format}"`) && line.includes("destinationId/custom_model_id")),
+    `${format}: ${result.stdout}${result.stderr}`));
+  });
+});
+
+test("real Spectral CLI keeps prompt URL text, ordinary aliases, identifiers and all six enrollment operations", () => {
+  withLintProbe((lint) => {
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {
+      prompt: { $ref: "#/components/schemas/CustomDestinationHostLookingText" },
+      destinationId: { $ref: "#/components/schemas/CustomDestinationId" },
+      custom_model_id: { $ref: "#/components/schemas/CustomDestinationModelId" },
+      moment: { type: "string", format: "date-time" },
+      day: { type: "string", format: "date" },
+      entries: { type: "array", items: { $ref: "#/components/schemas/OrdinaryTextAlias" } },
+    } });
+    doc.components.schemas.CustomDestinationHostLookingText = {
+      type: "string", examples: ["Explain https://content.example/path and /v1 as text, not a destination."],
+    };
+    doc.components.schemas.OrdinaryTextAlias = { allOf: [{ $ref: "#/components/schemas/CustomDestinationHostLookingText" }] };
+    for (const [route, item] of Object.entries(base.paths)) assert.deepEqual(doc.paths[route], item);
+    assert.deepEqual(noAddress(doc), []);
+    const result = lint(doc);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+});
+
+test("enrollment scalar provenance follows its declared role rather than a fixed component name or shared primitive base", () => {
+  const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
+  const properties = doc.paths["/ai/inference"].post.requestBody.content["application/json"].schema.properties;
+  const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+  for (const field of ["host", "pathPrefix"]) {
+    doc.components.schemas[`Relocated${field}`] = structuredClone(base.components.schemas[
+      registration[field].$ref.split("/").at(-1)]);
+    doc.components.schemas[`RoleAlias${field}`] = { $ref: `#/components/schemas/Relocated${field}`, description: "Synthetic alias." };
+    registration[field] = { $ref: `#/components/schemas/RoleAlias${field}` };
+    properties[`value${field}`] = { $ref: `#/components/schemas/Relocated${field}` };
+    assert.ok(noAddress(doc).some((finding) => finding.message.includes(`registration-only ${field} address schema`)));
+  }
+  doc.components.schemas.GeneralText = { type: "string" };
+  registration.host = { $ref: "#/components/schemas/GeneralText", pattern: base.components.schemas.CustomDestinationHost.pattern };
+  registration.pathPrefix = { $ref: "#/components/schemas/GeneralText", pattern: base.components.schemas.CustomDestinationPathPrefix.pattern };
+  for (const key of Object.keys(properties)) delete properties[key];
+  properties.prompt = { $ref: "#/components/schemas/GeneralText" };
+  assert.deepEqual(noAddress(doc), []);
+  properties.target = { $ref: "#/components/schemas/CustomDestinationRegistrationRequest/properties/host" };
+  assert.ok(noAddress(doc).some((finding) => finding.path.at(-1) === "$ref" &&
+    finding.message.includes("registration-only host address schema")));
+});
+
+test("real Spectral CLI refuses semantic address parameters and fake enrollment exceptions", () => {
+  withLintProbe((lint) => {
+    const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
+    doc.paths["/ai/inference"].parameters = [
+      { in: "query", name: "selector", description: "Synthetic negative.", schema: { $ref: "#/components/schemas/CustomDestinationHost" } },
+      { in: "header", name: "Segment-Selector", description: "Synthetic negative.", schema: { type: "string", format: "uri-reference" } },
+    ];
+    const original = structuredClone(base.paths["/ai/custom-destinations"].post);
+    doc.paths["/ai/custom-destinations"].post.requestBody.content["application/json"].schema = {
+      type: "object", additionalProperties: false, properties: { target: { $ref: "#/components/schemas/CustomDestinationHost" } },
+    };
+    doc.paths["/ai/pretend-enrollment"] = { post: { ...original, operationId: "pretendEnrollment" } };
+    const result = lint(doc);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const lines = result.stderr.split(/\r?\n/);
+    for (const [location, origin] of [
+      ["paths./ai/inference.parameters.0.schema.$ref", "POST /ai/inference"],
+      ["paths./ai/inference.parameters.1.schema.format", "POST /ai/inference"],
+      ["paths./ai/custom-destinations.post.requestBody.content.application/json.schema.properties.target.$ref", "POST /ai/custom-destinations"],
+      ["components.schemas.CustomDestinationRegistrationRequest.properties.host.$ref", "POST /ai/pretend-enrollment"],
+    ]) {
+      assert.ok(lines.some((line) => line.includes("[pl-no-inference-address]") &&
+        line.includes(`(${location})`) && line.includes(origin) &&
+        /registration-only|address-bearing format/.test(line)), `${location}: ${result.stdout}${result.stderr}`);
+    }
   });
 });
 

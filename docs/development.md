@@ -104,7 +104,7 @@ Cold runs download Gradle and the Kotlin toolchain (several minutes).
 | `pl-money-example-registry-scale` | Every Money example uses a registry currency with exactly the registry exponent of fraction digits. |
 | `pl-problem-detail-no-money` | `ProblemDetail` never carries a monetary value. |
 | `pl-custom-destination-contract` | Direct accepted ADR-022 byte/schema/provenance validation, four exactly-once enum definitions, closed registration fields and canonical state-denial mapping. |
-| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no address, header, open-map or encoded-argument escape. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
+| `pl-no-inference-address` | Reference-recursive closed inference/tool requests; no named or registration-role-derived address scalar, explicit URI/IRI/host/IP format, header, open-map or encoded-argument escape. Ordinary prompt strings and owner-bound IDs remain allowed. Only the exact named registration/lifecycle bodies are exempt, never their query/header parameters. |
 
 `oas3-unused-component` is off: the shared components are published before any operation
 references them. The money-example rule reads `currency-registry.v1.json` from the linted

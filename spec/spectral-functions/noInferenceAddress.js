@@ -10,6 +10,8 @@ const ENROLLMENT = new Map([
   ]),
 ]);
 const ADDRESS_WORDS = new Set(["url", "uri", "host", "hostname", "endpoint", "address", "port", "headers", "proxy"]);
+const ADDRESS_FORMATS = new Set(["uri", "uri-reference", "uri-template", "iri", "iri-reference",
+  "url", "hostname", "idn-hostname", "ipv4", "ipv6"]);
 const REQUEST_NAME = /(?:inference|assistant|completion|chat|tool|^ai).*?(?:request|input|argument|param)|(?:request|input|argument).*?(?:inference|assistant|completion|chat|tool)/i;
 const OPERATION_NAME = /(?:^|[^a-z])(?:ai|inference|assistant|completion|chat|tools?)(?:[^a-z]|$)/i;
 
@@ -32,7 +34,8 @@ function enrollmentBody(operation, pathName, method) {
 }
 
 module.exports = function noInferenceAddress(document) {
-  const forbidden = new Set(loadSource().consequence.wire.forbidden_inference_fields.map((name) => words(name).join("")));
+  const { wire } = loadSource().consequence;
+  const forbidden = new Set(wire.forbidden_inference_fields.map((name) => words(name).join("")));
   const results = [];
   const reported = new Set();
   function report(message, at, origin) {
@@ -70,14 +73,35 @@ module.exports = function noInferenceAddress(document) {
     if (target === undefined) report("unresolved request $ref cannot prove closure", [...at, "$ref"], origin);
     else visitor(target, parts, origin, seen);
   }
-  function schema(value, at, origin, seen, structuredArguments = false) {
+  const enrollmentAddresses = new Map();
+  for (const field of wire.registration_fields.filter(address)) {
+    function remember(value, at, origin, seen) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      enrollmentAddresses.set(JSON.stringify(at.map(String)), field);
+      // A constrained reference is not an alias: its shared base can still be ordinary text.
+      if (Object.keys(value).every((key) => ["$ref", "title", "summary", "description", "example", "examples", "default", "deprecated"].includes(key))) {
+        reference(value, at, origin, seen, remember);
+      }
+    }
+    remember(document.components?.schemas?.CustomDestinationRegistrationRequest?.properties?.[field],
+      ["components", "schemas", "CustomDestinationRegistrationRequest", "properties", field],
+      `registration field ${field}`, new Set());
+  }
+  function schema(value, at, origin, seen, structuredArguments = false, usageAt = at) {
     if (value === false) return;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       report("request schema must be explicitly typed and closed", at, origin);
       return;
     }
+    const enrollmentField = enrollmentAddresses.get(JSON.stringify(at.map(String)));
+    if (enrollmentField) {
+      report(`registration-only ${enrollmentField} address schema is forbidden in an inference/tool request`, usageAt, origin);
+    }
     reference(value, at, origin, seen, (target, targetAt, targetOrigin, targetSeen) =>
-      schema(target, targetAt, targetOrigin, targetSeen, structuredArguments));
+      schema(target, targetAt, targetOrigin, targetSeen, structuredArguments, [...at, "$ref"]));
+    if (ADDRESS_FORMATS.has(value.format)) {
+      report(`address-bearing format ${JSON.stringify(value.format)} is forbidden in an inference/tool request`, [...at, "format"], origin);
+    }
     if (value.$dynamicRef || value.$recursiveRef) {
       report("dynamic request references cannot prove a closed request shape", at, origin);
     }

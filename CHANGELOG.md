@@ -33,6 +33,8 @@
   exclusive-bound counterexample that would otherwise be rounded into a false compatibility pass.
 - Reject complete canonical enum copies even when widened, reordered or padded with duplicates.
   Actual Spectral controls cover all four families and retain ref-only and partial-overlap positives.
+- Reject registration-address scalar aliases and explicit address formats in inference/tool requests.
+  Preserve ordinary prompt text, owner-bound IDs and the exact six enrollment exceptions.
 - Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
   retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
   validation diagnostics; add actual three-language root-null and Python error-path controls.

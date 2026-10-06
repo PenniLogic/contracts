@@ -135,15 +135,26 @@ single-use runtime. No such runtime is added here.
 follows local requestBody/path/schema references and reference siblings, and walks arrays,
 compositions and cycles. It refuses address/header aliases, encoded names, open nested maps,
 external/dynamic references, untyped array/media shapes, object-valued constant escapes and
-string-encoded tool arguments. Ordinary typed prompt strings remain allowed; the rule is not
-a prompt-content classifier or a substitute for server-side routing authority.
+string-encoded tool arguments. The canonical registration address roles (`host` and `pathPrefix`)
+also identify their declared schemas and annotation-only reference aliases: an innocuous inference
+field cannot reuse those address scalars through references, compositions or nested arrays.
+Constrained references do not taint an otherwise general text base, and component-name resemblance
+or regex similarity alone is not address provenance.
+
+Explicit `uri`, `uri-reference`, `uri-template`, `iri`, `iri-reference`, `url`, `hostname`,
+`idn-hostname`, `ipv4` and `ipv6` format declarations are address-bearing in inspected requests.
+This finite source check does not expand the generated validators' supported format vocabulary.
+Ordinary typed prompt strings, including URL text as content, and owner-bound destination/model
+identifiers remain allowed. The rule does not classify arbitrary strings or regex languages,
+authorize routing or prove operational SSRF resistance.
 
 Only the exact six operation names and canonical enrollment body references receive an address
 exception. A substituted body, reused tag/path or address query/header does not. The planted
 test-only inference overlay is **not** the production tool group owned by contracts#10.
 Real Spectral CLI tests plant `base_url`, `endpoint` and `host` through requestBody references,
 arrays/compositions and nested objects; all must fail with the rule name and precise path.
-The same overlay with the address removed must pass.
+Semantic scalar aliases, address formats and fake enrollment/parameter exceptions have named
+actual-CLI controls as well. The same overlay with the address removed must pass.
 
 ## Shared error composition
 
