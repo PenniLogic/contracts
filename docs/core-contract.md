@@ -195,7 +195,26 @@ TypeScript exposes both domain and wire projections as readonly. Python's frozen
 Kotlin's immutable values retain explicit-null/absent native behavior.
 
 Generic code-generation metadata proves that marked models with locally declared read-only
-members occur only in responses, never in request schemas. Their ordinary response serialization
+members occur only in responses within the supported source contexts, never in request schemas.
+One shared, bounded schema-use walker supplies both that proof and the owning lint guard.
+It traverses evaluated properties, schema-valued additional/pattern properties, dependent schemas,
+array/tuple/composition/conditional edges, local aliases and referenced definitions, keeping
+schema-map names distinct from annotation and literal data. Unused `$defs` declarations are
+not uses; a reference into them is. References must resolve to declared schemas or the proper
+OpenAPI request/response/header/Path Item/callback context.
+
+Operation callbacks, root webhooks, referenced Path Items, parameter/media schemas and encoding
+headers are inspected as distinct request/response roles, not silently omitted from the proof.
+Unknown clauses, unsupported/dynamic references, malformed containers, ambiguous reference
+siblings, cycles and work/depth bounds fail explicitly before response-only metadata or output
+promotion. This is a finite source-use proof, not a general JSON Schema implication engine
+or a product callback/webhook implementation.
+The lint-only walk can inspect a finite legacy recursive schema graph without revisiting
+active edges; every other edge still runs its guards. That preserves existing valid cyclic
+lint controls, not a code-generation exemption: the compiler's response-only proof still
+refuses cycles, and OpenAPI container cycles remain unproved in both callers.
+
+Their ordinary response serialization
 therefore preserves those fields rather than dropping a server-derived required member.
 Unbound, request/mixed-use or unsupported read-only placements fail generation explicitly.
 Separate closed write payloads continue to exclude the projection; serializing a received

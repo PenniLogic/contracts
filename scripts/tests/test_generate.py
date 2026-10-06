@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import copy
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -73,6 +75,88 @@ class RegistryRenderingTest(unittest.TestCase):
                 self.assertIn(entry["minor_unit_name"], content, language)
             self.assertTrue(path.endswith((".py", ".ts", ".kt")))
 
+class DeclarationSharingTest(unittest.TestCase):
+    def test_target_batch_is_bounded_and_joins_every_worker_before_return_or_failure(self) -> None:
+        lock = threading.Lock()
+        barrier = threading.Barrier(2)
+        state = {"active": 0, "maximum": 0, "completed": []}
+        def build(language):
+            with lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+            try:
+                if language != "python":
+                    barrier.wait(timeout=10)
+                if language == "kotlin":
+                    raise pl_contracts.PipelineError("synthetic target failure")
+                return {"target": language}
+            finally:
+                with lock:
+                    state["completed"].append(language)
+                    state["active"] -= 1
+        with self.assertRaisesRegex(pl_contracts.PipelineError, "synthetic target failure"):
+            gc._target_batch(["kotlin", "typescript", "python"], build)
+        self.assertEqual(state["maximum"], 2)
+        self.assertEqual(state["active"], 0)
+        self.assertEqual(set(state["completed"]), set(gc.LANGUAGES))
+        with self.assertRaisesRegex(pl_contracts.PipelineError, "duplicate generation target"):
+            gc._target_batch(["python", "python"], lambda language: {"target": language})
+
+    def test_same_invocation_shares_only_verified_equal_inputs_and_returns_independent_copies(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        with mock.patch.object(gc, "run", wraps=gc.run) as run:
+            with gc._declaration_scope():
+                first = gc._provider_declarations(source)
+                original = copy.deepcopy(first)
+                first["roots"].append("MUTATED_CALLER_COPY")
+                self.assertEqual(gc._provider_declarations(source), original)
+                self.assertEqual(run.call_count, 1)
+                source.write_text(spec_text() + "\n", encoding="utf-8")
+                self.assertEqual(gc._provider_declarations(source), original)
+                self.assertEqual(run.call_count, 2)
+            gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 3)
+
+    def test_changed_companion_and_unsupported_inputs_revalidate_and_never_cache_failures(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        companion = spec.path / "category-seed.v1.json"
+        before = companion.read_bytes()
+        with mock.patch.object(gc, "run", wraps=gc.run) as run, gc._declaration_scope():
+            gc._provider_declarations(source)
+            companion.write_bytes(before + b"\n")
+            for _ in range(2):
+                with self.assertRaisesRegex(pl_contracts.PipelineError, "provider constraint generation rejected"):
+                    gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 3)
+            companion.write_bytes(before)
+            source.write_text(replace_once(spec_text(), "  schemas:\n",
+                "  schemas:\n    SharedUnsupported:\n      type: object\n"
+                "      x-pennilogic-strict-provider: true\n      additionalProperties: false\n"
+                "      properties: {value: {type: number}}\n"), encoding="utf-8")
+            with self.assertRaisesRegex(pl_contracts.PipelineError, "unsupported type"):
+                gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 4)
+
+    def test_real_requested_three_target_set_compiles_source_once_without_reusing_outputs(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        output = spec.path / "generated"
+        tools = toolchain.ensure_installed()
+        with mock.patch.object(gc, "run", wraps=gc.run) as run:
+            manifests = gc.generate_all(list(gc.LANGUAGES), output, tools, source)
+        compiler = [call for call in run.call_args_list
+                    if any(str(value).endswith("provider_constraints.cjs") for value in call.args[0])]
+        self.assertEqual(len(compiler), 1)
+        self.assertEqual(set(manifests), set(gc.LANGUAGES))
+        for language, manifest in manifests.items():
+            self.assertEqual(pl_contracts.tree_hash(output / language, exclude=("contracts-manifest.json",))[0],
+                             manifest["tree_sha256"])
+
 
 class GoldenAndManifestTest(unittest.TestCase):
     def test_golden_file_matches_the_generator_configuration(self) -> None:
@@ -130,6 +214,7 @@ class SeamWiringTest(unittest.TestCase):
         cls.spec_path = cls.spec.write(text)
         cls.output = Path(tempfile.mkdtemp(prefix="pl-gen-"))
         cls.tools = toolchain.ensure_installed()
+        gc.generate("python", cls.output / "python", cls.tools, cls.spec_path)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -173,7 +258,6 @@ class SeamWiringTest(unittest.TestCase):
             self.assertFalse((self.output / "typescript" / forbidden).exists(), forbidden)
 
     def test_python_model_uses_the_wrappers_and_imports_the_instant_seam(self) -> None:
-        gc.generate("python", self.output / "python", self.tools, self.spec_path)
         model = (self.output / "python" / "pennilogic_contracts/models/synthetic_envelope.py").read_text(encoding="utf-8")
         self.assertIn("from pennilogic_contracts.models.money import Money", model)
         self.assertIn("from pennilogic_contracts.models.instant import Instant", model)
@@ -195,7 +279,6 @@ class SeamWiringTest(unittest.TestCase):
         interpreter = ROOT / "build" / "venv" / ("Scripts/python.exe" if sys.platform.startswith("win") else "bin/python")
         if not interpreter.is_file():
             self.skipTest("smoke venv missing; run python scripts/smoke.py python first (CI runs it before this suite)")
-        gc.generate("python", self.output / "python", self.tools, self.spec_path)
         probe = (
             "import json, sys\n"
             "from pydantic import ValidationError\n"

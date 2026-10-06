@@ -2,6 +2,7 @@
 
 const { HTTP_METHODS, MUTATING_METHODS, resolveLocalRef, referencesMoney } = require("./_shared");
 const { isDeepStrictEqual } = require("node:util");
+const { collectSchemaUsage, SchemaUsageError } = require("./_schemaUsage");
 
 const TAGS = new Set(["Auth", "Accounts", "Transactions", "Categories"]);
 const OBJECTS = new Set(["ApplicationProblemDetail", "SessionRevokedProblemDetail", "CursorPage",
@@ -57,32 +58,26 @@ module.exports = function coreEndpointContract(document) {
     }
     return false;
   }
-  function requestShape(value, path, active = new Set()) {
-    if (!value || typeof value !== "object") return;
-    if (value.$ref) {
-      if (!value.$ref.startsWith("#/components/schemas/")) {
-        add("request schemas must reference named local components", path);
-        return;
-      }
-      if (!active.has(value.$ref)) {
-        const next = new Set(active).add(value.$ref);
-        requestShape(resolveLocalRef(value.$ref, document), path, next);
-      }
-    }
-    if (value.type === "object" && value.additionalProperties !== false) {
-      add("request objects must reject unknown/raw fields, including nested objects", path);
-    }
-    for (const [name, member] of Object.entries(value.properties || {})) {
-      if (RAW.has(key(name))) add("raw content, digests and client owner/fingerprint claims are absent", [...path, "properties", name]);
-      if (member.readOnly === true) add("server-derived readOnly response members are not request fields", [...path, "properties", name]);
-      requestShape(member, [...path, "properties", name], new Set(active));
-    }
-    if (value.items) requestShape(value.items, [...path, "items"], new Set(active));
-    for (const branch of ["allOf", "oneOf", "anyOf"]) {
-      for (const [index, child] of (value[branch] || []).entries()) {
-        requestShape(child, [...path, branch, index], new Set(active));
-      }
-    }
+  try {
+    collectSchemaUsage(document, {
+      allowSchemaCycles: true,
+      scope: (operation) => operation.tags?.some((tag) => TAGS.has(tag)) ? "core" : "other",
+      visitSchema: (value, path, context) => {
+        if (context.use !== "request") return;
+        if (value.readOnly === true) add("server-derived readOnly response members are not request fields", path);
+        if (context.scope !== "core") return;
+        if (value.type === "object" && value.additionalProperties !== false) {
+          add("request objects must reject unknown/raw fields, including nested objects", path);
+        }
+        for (const name of Object.keys(value.properties || {})) {
+          if (RAW.has(key(name))) add("raw content, digests and client owner/fingerprint claims are absent",
+            [...path, "properties", name]);
+        }
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof SchemaUsageError)) throw error;
+    add(`request/response schema usage is unproved: ${error.message}`, error.path);
   }
   if (JSON.stringify(document.security) !== '[{"DPoP":[]}]') {
     add("root security must retain the accepted raw-header DPoP binding", ["security"]);
@@ -143,7 +138,6 @@ module.exports = function coreEndpointContract(document) {
       const body = resolve(operation.requestBody);
       for (const [media, message] of Object.entries(body?.content || {})) {
         if (media !== "application/json") add("core requests are typed JSON, not raw messages or uploads", at);
-        requestShape(message.schema, [...at, "requestBody", "content", media, "schema"]);
       }
       if (!operation.responses?.["401"] || !operation.responses?.default) {
         add("explicit DPoP challenge and shared RFC9457 error contracts are required", at);

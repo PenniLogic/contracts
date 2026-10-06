@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import unittest
+import time
 
 from support import ROOT, SpecDir, replace_once, run_script, spec_text
 from test_error_provider import schema_results
@@ -164,11 +166,32 @@ class ProviderWiringNegativeTest(unittest.TestCase):
         self.addCleanup(self.spec.cleanup)
 
     def test_a_missing_strict_binding_fails_for_each_closed_provider(self) -> None:
+        sources = []
+        evidence = ROOT / "build" / "provider-wiring-negative" / str(time.time_ns())
+        evidence.mkdir(parents=True)
         for name, _ in samples(legacy=True):
+            spec = SpecDir()
+            self.addCleanup(spec.cleanup)
+            anchor = f"    {name}:\n      type: object\n      x-pennilogic-strict-provider: true\n"
+            text = replace_once(spec_text(), anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
+            sources.append((name, spec.write(text)))
+        def lint_source(source):
+            name, path = source
+            started = time.perf_counter()
+            result = run_script("lint_spec.py", "--spec", str(path))
+            (evidence / (name + ".stdout.txt")).write_text(result.stdout, encoding="utf-8")
+            (evidence / (name + ".stderr.txt")).write_text(result.stderr, encoding="utf-8")
+            (evidence / (name + ".json")).write_text(json.dumps({
+                "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "spec_directory": str(path.parent), "exit": result.returncode,
+                "seconds": time.perf_counter() - started,
+            }) + "\n", encoding="utf-8")
+            return name, result
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lint_source, sources))
+        self.assertEqual([name for name, _ in results], [name for name, _ in samples(legacy=True)])
+        for name, result in results:
             with self.subTest(schema=name):
-                anchor = f"    {name}:\n      type: object\n      x-pennilogic-strict-provider: true\n"
-                text = replace_once(spec_text(), anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
-                result = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 expected = ("must select x-pennilogic-strict-provider" if name.startswith("CustomDestination")
                             else "strict generated conversion and serialization")

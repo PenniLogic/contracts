@@ -2,7 +2,8 @@
 
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
-const { resolveLocalRef, SCHEMA_ANNOTATIONS, HTTP_METHODS } = require("../spec/spectral-functions/_shared.js");
+const { resolveLocalRef, SCHEMA_ANNOTATIONS } = require("../spec/spectral-functions/_shared.js");
+const { collectSchemaUsage, SchemaUsageError } = require("../spec/spectral-functions/_schemaUsage.js");
 const Ajv = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats");
 const { successResponses } = require("./success_responses.cjs");
@@ -318,52 +319,14 @@ function compile(document) {
   const readOnlyModels = roots.filter((name) =>
     Object.values(schemas[name].properties || {}).some((property) => property.readOnly === true));
   if (readOnlyModels.length) {
-    function usedSchemas(response) {
-      const names = new Set(), visited = new Set();
-      let work = 0;
-      function visit(value, depth = 0) {
-        if (value === undefined) return;
-        if (++work > 16384 || depth > 64) reject("readOnly usage traversal bound");
-        if (!value || typeof value !== "object" || Array.isArray(value)) reject("malformed readOnly usage");
-        if (value.$ref !== undefined) {
-          if (typeof value.$ref !== "string" || !value.$ref.startsWith("#/")) reject("unsupported readOnly usage reference");
-          const target = resolveLocalRef(value.$ref, document);
-          if (!target) reject("unresolved readOnly usage reference");
-          if (value.$ref.startsWith("#/components/schemas/")) names.add(value.$ref.slice("#/components/schemas/".length));
-          if (!visited.has(value.$ref)) {
-            visited.add(value.$ref);
-            visit(target, depth + 1);
-          }
-        }
-        for (const child of Object.values(value.properties || {})) visit(child, depth + 1);
-        for (const keyword of ["schema", "items", "not", "if", "then", "else"]) visit(value[keyword], depth + 1);
-        for (const keyword of ["allOf", "anyOf", "oneOf"]) for (const child of value[keyword] || []) visit(child, depth + 1);
-        for (const child of Object.values(value.content || {})) visit(child.schema, depth + 1);
-      }
-      function pathItem(item, active = new Set()) {
-        if (item.$ref) {
-          if (active.has(item.$ref)) reject("cyclic readOnly path reference");
-          const target = resolveLocalRef(item.$ref, document);
-          if (!target) reject("unresolved readOnly path reference");
-          pathItem(target, new Set(active).add(item.$ref));
-        }
-        for (const method of HTTP_METHODS) {
-          const operation = item[method];
-          if (!operation) continue;
-          if (response) {
-            for (const child of Object.values(operation.responses || {})) visit(child);
-          } else {
-            visit(operation.requestBody);
-            for (const child of [...(item.parameters || []), ...(operation.parameters || [])]) visit(child);
-          }
-        }
-      }
-      for (const item of Object.values(document.paths || {})) pathItem(item);
-      return names;
+    let usage;
+    try { usage = collectSchemaUsage(document); }
+    catch (error) {
+      if (!(error instanceof SchemaUsageError)) throw error;
+      reject(`unproved readOnly usage: ${error.message}`);
     }
-    const requests = usedSchemas(false), responses = usedSchemas(true);
     for (const name of readOnlyModels) {
-      if (requests.has(name) || !responses.has(name)) reject("unsupported keyword: readOnly model must be response-only");
+      if (usage.request.has(name) || !usage.response.has(name)) reject("unsupported keyword: readOnly model must be response-only");
       const model = projection.components.schemas[name];
       model["x-pennilogic-read-only-response"] = true;
       for (const property of Object.values(model.properties)) {

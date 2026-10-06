@@ -2,6 +2,17 @@
 
 ## Unreleased initial core contract 0.4.0
 
+- Correct the c440 response-only usage-proof gap: one bounded context-aware walker now covers
+  schema-valued map/dependent/application edges, proper local references and callback/webhook/
+  Path Item request roles before metadata or output promotion. The owning core guard uses the
+  same traversal; genuine annotations/literals and response-only positives stay distinct.
+  Preserve the existing node/depth/ref bounds, earlier false-admission/native evidence and all
+  M1/F2/Q1 corrections. No product callback feature, backend exploit or new-head approval is claimed.
+- Remediate measured graph work without reducing tests: share checked declarations only within
+  one exact-input batch, retain independent fresh determinism batches, stage independent targets
+  with at most two workers, and share the freshly generated Python seam fixture. Isolate all
+  29 legacy strict-binding CLI cases before bounded concurrency two. Preserve actual c440's
+  908-job/912-whole functional-success/timing-failure record and the unchanged hosted600 gates.
 - Correct the independently reproduced public TypeScript writer defect: generated `ModelToJSON`
   and `ModelToJSONTyped` return a distinct recursive wire type rather than falsely promising a
   domain `Money` wrapper. Preserve canonical codecs/wire values; validate strict portable consumers
