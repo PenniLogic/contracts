@@ -2,9 +2,9 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { test } = require("node:test");
+const { test, suite } = require("node:test");
 const { createHash } = require("node:crypto");
-const { spawnSync } = require("node:child_process");
+const { execFile } = require("node:child_process");
 const { parse } = require("@stoplight/yaml");
 const { schema: validateSchema } = require("@stoplight/spectral-functions");
 const contract = require("../../spec/spectral-functions/customDestinationContract");
@@ -43,7 +43,16 @@ function withRequest(shape) {
   return doc;
 }
 
-function withLintProbe(check) {
+function run(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { cwd: ROOT, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error && (!Number.isInteger(error.code) || error.signal)) reject(error);
+      else resolve({ status: error?.code ?? 0, stdout, stderr });
+    });
+  });
+}
+
+async function withLintProbe(check) {
   fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
   const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
   try {
@@ -51,16 +60,63 @@ function withLintProbe(check) {
       fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
     }
     const file = path.join(directory, "probe.json");
-    check((doc) => {
+    await check(async (doc) => {
       fs.writeFileSync(file, JSON.stringify(doc));
-      const result = spawnSync("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--spec", file], { cwd: ROOT, encoding: "utf8" });
+      const result = await run("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--spec", file]);
       assert.equal(result.error, undefined);
       return result;
-    });
+    }, directory);
   } finally {
     fs.rmSync(directory, { recursive: true });
   }
 }
+
+test("lint subprocess helper preserves complete stdout, stderr and zero/nonzero exit codes", async () => {
+  for (const status of [0, 1, 2]) {
+    const result = await run(process.execPath, ["-e",
+      `process.stdout.write("synthetic stdout\\n"); process.stderr.write("synthetic stderr\\n"); process.exitCode = ${status};`]);
+    assert.deepEqual(result, { status, stdout: "synthetic stdout\n", stderr: "synthetic stderr\n" });
+  }
+});
+
+test("lint subprocess helper rejects launch failures and output overflow rather than reporting a lint result", async () => {
+  await assert.rejects(run(path.join(ROOT, "build", "nonexistent-lint-command"), []), { code: "ENOENT" });
+  await assert.rejects(run(process.execPath, ["-e", 'process.stdout.write("x".repeat(1024 * 1024 + 1));']),
+    { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+});
+
+test("lint probe cleanup waits for an asynchronous callback and preserves its failure", async () => {
+  let directory;
+  const error = new Error("synthetic asynchronous assertion failure");
+  await assert.rejects(withLintProbe(async (_lint, owned) => {
+    directory = owned;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(fs.existsSync(directory));
+    throw error;
+  }), (actual) => actual === error);
+  assert.equal(fs.existsSync(directory), false);
+});
+
+test("parallel real lint probes keep documents, diagnostics and cleanup isolated", async () => {
+  const directories = [];
+  const results = await Promise.allSettled([[base, 0], [probe(), 1]].map(([doc, status]) =>
+    withLintProbe(async (lint, directory) => {
+      directories.push(directory);
+      const result = await lint(doc);
+      assert.equal(result.status, status, result.stdout + result.stderr);
+      if (status === 0) assert.equal(result.stderr, "");
+      else assert.match(result.stderr, /\[pl-no-inference-address\]/);
+      const relative = (owned) => path.relative(ROOT, path.join(owned, "probe.json")).replaceAll("\\", "/");
+      assert.ok((result.stdout + result.stderr).includes(relative(directory)));
+      const other = directories.find((candidate) => candidate !== directory);
+      assert.ok(!(result.stdout + result.stderr).includes(relative(other)));
+    })));
+  assert.equal(new Set(directories).size, 2);
+  for (const directory of directories) assert.equal(fs.existsSync(directory), false);
+  for (const result of results) assert.equal(result.status, "fulfilled", result.reason);
+});
+
+suite("custom-destination source controls", { concurrency: 2 }, () => {
 
 test("canonical accepted consequence satisfies its complete published closed schema", () => {
   assert.deepEqual(validateSchema(consequence, { schema, dialect: "draft7", allErrors: true }, context()), []);
@@ -126,7 +182,7 @@ test("all four canonical enums reject missing, additional, duplicate, reordered 
 
 test("real Spectral CLI rejects complete canonical enum copies regardless of widening, order or repeated members", async (t) => {
   for (const [name, values] of Object.entries(consequence.enums)) {
-    await t.test(name, () => withLintProbe((lint) => {
+    await t.test(name, () => withLintProbe(async (lint) => {
       const variants = {
         Exact: [...values],
         Reordered: [...values].reverse(),
@@ -139,7 +195,7 @@ test("real Spectral CLI rejects complete canonical enum copies regardless of wid
       for (const [variant, members] of Object.entries(variants)) {
         doc.components.schemas[`EnumCopy${variant}`] = { type: "string", enum: members };
       }
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       const diagnostics = result.stderr.split(/\r?\n/);
       for (const variant of Object.keys(variants)) {
@@ -153,8 +209,8 @@ test("real Spectral CLI rejects complete canonical enum copies regardless of wid
   }
 });
 
-test("real Spectral CLI permits unchanged canonical enums, ref-only aliases and unrelated or partial-overlap enums", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI permits unchanged canonical enums, ref-only aliases and unrelated or partial-overlap enums", async () => {
+  await withLintProbe(async (lint) => {
     const doc = structuredClone(base);
     for (const [name, values] of Object.entries(consequence.enums)) {
       doc.components.schemas[`EnumAlias${name}`] = { $ref: `#/components/schemas/${name}` };
@@ -166,13 +222,13 @@ test("real Spectral CLI permits unchanged canonical enums, ref-only aliases and 
         type: "string", enum: [...values.slice(1), "synthetic_extra", "synthetic_other"],
       };
     }
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
 
-test("real Spectral CLI finds all four copied enums under example/examples/default field and component names", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI finds all four copied enums under example/examples/default field and component names", async () => {
+  await withLintProbe(async (lint) => {
     const doc = structuredClone(base);
     const expected = [];
     for (const member of ["example", "examples", "default"]) {
@@ -191,7 +247,7 @@ test("real Spectral CLI finds all four copied enums under example/examples/defau
     }
     assert.doesNotThrow(() => compile(doc));
     assert.deepEqual(findings(doc).map((finding) => finding.path), expected);
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
       line.includes("[pl-custom-destination-contract]") && line.includes(`(${location.join(".")})`) &&
@@ -199,8 +255,8 @@ test("real Spectral CLI finds all four copied enums under example/examples/defau
   });
 });
 
-test("real Spectral CLI traverses schema maps, nested arrays and every schema applicator without treating names as annotations", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI traverses schema maps, nested arrays and every schema applicator without treating names as annotations", async () => {
+  await withLintProbe(async (lint) => {
     const doc = structuredClone(base);
     const copy = () => ({ type: "string", enum: [...consequence.enums.CredentialHeader, "synthetic_extra"] });
     const shape = { type: "object", properties: {
@@ -223,7 +279,7 @@ test("real Spectral CLI traverses schema maps, nested arrays and every schema ap
     doc.components.schemas.SchemaPositions = shape;
     const expected = suffixes.map((suffix) => ["components", "schemas", "SchemaPositions", ...suffix].join(".")).sort();
     assert.deepEqual(findings(doc).map((finding) => finding.path.join(".")).sort(), expected);
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
       line.includes("[pl-custom-destination-contract]") && line.includes(`(${location})`) &&
@@ -231,8 +287,8 @@ test("real Spectral CLI traverses schema maps, nested arrays and every schema ap
   });
 });
 
-test("real Spectral CLI visits OpenAPI schema containers including named components, headers, callbacks and webhooks", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI visits OpenAPI schema containers including named components, headers, callbacks and webhooks", async () => {
+  await withLintProbe(async (lint) => {
     const doc = structuredClone(base);
     const copy = () => ({ type: "string", enum: [...consequence.enums.CredentialHeader, "synthetic_extra"] });
     const parameter = () => ({ name: "selection", in: "query", description: "Synthetic enum control.", schema: copy() });
@@ -277,7 +333,7 @@ test("real Spectral CLI visits OpenAPI schema containers including named compone
         `${prefix}.responses.200.content.application/json.schema.enum`);
     }
     assert.deepEqual(findings(doc).map((finding) => finding.path.join(".")).sort(), expected.sort());
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     for (const location of expected) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
       line.includes("[pl-custom-destination-contract]") && line.includes(`(${location})`) &&
@@ -285,8 +341,8 @@ test("real Spectral CLI visits OpenAPI schema containers including named compone
   });
 });
 
-test("real Spectral CLI preserves genuine annotation and example data, canonical refs and partial-overlap fields", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI preserves genuine annotation and example data, canonical refs and partial-overlap fields", async () => {
+  await withLintProbe(async (lint) => {
     const doc = structuredClone(base);
     const data = { enum: [...consequence.enums.CredentialHeader] };
     const shape = { type: "object", additionalProperties: false, required: ["enum"], properties: {
@@ -314,7 +370,7 @@ test("real Spectral CLI preserves genuine annotation and example data, canonical
     } };
     doc["x-synthetic-data"] = { components: { schemas: { example: { enum: data.enum } } } };
     assert.deepEqual(findings(doc), []);
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
@@ -419,25 +475,25 @@ test("recursive lint finds a planted address through requestBody refs, arrays, c
   assert.deepEqual(noAddress(base), []);
 });
 
-test("real Spectral CLI fails nested address fixtures actionably and passes the repaired control", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI fails nested address fixtures actionably and passes the repaired control", async () => {
+  await withLintProbe(async (lint) => {
     const doc = probe();
     for (const field of ["base_url", "endpoint", "host"]) {
       doc.components.schemas.CustomDestinationLintTarget.properties = { [field]: { type: "string" } };
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.match(result.stderr, /\[pl-no-inference-address\]/);
       assert.ok(result.stderr.includes(`CustomDestinationLintTarget.properties.${field}`));
       assert.match(result.stderr, /destinationId\/custom_model_id/);
     }
     doc.components.schemas.CustomDestinationLintTarget.properties = {};
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
 
-test("real Spectral CLI refuses enrollment address provenance through benign aliases, compositions and nested arrays", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses enrollment address provenance through benign aliases, compositions and nested arrays", async () => {
+  await withLintProbe(async (lint) => {
     const host = base.components.schemas.CustomDestinationRegistrationRequest.properties.host;
     const prefix = base.components.schemas.CustomDestinationRegistrationRequest.properties.pathPrefix;
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {
@@ -456,7 +512,7 @@ test("real Spectral CLI refuses enrollment address provenance through benign ali
     doc.components.schemas.ScalarAliasFirst = { $ref: "#/components/schemas/ScalarAlias~1Second~0" };
     doc.components.schemas["ScalarAlias/Second~"] = { $ref: "#/components/schemas/%43ustomDestinationHost" };
     doc.components.schemas.PlainText = { type: "string" };
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     const lines = result.stderr.split(/\r?\n/);
     for (const suffix of [
@@ -472,8 +528,8 @@ test("real Spectral CLI refuses enrollment address provenance through benign ali
   });
 });
 
-test("real Spectral CLI refuses explicit URI, IRI, host and IP formats under innocuous field names", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses explicit URI, IRI, host and IP formats under innocuous field names", async () => {
+  await withLintProbe(async (lint) => {
     const formats = ["uri", "uri-reference", "uri-template", "iri", "iri-reference",
       "url", "hostname", "idn-hostname", "ipv4", "ipv6"];
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
@@ -483,7 +539,7 @@ test("real Spectral CLI refuses explicit URI, IRI, host and IP formats under inn
         allOf: [{ $ref: `#/components/schemas/FormattedScalar${index}` }],
       };
     });
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     const lines = result.stderr.split(/\r?\n/);
     formats.forEach((format, index) => assert.ok(lines.some((line) =>
@@ -493,8 +549,8 @@ test("real Spectral CLI refuses explicit URI, IRI, host and IP formats under inn
   });
 });
 
-test("real Spectral CLI keeps prompt URL text, ordinary aliases, identifiers and all six enrollment operations", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI keeps prompt URL text, ordinary aliases, identifiers and all six enrollment operations", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {
       prompt: { $ref: "#/components/schemas/CustomDestinationHostLookingText" },
       destinationId: { $ref: "#/components/schemas/CustomDestinationId" },
@@ -509,7 +565,7 @@ test("real Spectral CLI keeps prompt URL text, ordinary aliases, identifiers and
     doc.components.schemas.OrdinaryTextAlias = { allOf: [{ $ref: "#/components/schemas/CustomDestinationHostLookingText" }] };
     for (const [route, item] of Object.entries(base.paths)) assert.deepEqual(doc.paths[route], item);
     assert.deepEqual(noAddress(doc), []);
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
@@ -537,8 +593,8 @@ test("enrollment scalar provenance follows its declared role rather than a fixed
     finding.message.includes("registration-only host address schema")));
 });
 
-test("real Spectral CLI preserves enrollment roles through each compiler-supported annotation on direct and intermediate refs", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI preserves enrollment roles through each compiler-supported annotation on direct and intermediate refs", async () => {
+  await withLintProbe(async (lint) => {
     const annotations = {
       title: "Synthetic scalar", description: "Synthetic scalar.", default: null,
       example: null, examples: null, deprecated: true, "x-pennilogic-strict-provider": false,
@@ -568,7 +624,7 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
         assert.deepEqual(compiled.schemas, control.schemas, annotation);
         assert.deepEqual(compiled.roots, control.roots, annotation);
         assert.equal(noAddress(doc).length, 2, `${annotation}/${intermediate}`);
-        const result = lint(doc);
+        const result = await lint(doc);
         assert.equal(result.status, 1, result.stdout + result.stderr);
         for (const [member, role] of [["target", "host"], ["segment", "pathPrefix"]]) {
           assert.ok(result.stderr.split(/\r?\n/).some((line) =>
@@ -581,8 +637,8 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
   });
 });
 
-test("supported annotations do not taint constrained general-text bases or widen the compiler vocabulary", () => {
-  withLintProbe((lint) => {
+test("supported annotations do not taint constrained general-text bases or widen the compiler vocabulary", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {
       prompt: { $ref: "#/components/schemas/GeneralText" },
     } });
@@ -599,7 +655,7 @@ test("supported annotations do not taint constrained general-text bases or widen
     }
     assert.deepEqual(noAddress(doc), []);
     assert.doesNotThrow(() => compile(doc));
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     for (const annotation of ["summary", "readOnly", "writeOnly", "externalDocs", "x-unknown-annotation"]) {
       const altered = structuredClone(base);
@@ -617,8 +673,8 @@ test("supported annotations do not taint constrained general-text bases or widen
   });
 });
 
-test("real Spectral CLI preserves registration roles through implied types, equal or looser bounds and scalar conjunctions", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI preserves registration roles through implied types, equal or looser bounds and scalar conjunctions", async () => {
+  await withLintProbe(async (lint) => {
     const wrappers = [
       (ref) => ({ ...ref, type: "string" }),
       (ref) => ({ ...ref, minLength: 0 }),
@@ -650,7 +706,7 @@ test("real Spectral CLI preserves registration roles through implied types, equa
       assert.ok(compiled.schemas.CustomDestinationHost);
       assert.ok(compiled.schemas.CustomDestinationPathPrefix);
       assert.equal(noAddress(doc).length, 2);
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       for (const [member, field] of [["selector", "host"], ["segment", "pathPrefix"]]) {
         assert.ok(result.stderr.split(/\r?\n/).some((line) => line.includes("[pl-no-inference-address]") &&
@@ -661,8 +717,8 @@ test("real Spectral CLI preserves registration roles through implied types, equa
   });
 });
 
-test("real Spectral CLI retains renamed multi-hop enrollment roles at every equivalent intermediate reference", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI retains renamed multi-hop enrollment roles at every equivalent intermediate reference", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
     const properties = doc.paths["/ai/inference"].post.requestBody.content["application/json"].schema.properties;
     for (const [index, field] of ["host", "pathPrefix"].entries()) {
@@ -689,7 +745,7 @@ test("real Spectral CLI retains renamed multi-hop enrollment roles at every equi
       "x-pennilogic-strict-provider": true,
     };
     assert.doesNotThrow(() => compile(doc));
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     for (const index of [0, 1]) {
       for (const hop of [0, 1, 2, 3]) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
@@ -701,8 +757,8 @@ test("real Spectral CLI retains renamed multi-hop enrollment roles at every equi
   });
 });
 
-test("real Spectral CLI distinguishes genuinely narrowed general text from its equivalent registration wrappers", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI distinguishes genuinely narrowed general text from its equivalent registration wrappers", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {
       prompt: { $ref: "#/components/schemas/SharedText" },
     } });
@@ -717,12 +773,12 @@ test("real Spectral CLI distinguishes genuinely narrowed general text from its e
     }
     assert.doesNotThrow(() => compile(doc));
     assert.deepEqual(noAddress(doc), []);
-    const positive = lint(doc);
+    const positive = await lint(doc);
     assert.equal(positive.status, 0, positive.stdout + positive.stderr);
     doc.paths["/ai/inference"].post.requestBody.content["application/json"].schema.properties.selection = {
       $ref: "#/components/schemas/Constrainedhost",
     };
-    const negative = lint(doc);
+    const negative = await lint(doc);
     assert.equal(negative.status, 1, negative.stdout + negative.stderr);
     assert.match(negative.stderr, /registration-only host address schema/);
     assert.deepEqual(validate("Discuss https://content.example/v1 as ordinary text.",
@@ -730,8 +786,8 @@ test("real Spectral CLI distinguishes genuinely narrowed general text from its e
   });
 });
 
-test("real Spectral CLI refuses unproved registration compositions rather than silently losing address provenance", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses unproved registration compositions rather than silently losing address provenance", async () => {
+  await withLintProbe(async (lint) => {
     const wrappers = [
       (ref) => ({ type: "string", anyOf: [ref] }),
       (ref) => ({ type: "string", oneOf: [ref] }),
@@ -747,7 +803,7 @@ test("real Spectral CLI refuses unproved registration compositions rather than s
       const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
       for (const field of ["host", "pathPrefix"]) registration[field] = wrap(registration[field]);
       assert.doesNotThrow(() => compile(doc));
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.match(result.stderr, /\[pl-no-inference-address\].*registration address provenance is unproved/);
       assert.match(result.stderr, /destinationId\/custom_model_id/);
@@ -803,8 +859,8 @@ test("bounded alias proof preserves finite constraint identity and refuses malfo
   assert.ok(noAddress(wide).some((finding) => finding.message.includes("traversal bound")));
 });
 
-test("real Spectral CLI refuses specialized bases narrowed by enrollment bounds, patterns, const or enum", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses specialized bases narrowed by enrollment bounds, patterns, const or enum", async () => {
+  await withLintProbe(async (lint) => {
     const refinements = [
       () => ({ minLength: 2 }),
       (target) => ({ maxLength: target.maxLength - 1 }),
@@ -832,7 +888,7 @@ test("real Spectral CLI refuses specialized bases narrowed by enrollment bounds,
       doc.components.schemas.SpecializedInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
       assert.ok(compile(doc).roots.includes("SpecializedInferenceArguments"));
       assert.deepEqual(validate({ selector: "outside.example", segment: "/v1" }, { ...shape, components: doc.components }), []);
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       for (const name of ["CustomDestinationHost", "CustomDestinationPathPrefix"]) {
         assert.ok(result.stderr.split(/\r?\n/).some((line) => line.includes("[pl-no-inference-address]") &&
@@ -843,8 +899,8 @@ test("real Spectral CLI refuses specialized bases narrowed by enrollment bounds,
   });
 });
 
-test("real Spectral CLI retains specialized-base refusal through renamed multi-hop body, header, query and nested references", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI retains specialized-base refusal through renamed multi-hop body, header, query and nested references", async () => {
+  await withLintProbe(async (lint) => {
     const shape = { type: "object", additionalProperties: false, properties: {
       records: { type: "array", items: { type: "object", additionalProperties: false, properties: {} } },
     } };
@@ -878,13 +934,13 @@ test("real Spectral CLI retains specialized-base refusal through renamed multi-h
       operation.parameters.push({ $ref: `#/components/parameters/RenamedParameter${index}` });
     }
     assert.ok(compile(doc).roots.includes("RenamedInferenceArguments"));
-    const negative = lint(doc);
+    const negative = await lint(doc);
     assert.equal(negative.status, 1, negative.stdout + negative.stderr);
     for (const index of [0, 1]) assert.ok(negative.stderr.split(/\r?\n/).some((line) =>
       line.includes(`(components.schemas.RenamedDomain${index})`) &&
       line.includes("[pl-no-inference-address]") && line.includes("registration address provenance is unproved")), negative.stderr);
     for (const index of [0, 1]) doc.components.schemas[`DomainMiddle${index}`].allOf[1].minLength = 1;
-    const equivalent = lint(doc);
+    const equivalent = await lint(doc);
     assert.equal(equivalent.status, 1, equivalent.stdout + equivalent.stderr);
     for (const index of [0, 1]) {
       assert.ok(equivalent.stderr.includes(`properties.records.items.properties.selection${index}.$ref)`));
@@ -895,8 +951,8 @@ test("real Spectral CLI retains specialized-base refusal through renamed multi-h
   });
 });
 
-test("real Spectral CLI preserves proved unrestricted shared text through annotations and ref conjunctions", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI preserves proved unrestricted shared text through annotations and ref conjunctions", async () => {
+  await withLintProbe(async (lint) => {
     const shape = { type: "object", additionalProperties: false, properties: {
       prompt: { $ref: "#/components/schemas/PlainDomain" },
       notes: { type: "array", items: { $ref: "#/components/schemas/PlainOuter" } },
@@ -921,7 +977,7 @@ test("real Spectral CLI preserves proved unrestricted shared text through annota
     assert.deepEqual(validate({ prompt: "", notes: ["Quote https://content.example/v1 as text."] },
       { ...shape, components: doc.components }), []);
     assert.deepEqual(noAddress(doc), []);
-    const positive = lint(doc);
+    const positive = await lint(doc);
     assert.equal(positive.status, 0, positive.stdout + positive.stderr);
     for (const restriction of [{ minLength: 1 }, { maxLength: 254 }, { pattern: "^.*$" }, { enum: ["a", "b"] }]) {
       const restricted = structuredClone(doc);
@@ -931,8 +987,8 @@ test("real Spectral CLI preserves proved unrestricted shared text through annota
   });
 });
 
-test("real Spectral CLI refuses inline role pointers in unmarked requests while marked compiler derivatives remain rejected", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses inline role pointers in unmarked requests while marked compiler derivatives remain rejected", async () => {
+  await withLintProbe(async (lint) => {
     for (const position of ["direct", 0, 1]) {
       const shape = { type: "object", additionalProperties: false, properties: {} };
       const doc = withRequest(shape);
@@ -956,7 +1012,7 @@ test("real Spectral CLI refuses inline role pointers in unmarked requests while 
       const marked = structuredClone(doc);
       marked.components.schemas.InlineInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
       assert.throws(() => compile(marked), /provider constraint generation rejected: unresolved reference/);
-      const result = lint(doc);
+      const result = await lint(doc);
       assert.equal(result.status, 1, result.stdout + result.stderr);
       for (const member of ["selector", "segment"]) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
         line.includes("[pl-no-inference-address]") && line.includes(`properties.${member}.$ref)`) &&
@@ -965,8 +1021,8 @@ test("real Spectral CLI refuses inline role pointers in unmarked requests while 
   });
 });
 
-test("real Spectral CLI enforces schema-root refs through nested aliases without restricting OpenAPI ref contexts or member names", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI enforces schema-root refs through nested aliases without restricting OpenAPI ref contexts or member names", async () => {
+  await withLintProbe(async (lint) => {
     const shape = { type: "object", additionalProperties: false, properties: {
       records: { type: "array", items: { type: "object", additionalProperties: false, properties: {
         selection: { type: "string", allOf: [{ $ref: "#/components/schemas/SelectionOuter" }] },
@@ -1000,7 +1056,7 @@ test("real Spectral CLI enforces schema-root refs through nested aliases without
       parameters: [{ $ref: "#/components/parameters/ContextQuery" }], post: operation,
     };
     assert.doesNotThrow(() => compile(doc));
-    const negative = lint(doc);
+    const negative = await lint(doc);
     assert.equal(negative.status, 1, negative.stdout + negative.stderr);
     for (const location of [
       "components.schemas.SelectionMiddle.$ref",
@@ -1012,14 +1068,14 @@ test("real Spectral CLI enforces schema-root refs through nested aliases without
     doc.components.parameters.ContextHeader.schema.$ref = "#/components/schemas/examples";
     doc.components.parameters.ContextQuery.content["application/json"].schema.$ref = "#/components/schemas/examples";
     assert.deepEqual(noAddress(doc), []);
-    const positive = lint(doc);
+    const positive = await lint(doc);
     assert.equal(positive.status, 0, positive.stdout + positive.stderr);
     const pathRef = structuredClone(doc);
     pathRef.components.pathItems = { ContextPath: pathRef.paths["/ai/inference"] };
     pathRef.paths["/ai/inference"] = { $ref: "#/components/pathItems/ContextPath" };
     assert.deepEqual(noAddress(pathRef), []);
     doc.components.schemas.SelectionMiddle.$ref = "#/components/schemas/NaturalCarrier/properties/examples";
-    const unsupported = lint(doc);
+    const unsupported = await lint(doc);
     assert.equal(unsupported.status, 1, unsupported.stdout + unsupported.stderr);
     assert.match(unsupported.stderr, /\[pl-no-inference-address\].*inline\/subschema and other local targets are unsupported/);
   });
@@ -1040,8 +1096,8 @@ test("custom guards treat combined enum/example/default and literal ref payloads
   assert.deepEqual(findings(doc), []);
 });
 
-test("real Spectral CLI refuses negative composition through body refs, parameters, aliases, nested arrays and compositions", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses negative composition through body refs, parameters, aliases, nested arrays and compositions", async () => {
+  await withLintProbe(async (lint) => {
     const negative = (schema) => ({ type: "string", not: { not: schema } });
     const host = { $ref: "#/components/schemas/CustomDestinationHost" };
     const prefix = { $ref: "#/components/schemas/CustomDestinationPathPrefix" };
@@ -1076,7 +1132,7 @@ test("real Spectral CLI refuses negative composition through body refs, paramete
     doc.paths["/ai/inference"].post.parameters.push({
       in: "header", name: "Selection", description: "Synthetic negative.", schema: negative(prefix),
     });
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     const body = "components.requestBodies.ConstraintBody.content.application/json.schema.properties";
     const locations = [
@@ -1094,8 +1150,8 @@ test("real Spectral CLI refuses negative composition through body refs, paramete
   });
 });
 
-test("real Spectral CLI keeps not/example/examples/default member names and schema-shaped annotation data as ordinary content", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI keeps not/example/examples/default member names and schema-shaped annotation data as ordinary content", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {
       prompt: { type: "string" },
       not: { type: "object", additionalProperties: false, properties: {
@@ -1121,13 +1177,13 @@ test("real Spectral CLI keeps not/example/examples/default member names and sche
     assert.deepEqual(noAddress(doc), []);
     assert.deepEqual(findings(doc), []);
     for (const [route, item] of Object.entries(base.paths)) assert.deepEqual(doc.paths[route], item);
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
 
-test("real Spectral CLI refuses semantic address parameters and fake enrollment exceptions", () => {
-  withLintProbe((lint) => {
+test("real Spectral CLI refuses semantic address parameters and fake enrollment exceptions", async () => {
+  await withLintProbe(async (lint) => {
     const doc = withRequest({ type: "object", additionalProperties: false, properties: {} });
     doc.paths["/ai/inference"].parameters = [
       { in: "query", name: "selector", description: "Synthetic negative.", schema: { $ref: "#/components/schemas/CustomDestinationHost" } },
@@ -1138,7 +1194,7 @@ test("real Spectral CLI refuses semantic address parameters and fake enrollment 
       type: "object", additionalProperties: false, properties: { target: { $ref: "#/components/schemas/CustomDestinationHost" } },
     };
     doc.paths["/ai/pretend-enrollment"] = { post: { ...original, operationId: "pretendEnrollment" } };
-    const result = lint(doc);
+    const result = await lint(doc);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     const lines = result.stderr.split(/\r?\n/);
     for (const [location, origin] of [
@@ -1302,4 +1358,6 @@ test("DPoP proof shape and opaque step-up do not pretend to verify credentials",
   assert.equal(base["x-dpop-protocol"].apiKeyPrefix, "unset");
   assert.equal(base["x-dpop-protocol"].iatWindowSeconds, 60);
   assert.equal(base["x-dpop-protocol"].jtiReplayCacheSeconds, 300);
+});
+
 });
