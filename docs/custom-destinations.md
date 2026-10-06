@@ -154,14 +154,26 @@ keywords or change default handling; the existing lint-only `summary` annotation
 The bounded proof follows local references and positive `allOf` conjunctions, retaining scalar
 type, effective length bounds, exact pattern/format identities and finite string constraints.
 Matching types, equal/looser bounds and equivalent intermediate or renamed wrappers cannot erase
-the role. It does not blindly propagate provenance into every referenced base: a genuinely narrowed
-general-text use remains separate when a concrete value satisfies the base but not the role.
-That proper-narrowing witness is limited to empty/single-character strings; it is not a
-regex-equivalence guess. Unproved narrowing, unsupported/ambiguous composition, cycles and exhausted
-bounds fail explicitly rather than certify role absence. Traversal is limited to depth 64, 16,384
+the role. It does not blindly propagate provenance into every referenced base: a base remains
+separate only when the complete supported conjunction proves unrestricted strings (`type: string`,
+effective minimum length zero, no maximum length, pattern, format or finite const/enum restriction).
+Supported annotations and redundant local ref/`allOf` wrappers preserve that proof. A proper
+subset or a differing example is not evidence that a specialized base is general text. Stronger
+enrollment bounds, patterns or finite restrictions therefore cannot erase an address-bearing base;
+non-equivalent bases without the unrestricted-string proof fail explicitly. This is a conservative
+finite boundary, not a regex-language solver. Unsupported/ambiguous composition, cycles and exhausted
+bounds also fail explicitly rather than certify role absence. Traversal is limited to depth 64, 16,384
 nodes, 256-member conjunctions/finite sets and 4,096-character pattern sources. Component-name
 resemblance or regex similarity alone is not address provenance. Compiler/generator inputs and
 their supported vocabulary are unchanged.
+
+Inspected request-schema `$ref`s must resolve to a named `components.schemas` root. Pointers into
+inline registration fields, `allOf` branches or any other local subschema are explicitly unsupported,
+including in unmarked requests, nested schemas and parameters. Existing URI/JSON-Pointer escaping
+of component names remains inspectable; this does not widen the strict compiler's narrower
+component-name grammar. OpenAPI requestBody, parameter and path-item references remain supported
+in their own contexts. Unmarked inline-pointer source admission and separately marked compiler
+refusal are distinct checks; neither proves a generated-runtime bypass.
 
 Explicit `uri`, `uri-reference`, `uri-template`, `iri`, `iri-reference`, `url`, `hostname`,
 `idn-hostname`, `ipv4` and `ipv6` format declarations are address-bearing in inspected requests.

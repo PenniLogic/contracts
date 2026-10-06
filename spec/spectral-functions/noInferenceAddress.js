@@ -67,15 +67,13 @@ module.exports = function noInferenceAddress(document) {
     return forbidden.has(parts.join("")) || parts.some((part) => ADDRESS_WORDS.has(part)) ||
       /^(?:base|api|endpoint)(?:url|uri|address|host)$/.test(parts.join(""));
   }
-  function reference(value, at, origin, seen, visitor) {
+  function reference(value, at, origin, seen, visitor, schemaOnly = false) {
     if (typeof value.$ref !== "string") return;
     const ref = value.$ref;
     if (!ref.startsWith("#/")) {
       report("request schemas must use inspectable local $refs (external/dynamic request shapes cannot prove closure)", [...at, "$ref"], origin);
       return;
     }
-    if (seen.has(ref)) return;
-    seen.add(ref);
     let parts;
     try {
       parts = decodeURIComponent(ref.slice(2)).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
@@ -84,6 +82,11 @@ module.exports = function noInferenceAddress(document) {
       report("malformed request $ref", [...at, "$ref"], origin);
       return;
     }
+    if (schemaOnly && (parts.length !== 3 || parts[0] !== "components" || parts[1] !== "schemas" || !parts[2])) {
+      report("request schema $refs must target named #/components/schemas/<name> roots; inline/subschema and other local targets are unsupported", [...at, "$ref"], origin);
+    }
+    if (seen.has(ref)) return;
+    seen.add(ref);
     const target = parts.reduce((node, part) => node && typeof node === "object" ? node[part] : undefined, document);
     if (target === undefined) report("unresolved request $ref cannot prove closure", [...at, "$ref"], origin);
     else visitor(target, parts, origin, seen);
@@ -108,7 +111,7 @@ module.exports = function noInferenceAddress(document) {
         return unproved("malformed or cyclic scalar alias", at);
       }
       const next = new Set(active).add(key(at));
-      const facts = { type: undefined, min: 0, max: Infinity, patterns: new Map(), formats: new Set(), finite: undefined };
+      const facts = { type: undefined, min: 0, max: Infinity, patterns: new Set(), formats: new Set(), finite: undefined };
       const intersect = (values) => {
         facts.finite = facts.finite === undefined ? values : facts.finite.filter((item) => values.includes(item));
       };
@@ -116,7 +119,7 @@ module.exports = function noInferenceAddress(document) {
         if (child.type) facts.type = child.type;
         facts.min = Math.max(facts.min, child.min);
         facts.max = Math.min(facts.max, child.max);
-        for (const [pattern, expression] of child.patterns) facts.patterns.set(pattern, expression);
+        for (const pattern of child.patterns) facts.patterns.add(pattern);
         for (const format of child.formats) facts.formats.add(format);
         if (child.finite !== undefined) intersect(child.finite);
       };
@@ -126,11 +129,12 @@ module.exports = function noInferenceAddress(document) {
         else if (["minLength", "maxLength"].includes(name) && Number.isSafeInteger(child) && child >= 0 && child <= 2147483647) {
           facts[name === "minLength" ? "min" : "max"] = child;
         } else if (name === "pattern" && typeof child === "string" && child.length <= 4096) {
-          try { facts.patterns.set(child, new RegExp(child, "u")); }
+          try { new RegExp(child, "u"); }
           catch (error) {
             if (!(error instanceof SyntaxError)) throw error;
             return unproved("malformed scalar pattern", [...at, name]);
           }
+          facts.patterns.add(child);
         } else if (name === "format" && typeof child === "string" && child.length > 0) facts.formats.add(child);
         else if (name === "const" && typeof child === "string") intersect([child]);
         else if (name === "enum" && Array.isArray(child) && child.length > 0 && child.length <= 256 &&
@@ -159,17 +163,12 @@ module.exports = function noInferenceAddress(document) {
       if (facts.min > facts.max || facts.finite?.length === 0) return unproved("contradictory scalar constraints", at);
       return facts;
     }
-    function accepts(facts, text) {
-      return facts.type === "string" && [...text].length >= facts.min && [...text].length <= facts.max &&
-        (facts.finite === undefined || facts.finite.includes(text)) &&
-        [...facts.patterns.values()].every((pattern) => pattern.test(text));
-    }
     function implies(target, role) {
       if (target.type !== "string" || role.type !== "string" ||
           [...role.formats].some((format) => !target.formats.has(format))) return false;
       return (role.finite === undefined || target.finite !== undefined && target.finite.every((text) => role.finite.includes(text))) &&
         target.min >= role.min && target.max <= role.max &&
-        [...role.patterns.keys()].every((pattern) => target.patterns.has(pattern));
+        [...role.patterns].every((pattern) => target.patterns.has(pattern));
     }
     if (document.openapi !== "3.1.0" || ![
       undefined, "https://spec.openapis.org/oas/3.1/dialect/base", "https://json-schema.org/draft/2020-12/schema",
@@ -184,12 +183,10 @@ module.exports = function noInferenceAddress(document) {
         enrollmentAddresses.set(targetKey, field);
         continue;
       }
-      // A concrete counterexample proves proper narrowing, not regex-language equivalence.
-      // Bound the witness input to empty/single-character strings; an unproved case stays red.
-      const witnesses = target.finite ?? ["", ...Array.from({ length: 128 }, (_, code) => String.fromCharCode(code))];
-      const narrowed = !target.formats.size && !role.formats.size && witnesses.some((text) =>
-        text.length <= 1 && accepts(target, text) && !accepts(role, text));
-      if (!narrowed) unproved("neither an equivalent alias nor a proved narrower use of its shared base", at);
+      // A proper subset alone cannot distinguish specialized address data from general text.
+      const plainText = target.type === "string" && target.min === 0 && target.max === Infinity &&
+        target.patterns.size === 0 && target.formats.size === 0 && target.finite === undefined;
+      if (!plainText) unproved("reference base is neither an equivalent enrollment alias nor an unconstrained string domain", at);
     }
   }
   function schema(value, at, origin, seen, structuredArguments = false, usageAt = at) {
@@ -203,7 +200,7 @@ module.exports = function noInferenceAddress(document) {
       report(`registration-only ${enrollmentField} address schema is forbidden in an inference/tool request`, usageAt, origin);
     }
     reference(value, at, origin, seen, (target, targetAt, targetOrigin, targetSeen) =>
-      schema(target, targetAt, targetOrigin, targetSeen, structuredArguments, [...at, "$ref"]));
+      schema(target, targetAt, targetOrigin, targetSeen, structuredArguments, [...at, "$ref"]), true);
     if (ADDRESS_FORMATS.has(value.format)) {
       report(`address-bearing format ${JSON.stringify(value.format)} is forbidden in an inference/tool request`, [...at, "format"], origin);
     }

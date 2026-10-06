@@ -766,7 +766,8 @@ test("bounded alias proof preserves finite constraint identity and refuses malfo
   assert.ok(noAddress(doc).some((finding) => finding.message.includes("registration-only host")));
   const constrained = structuredClone(doc);
   constrained.components.schemas.CustomDestinationRegistrationRequest.properties.host.enum = ["a"];
-  assert.deepEqual(noAddress(constrained), []);
+  assert.ok(noAddress(constrained).some((finding) =>
+    finding.message.includes("neither an equivalent enrollment alias nor an unconstrained string domain")));
   for (const mutate of [
     (copy) => { copy.components.schemas.FiniteScalar.enum = ["a", "a"]; },
     (copy) => { copy.components.schemas.FiniteScalar.type = ["string", "null"]; },
@@ -800,6 +801,228 @@ test("bounded alias proof preserves finite constraint identity and refuses malfo
     type: "string", allOf: Array.from({ length: 128 }, () => ({ $ref: "#/components/schemas/ScalarLayer" })),
   };
   assert.ok(noAddress(wide).some((finding) => finding.message.includes("traversal bound")));
+});
+
+test("real Spectral CLI refuses specialized bases narrowed by enrollment bounds, patterns, const or enum", () => {
+  withLintProbe((lint) => {
+    const refinements = [
+      () => ({ minLength: 2 }),
+      (target) => ({ maxLength: target.maxLength - 1 }),
+      () => ({ pattern: "^..+$" }),
+      (_, sample) => ({ const: sample }),
+      (_, sample) => ({ enum: [sample] }),
+    ];
+    for (const refine of refinements) {
+      const shape = { type: "object", additionalProperties: false, properties: {
+        selector: { $ref: "#/components/schemas/CustomDestinationHost" },
+        segment: { $ref: "#/components/schemas/CustomDestinationPathPrefix" },
+      } };
+      const doc = withRequest(shape);
+      const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+      for (const [field, sample, invalid] of [
+        ["host", "outside.example", "bad host with spaces"],
+        ["pathPrefix", "/v1", "https://outside.example"],
+      ]) {
+        const ref = registration[field];
+        const target = doc.components.schemas[ref.$ref.split("/").at(-1)];
+        registration[field] = { ...ref, type: "string", ...refine(target, sample) };
+        assert.deepEqual(validate(sample, { ...registration[field], components: doc.components }), []);
+        assert.ok(validate(invalid, { ...registration[field], components: doc.components }).length > 0);
+      }
+      doc.components.schemas.SpecializedInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
+      assert.ok(compile(doc).roots.includes("SpecializedInferenceArguments"));
+      assert.deepEqual(validate({ selector: "outside.example", segment: "/v1" }, { ...shape, components: doc.components }), []);
+      const result = lint(doc);
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      for (const name of ["CustomDestinationHost", "CustomDestinationPathPrefix"]) {
+        assert.ok(result.stderr.split(/\r?\n/).some((line) => line.includes("[pl-no-inference-address]") &&
+          line.includes(`(components.schemas.${name})`) && line.includes("registration address provenance is unproved") &&
+          line.includes("unconstrained string domain") && line.includes("destinationId/custom_model_id")), result.stderr);
+      }
+    }
+  });
+});
+
+test("real Spectral CLI retains specialized-base refusal through renamed multi-hop body, header, query and nested references", () => {
+  withLintProbe((lint) => {
+    const shape = { type: "object", additionalProperties: false, properties: {
+      records: { type: "array", items: { type: "object", additionalProperties: false, properties: {} } },
+    } };
+    const doc = withRequest(shape);
+    const properties = shape.properties.records.items.properties;
+    const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+    for (const [index, field] of ["host", "pathPrefix"].entries()) {
+      doc.components.schemas[`RenamedDomain${index}`] =
+        structuredClone(doc.components.schemas[registration[field].$ref.split("/").at(-1)]);
+      doc.components.schemas[`DomainMiddle${index}`] = {
+        type: "string", allOf: [{ $ref: `#/components/schemas/RenamedDomain${index}` }, { minLength: 2 }],
+      };
+      doc.components.schemas[`DomainOuter${index}`] = {
+        $ref: `#/components/schemas/DomainMiddle${index}`, type: "string", "x-not-money": true,
+      };
+      registration[field] = { $ref: `#/components/schemas/DomainOuter${index}`, minLength: 0 };
+      properties[`selection${index}`] = { $ref: `#/components/schemas/RenamedDomain${index}` };
+      properties[`alias${index}`] = { $ref: `#/components/schemas/DomainOuter${index}` };
+    }
+    doc.components.schemas.RenamedInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
+    doc.components.requestBodies.RenamedBody = {
+      required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/RenamedInferenceArguments" } } },
+    };
+    const operation = doc.paths["/ai/inference"].post;
+    operation.requestBody = { $ref: "#/components/requestBodies/RenamedBody" };
+    for (const [index, location] of ["header", "query"].entries()) {
+      doc.components.parameters[`RenamedParameter${index}`] = {
+        in: location, name: `Selection${index}`, description: "Synthetic source-only selection.",
+        schema: { $ref: `#/components/schemas/RenamedDomain${index}` },
+      };
+      operation.parameters.push({ $ref: `#/components/parameters/RenamedParameter${index}` });
+    }
+    assert.ok(compile(doc).roots.includes("RenamedInferenceArguments"));
+    const negative = lint(doc);
+    assert.equal(negative.status, 1, negative.stdout + negative.stderr);
+    for (const index of [0, 1]) assert.ok(negative.stderr.split(/\r?\n/).some((line) =>
+      line.includes(`(components.schemas.RenamedDomain${index})`) &&
+      line.includes("[pl-no-inference-address]") && line.includes("registration address provenance is unproved")), negative.stderr);
+    for (const index of [0, 1]) doc.components.schemas[`DomainMiddle${index}`].allOf[1].minLength = 1;
+    const equivalent = lint(doc);
+    assert.equal(equivalent.status, 1, equivalent.stdout + equivalent.stderr);
+    for (const index of [0, 1]) {
+      assert.ok(equivalent.stderr.includes(`properties.records.items.properties.selection${index}.$ref)`));
+      assert.ok(equivalent.stderr.includes(`properties.records.items.properties.alias${index}.$ref)`));
+      assert.ok(equivalent.stderr.includes(`components.parameters.RenamedParameter${index}.schema.$ref)`));
+    }
+    assert.doesNotMatch(equivalent.stderr, /registration address provenance is unproved/);
+  });
+});
+
+test("real Spectral CLI preserves proved unrestricted shared text through annotations and ref conjunctions", () => {
+  withLintProbe((lint) => {
+    const shape = { type: "object", additionalProperties: false, properties: {
+      prompt: { $ref: "#/components/schemas/PlainDomain" },
+      notes: { type: "array", items: { $ref: "#/components/schemas/PlainOuter" } },
+    } };
+    const doc = withRequest(shape);
+    doc.components.schemas.PlainDomain = { type: "string", minLength: 0, "x-not-money": true };
+    doc.components.schemas.PlainMiddle = { $ref: "#/components/schemas/PlainDomain", type: "string", description: "Shared text." };
+    doc.components.schemas.PlainOuter = {
+      type: "string", allOf: [{ $ref: "#/components/schemas/PlainMiddle" }, { type: "string", minLength: 0 }],
+    };
+    for (const field of ["host", "pathPrefix"]) {
+      const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+      const target = doc.components.schemas[registration[field].$ref.split("/").at(-1)];
+      doc.components.schemas[`Specialized${field}`] = { type: "string", allOf: [
+        { $ref: "#/components/schemas/PlainOuter" },
+        { pattern: target.pattern, minLength: target.minLength, maxLength: target.maxLength },
+      ] };
+      registration[field] = { $ref: `#/components/schemas/Specialized${field}`, "x-not-money": true };
+    }
+    doc.components.schemas.PlainInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
+    assert.ok(compile(doc).roots.includes("PlainInferenceArguments"));
+    assert.deepEqual(validate({ prompt: "", notes: ["Quote https://content.example/v1 as text."] },
+      { ...shape, components: doc.components }), []);
+    assert.deepEqual(noAddress(doc), []);
+    const positive = lint(doc);
+    assert.equal(positive.status, 0, positive.stdout + positive.stderr);
+    for (const restriction of [{ minLength: 1 }, { maxLength: 254 }, { pattern: "^.*$" }, { enum: ["a", "b"] }]) {
+      const restricted = structuredClone(doc);
+      Object.assign(restricted.components.schemas.PlainDomain, restriction);
+      assert.ok(noAddress(restricted).some((finding) => finding.message.includes("registration address provenance is unproved")));
+    }
+  });
+});
+
+test("real Spectral CLI refuses inline role pointers in unmarked requests while marked compiler derivatives remain rejected", () => {
+  withLintProbe((lint) => {
+    for (const position of ["direct", 0, 1]) {
+      const shape = { type: "object", additionalProperties: false, properties: {} };
+      const doc = withRequest(shape);
+      const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+      for (const [field, member, sample, invalid] of [
+        ["host", "selector", "outside.example", "bad host with spaces"],
+        ["pathPrefix", "segment", "/v1", "https://outside.example"],
+      ]) {
+        const target = structuredClone(doc.components.schemas[registration[field].$ref.split("/").at(-1)]);
+        registration[field] = position === "direct" ? target : {
+          type: "string", allOf: position === 0 ? [target] : [{ minLength: 0 }, target, { maxLength: target.maxLength + 1 }],
+        };
+        shape.properties[member] = {
+          $ref: `#/components/schemas/CustomDestinationRegistrationRequest/properties/${field}` +
+            (position === "direct" ? "" : `/allOf/${position}`),
+        };
+        assert.deepEqual(validate(sample, { ...shape.properties[member], components: doc.components }), []);
+        assert.ok(validate(invalid, { ...shape.properties[member], components: doc.components }).length > 0);
+      }
+      assert.doesNotThrow(() => compile(doc));
+      const marked = structuredClone(doc);
+      marked.components.schemas.InlineInferenceArguments = { ...shape, "x-pennilogic-strict-provider": true };
+      assert.throws(() => compile(marked), /provider constraint generation rejected: unresolved reference/);
+      const result = lint(doc);
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      for (const member of ["selector", "segment"]) assert.ok(result.stderr.split(/\r?\n/).some((line) =>
+        line.includes("[pl-no-inference-address]") && line.includes(`properties.${member}.$ref)`) &&
+        line.includes("inline/subschema and other local targets are unsupported")), result.stderr);
+    }
+  });
+});
+
+test("real Spectral CLI enforces schema-root refs through nested aliases without restricting OpenAPI ref contexts or member names", () => {
+  withLintProbe((lint) => {
+    const shape = { type: "object", additionalProperties: false, properties: {
+      records: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+        selection: { type: "string", allOf: [{ $ref: "#/components/schemas/SelectionOuter" }] },
+      } } },
+    } };
+    const doc = withRequest(shape);
+    const registration = doc.components.schemas.CustomDestinationRegistrationRequest.properties;
+    for (const field of ["host", "pathPrefix"]) registration[field] = {
+      type: "string", allOf: [structuredClone(doc.components.schemas[registration[field].$ref.split("/").at(-1)])],
+    };
+    const host = "#/components/schemas/CustomDestinationRegistrationRequest/properties/host/allOf/0";
+    const prefix = "#/components/schemas/CustomDestinationRegistrationRequest/properties/pathPrefix/allOf/0";
+    doc.components.schemas.SelectionMiddle = { $ref: host, "x-not-money": true };
+    doc.components.schemas.SelectionOuter = { $ref: "#/components/schemas/SelectionMiddle" };
+    doc.components.schemas.examples = { type: "string" };
+    doc.components.schemas.NaturalCarrier = {
+      type: "object", additionalProperties: false, properties: { examples: { type: "string" } },
+    };
+    doc.components.requestBodies.ContextBody = { required: true, content: { "application/json": { schema: shape } } };
+    doc.components.parameters.ContextHeader = {
+      in: "header", name: "Selection", description: "Synthetic source-only selection.", schema: { $ref: host },
+    };
+    doc.components.parameters.ContextQuery = {
+      in: "query", name: "Segment", description: "Synthetic source-only segment.",
+      content: { "application/json": { schema: { $ref: prefix } } },
+    };
+    const operation = doc.paths["/ai/inference"].post;
+    operation.requestBody = { $ref: "#/components/requestBodies/ContextBody" };
+    operation.parameters.push({ $ref: "#/components/parameters/ContextHeader" });
+    doc.paths["/ai/inference"] = {
+      parameters: [{ $ref: "#/components/parameters/ContextQuery" }], post: operation,
+    };
+    assert.doesNotThrow(() => compile(doc));
+    const negative = lint(doc);
+    assert.equal(negative.status, 1, negative.stdout + negative.stderr);
+    for (const location of [
+      "components.schemas.SelectionMiddle.$ref",
+      "components.parameters.ContextHeader.schema.$ref",
+      "components.parameters.ContextQuery.content.application/json.schema.$ref",
+    ]) assert.ok(negative.stderr.split(/\r?\n/).some((line) => line.includes("[pl-no-inference-address]") && line.includes(`(${location})`) &&
+      line.includes("inline/subschema and other local targets are unsupported")), negative.stderr);
+    doc.components.schemas.SelectionMiddle.$ref = "#/components/schemas/examples";
+    doc.components.parameters.ContextHeader.schema.$ref = "#/components/schemas/examples";
+    doc.components.parameters.ContextQuery.content["application/json"].schema.$ref = "#/components/schemas/examples";
+    assert.deepEqual(noAddress(doc), []);
+    const positive = lint(doc);
+    assert.equal(positive.status, 0, positive.stdout + positive.stderr);
+    const pathRef = structuredClone(doc);
+    pathRef.components.pathItems = { ContextPath: pathRef.paths["/ai/inference"] };
+    pathRef.paths["/ai/inference"] = { $ref: "#/components/pathItems/ContextPath" };
+    assert.deepEqual(noAddress(pathRef), []);
+    doc.components.schemas.SelectionMiddle.$ref = "#/components/schemas/NaturalCarrier/properties/examples";
+    const unsupported = lint(doc);
+    assert.equal(unsupported.status, 1, unsupported.stdout + unsupported.stderr);
+    assert.match(unsupported.stderr, /\[pl-no-inference-address\].*inline\/subschema and other local targets are unsupported/);
+  });
 });
 
 test("custom guards treat combined enum/example/default and literal ref payloads as data without certifying stock example resolution", () => {

@@ -45,6 +45,11 @@
   matching types and equal/looser bounds. Keep proved narrower general-text bases separate and
   refuse ambiguous provenance rather than silently admitting it. Clarify that custom-guard data
   handling does not waive the unchanged stock Spectral example/resolution limitation.
+- Correct the earlier proper-narrowing exemption: only a proved unrestricted string base can
+  remain separate from a non-equivalent enrollment role. Stronger bounds, patterns or finite
+  restrictions do not establish that a specialized base is general text. Explicitly refuse
+  non-component-root request-schema pointers, including unmarked inline conjunction references;
+  preserve context-correct OpenAPI body/parameter refs and the unchanged compiler boundary.
 - Reject null at marked Python response-model boundaries before the stock deserializer shortcut,
   retaining explicit Optional/legacy/no-content behavior. Hide API argument input in normal
   validation diagnostics; add actual three-language root-null and Python error-path controls.
