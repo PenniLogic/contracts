@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { test, suite } = require("node:test");
 const { createHash } = require("node:crypto");
-const { execFile } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { parse } = require("@stoplight/yaml");
 const { schema: validateSchema } = require("@stoplight/spectral-functions");
 const contract = require("../../spec/spectral-functions/customDestinationContract");
@@ -45,9 +45,39 @@ function withRequest(shape) {
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd: ROOT, encoding: "utf8" }, (error, stdout, stderr) => {
-      if (error && (!Number.isInteger(error.code) || error.signal)) reject(error);
-      else resolve({ status: error?.code ?? 0, stdout, stderr });
+    const child = spawn(command, args, { cwd: ROOT });
+    const stdout = [];
+    const stderr = [];
+    const maxBuffer = 1024 * 1024;
+    let outputBytes = 0;
+    let failure;
+    const fail = (error) => {
+      if (failure) return;
+      failure = error;
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.kill();
+    };
+    child.once("error", fail);
+    for (const [stream, chunks] of [[child.stdout, stdout], [child.stderr, stderr]]) {
+      stream?.on("error", fail);
+      stream?.on("data", (chunk) => {
+        if (failure) return;
+        if (chunk.length > maxBuffer - outputBytes) {
+          fail(Object.assign(new Error("Combined stdout and stderr exceed the 1048576-byte limit"),
+            { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }));
+          return;
+        }
+        outputBytes += chunk.length;
+        chunks.push(chunk);
+      });
+    }
+    child.once("close", (status, signal) => {
+      if (failure) reject(failure);
+      else if (signal || !Number.isInteger(status)) {
+        reject(Object.assign(new Error(signal ? `Command terminated by ${signal}` : "Command has no exit status"),
+          { code: status, signal }));
+      } else resolve({ status, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
     });
   });
 }
@@ -83,6 +113,68 @@ test("lint subprocess helper rejects launch failures and output overflow rather 
   await assert.rejects(run(path.join(ROOT, "build", "nonexistent-lint-command"), []), { code: "ENOENT" });
   await assert.rejects(run(process.execPath, ["-e", 'process.stdout.write("x".repeat(1024 * 1024 + 1));']),
     { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+});
+
+test("lint subprocess helper refuses combined 600-KiB streams below each individual cap", async () => {
+  await assert.rejects(run(process.execPath, ["-e",
+    'process.stdout.write("x".repeat(600*1024),()=>process.stderr.write("y".repeat(600*1024)))']),
+  { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+});
+
+test("lint subprocess helper enforces aggregate ASCII bytes below, at and above one MiB in either stream order", async () => {
+  for (const delta of [-1, 0, 1]) {
+    for (const first of ["stdout", "stderr"]) {
+      const stdout = "x".repeat(512 * 1024);
+      const stderr = "y".repeat(512 * 1024 + delta);
+      const second = first === "stdout" ? "stderr" : "stdout";
+      const script = `const stdout="x".repeat(512*1024),stderr="y".repeat(512*1024+${delta});` +
+        `process.${first}.write(${first},()=>process.${second}.write(${second}));`;
+      if (delta > 0) await assert.rejects(run(process.execPath, ["-e", script]), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+      else assert.deepEqual(await run(process.execPath, ["-e", script]), { status: 0, stdout, stderr });
+    }
+  }
+});
+
+test("lint subprocess helper counts aggregate UTF-8 bytes rather than code units at the one-MiB boundary", async () => {
+  for (const delta of [-1, 0, 1]) {
+    const stdout = "\u00e9".repeat(256 * 1024);
+    const stderr = "\ud83d\ude00".repeat(128 * 1024 - 1) + "x".repeat(4 + delta);
+    assert.equal(Buffer.byteLength(stdout) + Buffer.byteLength(stderr), 1024 * 1024 + delta);
+    const script = `process.stdout.write("\\u00e9".repeat(256*1024),` +
+      `()=>process.stderr.write("\\ud83d\\ude00".repeat(128*1024-1)+"x".repeat(4+${delta})));`;
+    if (delta > 0) await assert.rejects(run(process.execPath, ["-e", script]), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+    else assert.deepEqual(await run(process.execPath, ["-e", script]), { status: 0, stdout, stderr });
+  }
+});
+
+test("lint subprocess helper bounds raw buffers before UTF-8 replacement expands their decoded output", async () => {
+  for (const delta of [-1, 0, 1]) {
+    const stdout = Buffer.alloc(512 * 1024, 255);
+    const stderr = Buffer.alloc(512 * 1024 + delta, 254);
+    assert.equal(stdout.length + stderr.length, 1024 * 1024 + delta);
+    const script = `process.stdout.write(Buffer.alloc(512*1024,255),` +
+      `()=>process.stderr.write(Buffer.alloc(512*1024+${delta},254)));`;
+    if (delta > 0) await assert.rejects(run(process.execPath, ["-e", script]), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+    else assert.deepEqual(await run(process.execPath, ["-e", script]),
+      { status: 0, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8") });
+  }
+});
+
+test("lint subprocess helper preserves UTF-8 characters split between buffer writes", async () => {
+  const script = 'process.stdout.write(Buffer.from([226]),()=>setTimeout(()=>{' +
+    'process.stdout.write(Buffer.from([130,172]));' +
+    'process.stderr.write(Buffer.from([240,159]),()=>setTimeout(()=>process.stderr.write(Buffer.from([152,128])),5));},5));';
+  assert.deepEqual(await run(process.execPath, ["-e", script]), { status: 0, stdout: "\u20ac", stderr: "\ud83d\ude00" });
+});
+
+test("lint probe cleanup also follows aggregate subprocess output failure", async () => {
+  let directory;
+  await assert.rejects(withLintProbe(async (_lint, owned) => {
+    directory = owned;
+    await run(process.execPath, ["-e",
+      'process.stdout.write("x".repeat(600*1024),()=>process.stderr.write("y".repeat(600*1024)))']);
+  }), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" });
+  assert.equal(fs.existsSync(directory), false);
 });
 
 test("lint probe cleanup waits for an asynchronous callback and preserves its failure", async () => {

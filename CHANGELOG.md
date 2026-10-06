@@ -2,6 +2,11 @@
 
 ## Unreleased pipeline timing correction
 
+- Correct the initial `8d3e199` asynchronous helper's separate per-stream buffer allowance.
+  Restore the former aggregate one-MiB raw stdout/stderr limit while retaining concurrency two,
+  complete in-budget UTF-8 output and failure/cleanup behavior. Add combined-stream boundary,
+  stream-order and raw-buffer regressions; preserve the earlier source, failed attempt and timing
+  evidence without treating those old-head results as this correction's validation.
 - Reconcile accepted main `ffdd507206990cb880baea150ffae2f6a7bb3043` with the retained reviewed
   source history without changing their identical tree.
 - Run isolated custom-destination lint tests two at a time using the existing Node test runner.
