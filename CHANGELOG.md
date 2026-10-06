@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased pipeline timing correction
+
+- Correct the initial `8d3e199` asynchronous helper's separate per-stream buffer allowance.
+  Restore the former aggregate one-MiB raw stdout/stderr limit while retaining concurrency two,
+  complete in-budget UTF-8 output and failure/cleanup behavior. Add combined-stream boundary,
+  stream-order and raw-buffer regressions; preserve the earlier source, failed attempt and timing
+  evidence without treating those old-head results as this correction's validation.
+- Reconcile accepted main `ffdd507206990cb880baea150ffae2f6a7bb3043` with the retained reviewed
+  source history without changing their identical tree.
+- Run isolated custom-destination lint tests two at a time using the existing Node test runner.
+  Retain every real CLI invocation, input and assertion; add subprocess failure, output and
+  concurrent cleanup/isolation controls. No contract, compiler, generator, SDK or CI policy changes.
+- Preserve accepted-main's functional SUCCESS but 609/613-second timing failure. This local
+  correction is not new-head hosted timing qualification, issue27 completion or release approval.
+
 ## Unreleased combined source candidate 0.3.0
 
 - Ordinarily compose original contracts#27's immutable `c296ebbc` failure freeze with accepted

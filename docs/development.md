@@ -88,6 +88,35 @@ Run from the repository root after `npm ci --no-audit --no-fund` and
 Local Windows note: run the same commands in PowerShell; `smoke.py kotlin` uses `gradlew.bat`.
 Cold runs download Gradle and the Kotlin toolchain (several minutes).
 
+### Source-test scheduling and timing
+
+The custom-destination Node suite uses the built-in test runner's concurrency limit of two.
+Each lint test still starts the real `python scripts/lint_spec.py` and pinned Spectral CLI for
+every original complete input. Tests own separate temporary directories and companion files;
+within a test, each lint process and its assertions finish before that document is changed.
+Asynchronous cleanup waits for the callback, including failures. Launch errors, output overflow
+and abnormal termination fail rather than becoming clean lint results. Dedicated controls check
+exit codes, complete stdout/stderr, concurrent positive/negative isolation and cleanup.
+The asynchronous helper counts raw stdout and stderr bytes against one shared 1,048,576-byte
+limit, matching the former synchronous helper's aggregate budget. It rejects before retaining an
+over-budget chunk, terminates the child and waits for closure before cleanup. In-budget streams
+are decoded as UTF-8 only after collection, preserving split characters and replacement decoding
+without charging decoded code units or replacement bytes against the raw-byte budget.
+Combined-stream controls cover below/at/above the boundary, either stream order and buffer data.
+The initial `8d3e199` scheduler incorrectly inherited `execFile`'s separate per-stream limits;
+600 KiB on each stream passed where the former aggregate limit refused it. This follow-up
+corrects that preservation regression; the frozen `8d3e199` evidence is not relabelled.
+There is no result cache, skipped case, shared mutable probe or substitute in-process linter.
+
+The normal source command above includes this suite; `node --test scripts/tests/custom_destinations.test.cjs`
+is the focused command. When measuring, record the whole elapsed span as well as step times,
+dependency/cache state and Gradle executed/up-to-date tasks. Accepted-main run `37432699878`
+on `ffdd507206990cb880baea150ffae2f6a7bb3043` was functionally successful but took 609 job /
+613 created-to-updated seconds, exceeding the unchanged 600-second qualification budget.
+Local speedups do not qualify a replacement head: it still needs fresh independent review and
+its own actual hosted job and whole-run measurements. Contract/runtime acceptance boundaries
+and the documented stock Spectral example-resolution limitation are unchanged.
+
 ## Lint
 
 `spec/.spectral.yaml` extends `spectral:oas` (recommended set, every rule raised to error) and adds:
