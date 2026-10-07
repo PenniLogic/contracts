@@ -92,6 +92,8 @@ class PlantedRemovalTest(unittest.TestCase):
     def test_removed_schema_parameter_header_and_narrowed_constraints_are_detected(self) -> None:
         text = spec_text()
         text = replace_once(text, "    TimeZone:\n      type: string\n      pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'\n      maxLength: 64\n      examples: [Asia/Kolkata]\n", "")
+        text = text.replace("{$ref: '#/components/schemas/TimeZone'}",
+                            "{type: string, pattern: '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$', maxLength: 64}")
         text = replace_once(text, "          maxLength: 21\n", "          maxLength: 20\n")
         text = replace_once(text, "      required: [amount, currency]\n", "      required: [amount, currency, scale]\n")
         text = replace_in_section(text, ("components", "headers", "IdempotentReplayed"),
@@ -270,6 +272,12 @@ class CompositionRegressionTest(unittest.TestCase):
         self.assertEqual({finding.key() for finding in findings}, {
             ("component-schema-allof-changed", "components/schemas/OperationProblemDetail"),
             ("component-responses-changed", "components/responses/CustomDestinationProblem"),
+            ("component-schema-allof-changed", "components/schemas/ApplicationProblemDetail"),
+            ("component-schema-allof-changed", "components/schemas/AuthenticationChallengeProblemDetail"),
+            ("component-responses-changed", "components/responses/CoreProblem"),
+            ("component-responses-changed", "components/responses/CoreDPoPChallenge"),
+            ("component-responses-changed", "components/responses/CustomDestinationDPoPChallenge"),
+            ("component-responses-changed", "components/responses/ServiceProblem"),
         })
 
     def test_unknown_record_metadata_is_not_an_optional_addition_proof(self) -> None:
@@ -349,7 +357,7 @@ class EnumResponseRegressionTest(unittest.TestCase):
         self.assertFalse(cbc._only_additive_response_schema({**response(valid), "description": {"from": "a", "to": "b"}}))
         self.assertFalse(cbc._only_additive_response_schema({**response(valid), "headers": {"deleted": ["Retry-After"]}}))
 
-    def test_real_generic_enum_response_expansion_passes_without_a_model_or_value_whitelist(self) -> None:
+    def test_real_generic_enum_source_expansion_preserves_the_bounded_legacy_response_without_a_whitelist(self) -> None:
         specs = SpecDir()
         self.addCleanup(specs.cleanup)
         text = with_inheritance_probe(spec_text())
@@ -361,6 +369,10 @@ class EnumResponseRegressionTest(unittest.TestCase):
 """)
         text = replace_section(text, ("components", "schemas", "BreakingProbeProvider", "properties", "detail"),
                                "        detail:\n          $ref: '#/components/schemas/BreakingProbeChoice'\n")
+        text = replace_in_section(text, ("components", "responses", "BreakingProbeResponse"),
+                                  "            $ref: '#/components/schemas/BreakingProbeProvider'\n",
+                                  "            allOf:\n              - $ref: '#/components/schemas/BreakingProbeProvider'\n"
+                                  "              - properties: {detail: {enum: [first]}}\n")
         base = specs.write(text, "base.yaml")
         enum = ("components", "schemas", "BreakingProbeChoice")
         added = replace_in_section(text, enum, "      enum: [first]\n      description: First explanation.\n",
@@ -368,6 +380,11 @@ class EnumResponseRegressionTest(unittest.TestCase):
         tools = toolchain.ensure_installed()
         findings, _ = cbc.compare(base, specs.write(added, "addition.yaml"), tools["oasdiff"])
         self.assertEqual(findings, [])
+        widened = replace_in_section(added, ("components", "responses", "BreakingProbeResponse"),
+                                     "              - properties: {detail: {enum: [first]}}\n",
+                                     "              - properties: {detail: {enum: [first, second]}}\n")
+        incompatible, _ = cbc.compare(base, specs.write(widened, "widened-response.yaml"), tools["oasdiff"])
+        self.assertTrue(incompatible, "new legacy response values remain breaking even when the source enum expands")
         for declaration in (
             "      enum: [second]\n", "      enum: [first, second]\n      pattern: '^first$'\n",
             "      enum: [first, second]\n      not: {const: first}\n",

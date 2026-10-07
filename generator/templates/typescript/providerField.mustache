@@ -1,3 +1,5 @@
+{{#isNullable}}nullable: true,{{/isNullable}}
+{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}nullable: true,{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}}
 {{#isString}}kind: 'string',{{/isString}}
 {{#isInteger}}kind: 'integer',{{/isInteger}}
 {{#isBoolean}}kind: 'boolean',{{/isBoolean}}
@@ -11,9 +13,20 @@
 {{#minItems}}minItems: {{minItems}},{{/minItems}}
 {{#maxItems}}maxItems: {{maxItems}},{{/maxItems}}
 {{#uniqueItems}}uniqueItems: true,{{/uniqueItems}}
+{{#vendorExtensions.x-pennilogic-nullable-enum-items}}
+items: {
+    name: '', required: true,
+    {{#items}}
+    {{^isArray}}{{^isNullable}}nullable: true,{{/isNullable}}{{/isArray}}
+    {{>providerField}}
+    {{/items}}
+},
+{{/vendorExtensions.x-pennilogic-nullable-enum-items}}
+{{^vendorExtensions.x-pennilogic-nullable-enum-items}}
 {{#items}}
 items: {
     name: '', required: true,
     {{>providerField}}
 },
 {{/items}}
+{{/vendorExtensions.x-pennilogic-nullable-enum-items}}

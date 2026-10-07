@@ -50,6 +50,10 @@ abstract class StrictProviderSerializer<T>(private val delegate: KSerializer<T>,
 
     private fun validateKinds(value: JsonElement, declared: SerialDescriptor, module: SerializersModule) {
         val type = if (declared.kind == SerialKind.CONTEXTUAL) module.getContextualDescriptor(declared) ?: declared else declared
+        if (value == JsonNull) {
+            if (declared.isNullable) return
+            throw ProviderWireException()
+        }
         fun primitive(predicate: (JsonPrimitive) -> Boolean) {
             if (value !is JsonPrimitive || value == JsonNull || !predicate(value)) throw ProviderWireException()
         }
@@ -73,7 +77,6 @@ abstract class StrictProviderSerializer<T>(private val delegate: KSerializer<T>,
                     throw ProviderWireException()
                 }
                 value.forEach { (key, member) ->
-                    if (member == JsonNull) throw ProviderWireException()
                     validateKinds(member, type.getElementDescriptor(fields.getValue(key)), module)
                 }
             }

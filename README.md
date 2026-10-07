@@ -3,7 +3,7 @@
 
 Versioned API contracts and shared schemas.
 
-**Status:** Repository foundation plus the OpenAPI lint, deterministic client-generation, breaking-change and tag-publication scaffold from PenniLogic/contracts#2; no product endpoints, registry publication credentials or published version tags are implemented.
+**Status:** Versioned API schemas and client-generation tooling from the PenniLogic/contracts#2 scaffold; see [OpenAPI](spec/openapi.yaml) and [CHANGELOG.md](CHANGELOG.md) for coverage. Definitions and local client smokes do not establish deployed server behavior or an immutable published version; no server runtime is implemented here.
 
 This repository belongs to the new public, Free-plan `PenniLogic` organization.
 `migration-source.json` records the pinned source snapshot and excluded history.

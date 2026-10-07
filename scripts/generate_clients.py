@@ -21,8 +21,11 @@ import shutil
 import sys
 import tempfile
 from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
+from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import (  # noqa: E402
@@ -30,12 +33,55 @@ from pl_contracts import (  # noqa: E402
     remove_tree, run, sha256_bytes, sha256_file, spec_version, tree_hash, versions, node_executable,
 )
 from toolchain import ensure_installed  # noqa: E402
+from render_success import render_success  # noqa: E402
+from render_categories import render_categories  # noqa: E402
 
 MANIFEST_NAME = "contracts-manifest.json"
 GOLDEN = GENERATOR_DIR / "golden.json"
 IGNORE_OVERRIDE = GENERATOR_DIR / "openapi-generator-ignore"
 TEMPLATE_DIRS = {language: GENERATOR_DIR / "templates" / language for language in LANGUAGES}
 TEXT_SUFFIXES = {".kt", ".kts", ".ts", ".py", ".md", ".json", ".txt", ".properties", ".gradle", ".toml", ".cfg", ".ini", ".yaml", ".yml", ".mustache"}
+_DECLARATIONS: ContextVar[dict[str, dict] | None] = ContextVar("provider_declarations", default=None)
+
+
+@contextmanager
+def _declaration_scope() -> Iterator[None]:
+    token = _DECLARATIONS.set({})
+    try:
+        yield
+    finally:
+        _DECLARATIONS.reset(token)
+
+
+def _provider_declarations(spec: Path) -> dict:
+    inputs = [spec, *(spec.parent / name for name in PROVIDER_SOURCE_NAMES),
+              spec.parent / "currency-registry.v1.json", ROOT / "package-lock.json",
+              ROOT / "toolchain" / "versions.json",
+              *(ROOT / "scripts" / name for name in ("provider_constraints.cjs", "success_responses.cjs", "category_seed.cjs")),
+              *(ROOT / "spec" / "spectral-functions" / name for name in ("_shared.js", "_schemaUsage.js"))]
+    identity = sha256_bytes(json.dumps(
+        [(str(path.resolve()), sha256_file(path) if path.is_file() else None) for path in inputs],
+        separators=(",", ":"),
+    ).encode("utf-8"))
+    declarations = _DECLARATIONS.get()
+    if declarations is not None and identity in declarations:
+        return deepcopy(declarations[identity])
+    constraints = run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(spec)],
+                      capture=True, check=False)
+    if constraints.returncode:
+        raise PipelineError(constraints.stderr.strip() or "provider constraint generation failed")
+    result = json.loads(constraints.stdout)
+    if declarations is not None:
+        declarations[identity] = deepcopy(result)
+    return result
+
+
+def _target_batch(languages: list[str], build: Callable[[str], dict]) -> dict[str, dict]:
+    if len(set(languages)) != len(languages):
+        raise PipelineError("duplicate generation target")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        work = {language: executor.submit(copy_context().run, build, language) for language in languages}
+        return {language: task.result() for language, task in work.items()}
 
 
 def normalized_text(path: Path) -> bytes:
@@ -180,7 +226,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "    if code == ProblemCode.VALIDATION_REJECTED and field == ProblemField.DUPLICATE_OVERRIDE:\n        return 400\n"
             "    return error_policy(code).status\n\n\n"
             "def new_correlation_id() -> str:\n    return 'cor_' + str(uuid4())\n"
-        )
+        ) + render_authentication_retry_policy(language, catalogue)
     if language == "kotlin":
         rows = "".join(
             f'        ProblemCode.{entry["code"].upper()} to ErrorPolicy('
@@ -218,7 +264,7 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "    fun status(code: ProblemCode, field: ProblemField? = null): Int =\n"
             "        if (code == ProblemCode.VALIDATION_REJECTED && field == ProblemField.DUPLICATE_OVERRIDE) 400 else policy(code).status\n"
             '    fun newCorrelationId(): String = "cor_${UUID.randomUUID()}"\n}\n'
-        )
+        ) + render_authentication_retry_policy(language, catalogue)
     if language == "typescript":
         def symbol(value: str) -> str:
             return "".join(word.capitalize() for word in value.split("_"))
@@ -270,6 +316,66 @@ def render_error_catalogue(language: str, catalogue: dict) -> tuple[str, str]:
             "export function errorStatus(code: ProblemCode, field?: ProblemField): number {\n"
             "    return code === ProblemCode.ValidationRejected && field === ProblemField.DuplicateOverride ? 400 : errorPolicy(code).status;\n}\n\n"
             "export function newCorrelationId(): string {\n    return 'cor_' + globalThis.crypto.randomUUID();\n}\n"
+        ) + render_authentication_retry_policy(language, catalogue)
+    raise PipelineError(f"unknown language {language}")
+
+
+def render_authentication_retry_policy(language: str, catalogue: dict) -> str:
+    policies = catalogue["authentication_policies"]
+    if set(policies) != {entry["code"] for entry in catalogue["authentication_codes"]}:
+        raise PipelineError("authentication retry catalogue is incomplete")
+    if language == "python":
+        rows = "".join(
+            f'    ProblemCode.{code.upper()}: AuthenticationRetryPolicy({policy["retryable"]}, '
+            f'RetryClass.{policy["retry_class"].upper()}, IdempotencyTreatment.{policy["idempotency"].upper()}, '
+            f'{repr(tuple(policy["required_context"]))}),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\n@dataclass(frozen=True)\nclass AuthenticationRetryPolicy:\n"
+            "    retryable: bool\n    retry_class: RetryClass\n    idempotency: IdempotencyTreatment\n"
+            "    required_context: tuple[str, ...]\n\n"
+            f"AUTHENTICATION_RETRY_POLICIES: Final[Mapping[ProblemCode, AuthenticationRetryPolicy]] = MappingProxyType({{\n{rows}}})\n\n"
+            "def authentication_retry_policy(code: ProblemCode) -> AuthenticationRetryPolicy:\n"
+            "    if not isinstance(code, ProblemCode) or code not in AUTHENTICATION_RETRY_POLICIES:\n"
+            "        raise TypeError('authentication code rejected')\n"
+            "    return AUTHENTICATION_RETRY_POLICIES[code]\n"
+        )
+    if language == "kotlin":
+        rows = "".join(
+            f'        ProblemCode.{code.upper()} to AuthenticationRetryPolicy({str(policy["retryable"]).lower()}, '
+            f'RetryClass.{policy["retry_class"].upper()}, IdempotencyTreatment.{policy["idempotency"].upper()}, '
+            'listOf(' + ", ".join(json.dumps(name) for name in policy["required_context"]) + ')),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\ndata class AuthenticationRetryPolicy(val retryable: Boolean, val retryClass: RetryClass, "
+            "val idempotency: IdempotencyTreatment, val requiredContext: List<String>)\n\n"
+            "object AuthenticationRetryCatalogue {\n"
+            f"    private val policies = mapOf(\n{rows}    )\n"
+            "    fun policy(code: ProblemCode): AuthenticationRetryPolicy = policies[code]\n"
+            '        ?: throw IllegalArgumentException("authentication code rejected")\n}\n'
+        )
+    if language == "typescript":
+        def symbol(value: str) -> str:
+            return "".join(word.capitalize() for word in value.split("_"))
+        keys = " | ".join(f"ProblemCode.{symbol(code)}" for code in policies)
+        rows = "".join(
+            f'    [ProblemCode.{symbol(code)}]: Object.freeze({{ retryable: {str(policy["retryable"]).lower()}, '
+            f'retryClass: RetryClass.{symbol(policy["retry_class"])}, idempotency: IdempotencyTreatment.{symbol(policy["idempotency"])}, '
+            f'requiredContext: Object.freeze({json.dumps(policy["required_context"])}) }}),\n'
+            for code, policy in policies.items()
+        )
+        return (
+            "\nexport interface AuthenticationRetryPolicy {\n    readonly retryable: boolean;\n"
+            "    readonly retryClass: RetryClass;\n    readonly idempotency: IdempotencyTreatment;\n"
+            "    readonly requiredContext: readonly string[];\n}\n"
+            f"export type AuthenticationProblemCode = {keys};\n"
+            f"export const AUTHENTICATION_RETRY_POLICIES: Readonly<Record<AuthenticationProblemCode, AuthenticationRetryPolicy> & Partial<Record<ProblemCode, AuthenticationRetryPolicy>>> = Object.freeze({{\n{rows}}});\n"
+            "export function authenticationRetryPolicy(code: ProblemCode): AuthenticationRetryPolicy {\n"
+            "    const policy = AUTHENTICATION_RETRY_POLICIES[code];\n"
+            "    if (!Object.hasOwn(AUTHENTICATION_RETRY_POLICIES, code) || policy === undefined) throw new TypeError('authentication code rejected');\n"
+            "    return policy;\n}\n"
         )
     raise PipelineError(f"unknown language {language}")
 
@@ -415,9 +521,10 @@ def generate_all(languages: list[str], output: Path, tools: dict, spec: Path = S
     """Publish a requested client set together, preserving every previous target on failure."""
     for language in languages:
         _check_output(output / language)
-    with _staging(output.parent) as stage:
-        manifests = {language: _generate_target(language, stage / "ready" / language, tools, spec)
-                     for language in languages}
+    with _staging(output.parent) as stage, _declaration_scope():
+        _provider_declarations(spec)
+        manifests = _target_batch(languages,
+            lambda language: _generate_target(language, stage / "ready" / language, tools, spec))
         _publish(stage, [(stage / "ready" / language, output / language) for language in languages])
     return manifests
 
@@ -430,11 +537,7 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
     version = spec_version(spec.read_text(encoding="utf-8"))
     config = config_path(language)
     generator_name = json.loads(config.read_text(encoding="utf-8"))["generatorName"]
-    constraints = run([node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(spec)],
-                      capture=True, check=False)
-    if constraints.returncode:
-        raise PipelineError(constraints.stderr.strip() or "provider constraint generation failed")
-    declarations = json.loads(constraints.stdout)
+    declarations = _provider_declarations(spec)
     if output.exists():
         raise PipelineError("generation staging target is not empty")
     output.mkdir(parents=True)
@@ -459,6 +562,10 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
     if completed.returncode != 0:
         raise PipelineError(f"openapi-generator failed for {language} (exit {completed.returncode}):\n{completed.stdout}\n{completed.stderr}")
     runtime_hash = copy_runtime(language, output)
+    relative, content = render_success(language, declarations.get("success", []))
+    success_target = output / relative
+    success_target.parent.mkdir(parents=True, exist_ok=True)
+    success_target.write_bytes(content.encode("utf-8"))
     if language == "python":
         target = output / "pennilogic_contracts" / "provider_constraint_data.py"
         content = (
@@ -492,6 +599,10 @@ def _generate_target(language: str, output: Path, tools: dict, spec: Path = SPEC
     registry_target = output / relative
     registry_target.parent.mkdir(parents=True, exist_ok=True)
     registry_target.write_bytes(content.encode("utf-8"))
+    relative, content = render_categories(language, declarations["category_seed"])
+    category_target = output / relative
+    category_target.parent.mkdir(parents=True, exist_ok=True)
+    category_target.write_bytes(content.encode("utf-8"))
     provider_hashes = {}
     for name in PROVIDER_SOURCE_NAMES:
         source = spec.parent / name
@@ -577,9 +688,15 @@ def verify(languages: list[str], tools: dict, update_golden: bool) -> int:
     golden = load_golden()
     problems: list[str] = []
     with _staging(BUILD) as stage:
+        with _declaration_scope():
+            _provider_declarations(SPEC)
+            first_run = _target_batch(languages, lambda language: generate(language, stage / "generated" / language, tools))
+        with _declaration_scope():
+            _provider_declarations(SPEC)
+            second_run = _target_batch(languages, lambda language: generate(language, stage / "verified" / language, tools))
         for language in languages:
-            first = generate(language, stage / "generated" / language, tools)
-            second = generate(language, stage / "verified" / language, tools)
+            first = first_run[language]
+            second = second_run[language]
             if first["tree_sha256"] != second["tree_sha256"]:
                 changed = sorted({f["path"] for f in first["files"]} ^ {f["path"] for f in second["files"]})
                 first_hashes = {f["path"]: f["sha256"] for f in first["files"]}

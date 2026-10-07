@@ -18,14 +18,28 @@ class {{classname}}(ProviderModel):
     """{{{classname}}}: strict generated provider, not a permissive legacy DTO."""
     _provider_schema_name: ClassVar[str] = "{{name}}"
 {{#vars}}
+    {{#vendorExtensions.x-pennilogic-nullable-enum-items}}
+    {{name}}: {{#isArray}}List[{{#items}}{{>provider_type}}{{/items}}]{{/isArray}}{{#isNullable}} | None{{/isNullable}}{{^required}} = None{{/required}}
+    {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
+    {{^vendorExtensions.x-pennilogic-nullable-enum-items}}
+    {{#vendorExtensions.x-pennilogic-nullable-enum}}
+    {{name}}: {{{dataType}}} | None{{^required}} = None{{/required}}
+    {{/vendorExtensions.x-pennilogic-nullable-enum}}
+    {{^vendorExtensions.x-pennilogic-nullable-enum}}
     {{name}}: {{{vendorExtensions.x-py-typing}}}
+    {{/vendorExtensions.x-pennilogic-nullable-enum}}
+    {{/vendorExtensions.x-pennilogic-nullable-enum-items}}
 {{/vars}}
 {{#vars}}
     {{#isUuid}}
 
     @field_validator('{{{name}}}', mode="before")
     @classmethod
-    def {{{name}}}_from_wire(cls, value: object) -> UUID:
+    def {{{name}}}_from_wire(cls, value: object) -> UUID{{#isNullable}} | None{{/isNullable}}:
+        {{#isNullable}}
+        if value is None:
+            return None
+        {{/isNullable}}
         return uuid_from_wire(value)
     {{/isUuid}}
     {{#vendorExtensions.x-regex}}

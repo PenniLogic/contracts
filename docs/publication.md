@@ -14,6 +14,8 @@ whose commit contains, at that tag:
   vectors and the seeded `money-roundtrip-generated.v1.json`, ADR-015 §7);
 - `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json` and
   `spec/import-group.v1.json`, the error/import provider source companions;
+- `spec/category-seed.v1.json`, the exact accepted category source companion, with the
+  upstream commit/byte/Git-blob binding carried in the specification and client manifests;
 - the committed generator configuration (`generator/*.json`, `generator/openapi-generator-ignore`,
   `generator/templates/`), the runtime seams (`runtime/`) and the generator lock
   (`toolchain/versions.json`: generator version and jar SHA-256; `generator/golden.json`: SHA-256 of
@@ -115,6 +117,26 @@ accepted-`5b41d458` comparison passes without an acknowledgement; the diff-only 
 reports all seven findings. This is not proof that old enum readers accept new values, binary
 ABI certification, consumer migration, independent final-head review or publication acceptance.
 
+## Original core source preparation
+
+The original #1 local `0.4.0` source adds the four core groups and error catalogue `1.2.0`;
+it is not a tag, prerelease channel, registry package or migrated producer. Exact component
+changes are recorded in the versioned OpenAPI `x-contract-changelog` and ship with the existing
+specification asset. This does not widen the publication script, credentials or CI permissions.
+Future producer adoption must route the new contextual authentication family only on its
+declared core/versioned interfaces. The accepted legacy authentication/custom-destination
+responses retain their old domains; an old enum reader is not promised new-code support.
+Actual prerelease publication and consumer/backend evidence remain coordinator-owned.
+The unreleased TypeScript correction separates `ModelWire` destruction output from domain
+DTOs. Existing consumers relying on the earlier false `ModelToJSON(): Model` declaration
+must reconstruct through the accepted reader instead of treating wire Money as its wrapper.
+That intentional source-type correction is recorded explicitly; it does not change Money
+JSON, waive old-consumer checks or imply a published/accepted consumer migration.
+The accepted API category seed is copied byte-identically and shipped through the same
+provider-companion mechanism, inside all three client trees and beside the specification.
+Its derived enums and localized defaults do not run an owner seed or create category UUIDs;
+API9 runtime acceptance remains separate.
+
 ## Rollback
 
 Rollback is **re-pinning the previous tag**: a consumer moves its pinned version back and
@@ -176,6 +198,19 @@ requiredness, type/ref/pattern changes, conditionals/`not`, changed compositions
 metadata remain unproved or breaking. Structured enum-value changes are also kept for review.
 
 ### Bounded source-backed conditional expansion
+
+At an actual existing operation response, variance is producer-safe: the new emitted domain
+must remain within the old client's accepted domain. Preserving old request inputs alone never
+approves a widened legacy response. Named and inline response call sites, including supported
+local path-item aliases, are inspected from complete source. Unused provider definitions may
+expand additively without claiming that an older deployed producer can emit their new values.
+Unbound/unsupported call sites remain findings.
+
+Finite required string discriminators may select literal guards and closed-property/presence
+constraints, with exact reference identities and diff/dependency records. Nullable new context
+is not an old-client migration. Unknown/open domains, ambiguous unions, reachable old-code
+restrictions, renames, unsupported forms and the existing work/depth/numeric boundaries still
+refuse. Memoized relations/diffs preserve depth checks; no budget or model-name exception is added.
 
 An appended `allOf` branch is not inherently additive. The additional proof in
 `scripts/schema_compatibility.py` uses both complete OpenAPI 3.1.0 documents and the exact pinned

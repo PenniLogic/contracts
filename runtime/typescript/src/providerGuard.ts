@@ -9,6 +9,7 @@ export class ProviderWireError extends TypeError {
 export interface ProviderField {
     readonly name: string;
     readonly required: boolean;
+    readonly nullable?: boolean;
     readonly kind?: 'string' | 'integer' | 'boolean' | 'array' | 'object';
     readonly pattern?: RegExp;
     readonly minLength?: number;
@@ -33,7 +34,7 @@ export function providerObject(value: unknown, fields: Readonly<Record<string, P
             if (field.required) throw new ProviderWireError();
             continue;
         }
-        if (member === null) throw new ProviderWireError();
+        if (member === null && !field.nullable) throw new ProviderWireError();
         validateField(member, field, wire);
     }
     return members;
@@ -50,7 +51,11 @@ export function providerWire(value: unknown, name: string, omitUndefined: boolea
 }
 
 function validateField(value: unknown, field: ProviderField, wire: boolean): void {
-    if (value === null || value === undefined) throw new ProviderWireError();
+    if (value === null) {
+        if (field.nullable) return;
+        throw new ProviderWireError();
+    }
+    if (value === undefined) throw new ProviderWireError();
     const scalar = !wire && (value instanceof Instant || value instanceof LocalDate) ? value.toWire() : value;
     if (field.kind === 'string' && typeof scalar !== 'string') throw new ProviderWireError();
     if (field.kind === 'boolean' && typeof value !== 'boolean') throw new ProviderWireError();

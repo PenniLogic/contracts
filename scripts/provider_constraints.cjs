@@ -3,16 +3,21 @@
 const fs = require("node:fs");
 const { Yaml } = require("@stoplight/spectral-parsers");
 const { resolveLocalRef, SCHEMA_ANNOTATIONS } = require("../spec/spectral-functions/_shared.js");
+const { collectSchemaUsage, SchemaUsageError } = require("../spec/spectral-functions/_schemaUsage.js");
 const Ajv = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats");
+const { successResponses } = require("./success_responses.cjs");
+const { BINDING, loadSeed, derivedEnums } = require("./category_seed.cjs");
+const path = require("node:path");
+const { isDeepStrictEqual } = require("node:util");
 
 const EXAMPLE_BUDGET = 4096;
 
 const KEYS = new Set(["$ref", "type", "properties", "required", "additionalProperties", "items",
   "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
   "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "uniqueItems",
-  "format", "allOf", "anyOf", "oneOf", "not", "if", "then", "else"]);
-const TYPES = new Set(["object", "array", "string", "integer", "boolean"]);
+  "format", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "readOnly"]);
+const TYPES = new Set(["object", "array", "string", "integer", "boolean", "null"]);
 
 function reject(reason) { throw new Error(`provider constraint generation rejected: ${reason}`); }
 function object(value) {
@@ -20,7 +25,15 @@ function object(value) {
   return value;
 }
 function scalar(value) {
-  return typeof value === "string" || typeof value === "boolean" || Number.isSafeInteger(value);
+  return value === null || typeof value === "string" || typeof value === "boolean" || Number.isSafeInteger(value);
+}
+
+function nullablePair(schema) {
+  const branches = schema.anyOf || schema.oneOf;
+  if (!Array.isArray(branches) || branches.length !== 2) return undefined;
+  const empty = branches.find((branch) => branch.type === "null" &&
+    Object.keys(branch).every((key) => key === "type" || SCHEMA_ANNOTATIONS.has(key)));
+  return empty && branches.find((branch) => branch !== empty);
 }
 
 function usableGeneratorExample(value) {
@@ -177,17 +190,19 @@ function compile(document) {
     if (active.has(name)) reject("cyclic reference");
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || !Object.hasOwn(schemas, name)) reject("unresolved reference");
     active.add(name);
-    compiled[name] = node(schemas[name]);
+    compiled[name] = node(schemas[name], true, false, roots.includes(name));
     active.delete(name);
   }
 
-  function node(input, valueSchema = true) {
+  function node(input, valueSchema = true, readOnlyAllowed = false, ownsProperties = false) {
     const source = object(input), result = {};
     for (const key of Object.keys(source)) {
       if (!KEYS.has(key) && !SCHEMA_ANNOTATIONS.has(key)) reject("unsupported keyword");
     }
     if (source.default !== undefined && source.default !== null) reject("unsupported default");
-    if (valueSchema && source.type === undefined && source.$ref === undefined) reject("untyped value");
+    if (source.readOnly !== undefined && typeof source.readOnly !== "boolean") reject("malformed readOnly annotation");
+    if (source.readOnly === true && !readOnlyAllowed) reject("unsupported readOnly placement");
+    if (valueSchema && source.type === undefined && source.$ref === undefined && !nullablePair(source)) reject("untyped value");
     if (source.$ref !== undefined) {
       if (typeof source.$ref !== "string" || !/^#\/components\/schemas\/[A-Za-z][A-Za-z0-9_]*$/.test(source.$ref) ||
           !resolveLocalRef(source.$ref, document)) reject("unresolved reference");
@@ -196,13 +211,18 @@ function compile(document) {
       result.ref = name;
     }
     if (source.type !== undefined) {
-      if (!TYPES.has(source.type)) reject("unsupported type");
+      if (Array.isArray(source.type)) {
+        if (source.type.length !== 2 || new Set(source.type).size !== 2 ||
+            !source.type.includes("null") ||
+            !source.type.every((kind) => ["string", "integer", "boolean", "array", "null"].includes(kind))) reject("unsupported type");
+      } else if (!TYPES.has(source.type)) reject("unsupported type");
       result.type = source.type;
     }
     if (source.format !== undefined) {
-      if ((source.type === "string" && !["date", "date-time", "uri-reference", "uuid"].includes(source.format)) ||
-          (source.type === "integer" && !["int32", "int64"].includes(source.format)) ||
-          !["string", "integer"].includes(source.type)) reject("unsupported format");
+      const kind = Array.isArray(source.type) ? source.type.find((type) => type !== "null") : source.type;
+      if ((kind === "string" && !["date", "date-time", "uri-reference", "uuid"].includes(source.format)) ||
+          (kind === "integer" && !["int32", "int64"].includes(source.format)) ||
+          !["string", "integer"].includes(kind)) reject("unsupported format");
       result.format = source.format;
     }
     for (const key of ["minLength", "maxLength", "minItems", "maxItems"]) {
@@ -246,8 +266,10 @@ function compile(document) {
     if (source.enum !== undefined) {
       if (!Array.isArray(source.enum) || !source.enum.length || !source.enum.every(scalar) ||
           new Set(source.enum.map((value) => JSON.stringify(value))).size !== source.enum.length) reject("malformed enum");
-      if (valueSchema && source.type !== "string") reject("unsupported enum representation");
-      if (source.type === "string" && !source.enum.every((value) => typeof value === "string")) reject("ambiguous enum");
+      const kinds = Array.isArray(source.type) ? source.type : [source.type];
+      if (valueSchema && !kinds.every((kind) => kind === "string" || kind === "null")) reject("unsupported enum representation");
+      if (kinds.includes("string") && !source.enum.every((value) =>
+          typeof value === "string" || (value === null && kinds.includes("null")))) reject("ambiguous enum");
       result.enum = source.enum;
     }
     if (source.const !== undefined) {
@@ -261,14 +283,14 @@ function compile(document) {
     }
     if (source.properties !== undefined) {
       result.properties = Object.fromEntries(Object.entries(object(source.properties)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-        .map(([name, property]) => [name, node(property, valueSchema)]));
+        .map(([name, property]) => [name, node(property, valueSchema, ownsProperties)]));
     }
     if (source.additionalProperties !== undefined) {
       if (typeof source.additionalProperties !== "boolean") reject("unsupported object map");
       result.additionalProperties = source.additionalProperties;
     }
     if (source.items !== undefined) result.items = node(source.items);
-    if (source.type === "array" && source.items === undefined) reject("unbound array items");
+    if ((source.type === "array" || source.type?.includes?.("array")) && source.items === undefined) reject("unbound array items");
     if (source.uniqueItems !== undefined) {
       if (typeof source.uniqueItems !== "boolean") reject("malformed uniqueness");
       result.uniqueItems = source.uniqueItems;
@@ -288,9 +310,98 @@ function compile(document) {
     if (schemas[name].type !== "object" || schemas[name].additionalProperties !== false) reject("open marked provider");
     component(name);
   }
+  const success = successResponses(document);
+  for (const operation of success) for (const response of operation.cases) {
+    if (!response.empty) compiled[response.validator] = node(response.schema, false);
+  }
   const result = { roots, schemas: Object.fromEntries(Object.entries(compiled).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
   const projection = JSON.parse(JSON.stringify(document));
+  const readOnlyModels = roots.filter((name) =>
+    Object.values(schemas[name].properties || {}).some((property) => property.readOnly === true));
+  if (readOnlyModels.length) {
+    let usage;
+    try { usage = collectSchemaUsage(document); }
+    catch (error) {
+      if (!(error instanceof SchemaUsageError)) throw error;
+      reject(`unproved readOnly usage: ${error.message}`);
+    }
+    for (const name of readOnlyModels) {
+      if (usage.request.has(name) || !usage.response.has(name)) reject("unsupported keyword: readOnly model must be response-only");
+      const model = projection.components.schemas[name];
+      model["x-pennilogic-read-only-response"] = true;
+      for (const property of Object.values(model.properties)) {
+        if (property.readOnly === true) property["x-pennilogic-read-only-response"] = true;
+      }
+    }
+  }
+  for (const operation of success) {
+    const {cases, ...metadata} = operation;
+    projection.paths[operation.path][operation.method]["x-pennilogic-success"] = {
+      ...metadata, cases: cases.map(({schema, ...response}) => response),
+    };
+  }
   const projectedModels = [];
+  function allowsNull(source, active = new Set()) {
+    if (source.type === "null" || (Array.isArray(source.type) && source.type.includes("null")) || nullablePair(source)) return true;
+    if (!source.$ref || active.has(source.$ref)) return false;
+    active.add(source.$ref);
+    return allowsNull(resolveLocalRef(source.$ref, document), active);
+  }
+  function projectNull(source, required = true) {
+    let changed = false;
+    if (source.type === "null") {
+      source.type = ["string", "null"];
+      source.nullable = true;
+      changed = true;
+    } else if (Array.isArray(source.type)) {
+      source.nullable = true;
+      changed = true;
+    } else {
+      const nonnull = nullablePair(source);
+      if (nonnull) {
+        delete source.anyOf;
+        delete source.oneOf;
+        let target = nonnull;
+        const aliases = new Set();
+        let scalarReference;
+        while (target?.$ref) {
+          if (aliases.has(target.$ref) ||
+              Object.keys(target).some((key) => key !== "$ref" && !SCHEMA_ANNOTATIONS.has(key))) {
+            reject("unsupported nullable alias refinement");
+          }
+          aliases.add(target.$ref);
+          scalarReference = target.$ref;
+          target = resolveLocalRef(target.$ref, document);
+        }
+        if (!target || !["string", "integer", "boolean"].includes(target.type)) reject("unsupported nullable reference");
+        Object.assign(source, JSON.parse(JSON.stringify(target)), { type: [target.type, "null"], nullable: true });
+        if (scalarReference && target.enum) {
+          source.$ref = scalarReference;
+          source.type = target.type;
+          source["x-pennilogic-nullable-enum"] = true;
+          delete source.enum;
+        }
+        changed = true;
+      } else if (source.$ref && allowsNull(source)) {
+        source.nullable = true;
+        changed = true;
+      }
+    }
+    if (source.nullable === true && !required) {
+      source["x-pennilogic-null-presence"] = true;
+    }
+    for (const [name, property] of Object.entries(source.properties || {})) {
+      changed = projectNull(property, source.required?.includes(name) === true) || changed;
+    }
+    if (source.items) {
+      changed = projectNull(source.items) || changed;
+      if (source.items["x-pennilogic-nullable-enum"] || source.items["x-pennilogic-nullable-enum-items"]) {
+        // Homogeneous array chains selected here end only in a source-declared nullable enum.
+        source["x-pennilogic-nullable-enum-items"] = true;
+      }
+    }
+    return changed;
+  }
   function layoutPropertyNames(model) {
     const inherited = model.$ref === undefined ? [] : layoutPropertyNames(resolveLocalRef(model.$ref, document));
     return [...new Set([
@@ -345,9 +456,15 @@ function compile(document) {
     const model = projection.components.schemas[name];
     // Closed marked objects declare their exact fields above. Keep branch requiredness and inherited
     // constraints in the registered validator, not lossy field flattening or synthetic scalar enums.
-    if (projectLayout(model)) projectedModels.push(name);
+    const nullable = projectNull(model);
+    if (projectLayout(model) || nullable) projectedModels.push(name);
   }
-  return generationExamples.length || projectedModels.length ? { ...result, generation_budget: EXAMPLE_BUDGET,
+  // Scalar references also need a generator-only nullable layout; runtime declarations retain the source.
+  for (const [name, model] of Object.entries(projection.components.schemas)) {
+    if (!roots.includes(name) && Object.hasOwn(compiled, name)) projectNull(model);
+  }
+  return generationExamples.length || projectedModels.length || success.length ? { ...result, success,
+    generation_budget: EXAMPLE_BUDGET,
     generation_examples: generationExamples, generation_model_projection: projectedModels,
     generation_input: projection } : result;
 }
@@ -357,7 +474,13 @@ if (require.main === module) {
   try {
     const parsed = Yaml.parse(fs.readFileSync(process.argv[2], "utf8"));
     if (parsed.diagnostics.length) reject("invalid source document");
-    process.stdout.write(JSON.stringify(compile(parsed.data)));
+    const seed = loadSeed(path.dirname(process.argv[2]));
+    if (!isDeepStrictEqual(parsed.data["x-category-seed-source"], BINDING)) reject("category source binding");
+    for (const [name, values] of Object.entries(derivedEnums(seed))) {
+      const schema = parsed.data.components?.schemas?.[name];
+      if (schema?.type !== "string" || !isDeepStrictEqual(schema.enum, values)) reject("category vocabulary binding");
+    }
+    process.stdout.write(JSON.stringify({ ...compile(parsed.data), category_seed: seed }));
   } catch (error) {
     process.stderr.write(error instanceof Error && error.message.startsWith("provider constraint generation rejected:")
       ? error.message + "\n" : "provider constraint generation rejected: invalid source document\n");

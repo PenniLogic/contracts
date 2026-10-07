@@ -39,6 +39,14 @@ def tagged_pair(document: dict) -> tuple[dict, dict]:
         "properties": {"rows": {"type": "array", "maxItems": 10,
                                "items": {"$ref": "#/components/schemas/CompatibilityEnvelope"}}},
     }
+    schemas["CompatibilityResponseEnvelope"] = {
+        "type": "object", "additionalProperties": False, "required": ["kind", "status"],
+        "properties": copy.deepcopy(schemas["CompatibilityEnvelope"]["properties"]),
+        "allOf": [{"$ref": "#/components/schemas/CompatibilityEnvelope"}],
+    }
+    schemas["CompatibilityResponseEnvelope"]["properties"]["kind"] = {
+        "$ref": "#/components/schemas/CompatibilityKind", "type": "string", "enum": ["stable", "other"],
+    }
     schemas["CompatibilityMetadata"] = {"type": "string", "enum": ["fixed"]}
     before["components"]["headers"]["CompatibilityMarker"] = {
         "description": "Unchanged synthetic response metadata.",
@@ -47,7 +55,7 @@ def tagged_pair(document: dict) -> tuple[dict, dict]:
     before["components"]["responses"]["CompatibilityResponse"] = {
         "description": "Unchanged synthetic response envelope.",
         "headers": {"Probe-Marker": {"$ref": "#/components/headers/CompatibilityMarker"}},
-        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompatibilityEnvelope"}}},
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompatibilityResponseEnvelope"}}},
     }
     before["paths"]["/probe"]["get"]["responses"]["200"] = {"$ref": "#/components/responses/CompatibilityResponse"}
     after = copy.deepcopy(before)
@@ -275,6 +283,87 @@ class SourceCompatibilityTest(unittest.TestCase):
                         del diff["components"]["responses"]["modified"]["CompatibilityResponse"]
                 self.assertTrue(cbc.component_findings(diff, self.base, self.revision))
 
+    def test_legacy_response_variance_refuses_newly_admitted_tags_even_when_requests_expand_safely(self) -> None:
+        for name in ("const guard", "inherited required object", "local ref chain"):
+            with self.subTest(pair=name):
+                before, after = variant(self.document, name)
+                envelope = after["components"]["schemas"]["CompatibilityResponseEnvelope"]
+                envelope["properties"]["kind"]["enum"].append("next")
+                base = self.specs.write(json.dumps(before), "variance-base.json")
+                revision = self.specs.write(json.dumps(after), "variance-new-response.json")
+                findings, _ = cbc.compare(base, revision, self.tools["oasdiff"])
+                self.assertTrue(findings, "old-domain preservation cannot qualify a widened legacy response")
+                cases = [{"name": "incompatible new output", "schema": "CompatibilityResponseEnvelope",
+                          "wire": {"kind": "next", "status": 409}}]
+                self.assertFalse(schema_results(cases, spec=base)[0]["valid"])
+                self.assertTrue(schema_results(cases, spec=revision)[0]["valid"])
+
+    def test_code_disjoint_new_context_and_old_presence_null_and_alias_counterexamples(self) -> None:
+        before, after = tagged_pair(self.document)
+        envelope = after["components"]["schemas"]["CompatibilityEnvelope"]
+        envelope["properties"]["context"] = {"type": ["string", "null"], "maxLength": 20}
+        envelope["allOf"][-1]["then"]["required"] = ["context"]
+        envelope["allOf"][-1]["else"] = {"not": {"required": ["context"]}}
+        base = self.specs.write(json.dumps(before), "context-base.json")
+        revision = self.specs.write(json.dumps(after), "context-revision.json")
+        findings, _ = cbc.compare(base, revision, self.tools["oasdiff"])
+        self.assertEqual(findings, [], [row.as_dict() for row in findings])
+        mutations = (
+            lambda value: value["required"].append("context"),
+            lambda value: value["required"].remove("status"),
+            lambda value: value["properties"]["placeholder"].update(type="string"),
+            lambda value: value.update(additionalProperties=True),
+            lambda value: value["allOf"][-1]["else"].update(properties={"status": {"const": 409}}),
+            lambda value: value["allOf"][-1]["then"].update(required=["note"]),
+            lambda value: value["allOf"][-1]["if"]["properties"]["kind"].update(const="stable"),
+            lambda value: value["properties"]["context"].update(unknownClause=True),
+            lambda value: value["properties"]["context"].update(type=["string", "integer", "null"]),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(counterexample=index):
+                changed = copy.deepcopy(after)
+                mutate(changed["components"]["schemas"]["CompatibilityEnvelope"])
+                revision = self.specs.write(json.dumps(changed), "context-invalid.json")
+                failures, _ = cbc.compare(base, revision, self.tools["oasdiff"])
+                self.assertTrue(failures)
+
+        for components in (before["components"]["schemas"], after["components"]["schemas"]):
+            components["ContextAlias"] = {"$ref": "#/components/schemas/CompatibilityEnvelope"}
+        before["components"]["responses"]["CompatibilityResponse"]["content"]["application/json"]["schema"] = {
+            "$ref": "#/components/schemas/ContextAlias",
+        }
+        after["components"]["schemas"]["ContextReplacement"] = copy.deepcopy(after["components"]["schemas"]["ContextAlias"])
+        after["components"]["responses"]["CompatibilityResponse"]["content"]["application/json"]["schema"] = {
+            "$ref": "#/components/schemas/ContextReplacement",
+        }
+        failures, _ = cbc.compare(self.specs.write(json.dumps(before), "alias-base.json"),
+                                 self.specs.write(json.dumps(after), "alias-renamed.json"), self.tools["oasdiff"])
+        self.assertTrue(failures)
+
+    def test_inline_and_path_item_aliased_legacy_response_calls_cannot_gain_incompatible_enum_values(self) -> None:
+        for aliased in (False, True):
+            with self.subTest(path_item_alias=aliased):
+                before, after = tagged_pair(self.document)
+                for document in (before, after):
+                    response = document["components"]["responses"]["CompatibilityResponse"]
+                    document["paths"]["/probe"]["get"]["responses"]["200"] = {
+                        "description": response["description"],
+                        "content": {"application/json": {
+                            "schema": {"$ref": "#/components/schemas/CompatibilityEnvelope"},
+                        }},
+                    }
+                    if aliased:
+                        document["components"]["pathItems"] = {
+                            "ResponsePath": copy.deepcopy(document["paths"]["/probe"]),
+                        }
+                        document["paths"]["/probe"] = {"$ref": "#/components/pathItems/ResponsePath"}
+                base = self.specs.write(json.dumps(before), "inline-base.json")
+                revision = self.specs.write(json.dumps(after), "inline-widened.json")
+                findings, _ = cbc.compare(base, revision, self.tools["oasdiff"])
+                self.assertTrue(findings)
+                if not aliased:
+                    self.assertIn("operation-response-domain-unproved", {finding.id for finding in findings})
+
     def test_unsupported_source_semantics_fail_without_resolving_external_input(self) -> None:
         defects = (
             ("unsupported OpenAPI", "openapi", "3.0.3"),
@@ -370,9 +459,11 @@ class SourceCompatibilityTest(unittest.TestCase):
 
     def test_duplicate_source_mapping_names_are_rejected_before_any_proof(self) -> None:
         text = json.dumps(self.base)
+        envelope = json.dumps(self.base["components"]["schemas"]["CompatibilityEnvelope"])
         declaration = '"minimum": 100, "maximum": 599'
-        self.assertEqual(text.count(declaration), 1)
-        malformed = text.replace(declaration, '"minimum": 100, "minimum": 101, "maximum": 599')
+        self.assertEqual(envelope.count(declaration), 1)
+        self.assertEqual(text.count(envelope), 1)
+        malformed = text.replace(envelope, envelope.replace(declaration, '"minimum": 100, "minimum": 101, "maximum": 599'))
         source = self.specs.write(malformed, "duplicate-source.json")
         with self.assertRaisesRegex(PipelineError, "complete OpenAPI source parsing failed"):
             cbc.source_documents(source, self.revision_path)

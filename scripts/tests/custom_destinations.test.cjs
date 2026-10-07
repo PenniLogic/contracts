@@ -86,7 +86,7 @@ async function withLintProbe(check) {
   fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
   const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
   try {
-    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json"]) {
+    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json", "category-seed.v1.json"]) {
       fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
     }
     const file = path.join(directory, "probe.json");

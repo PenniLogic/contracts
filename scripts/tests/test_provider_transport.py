@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import unittest
+import time
 
 from support import ROOT, SpecDir, replace_once, run_script, spec_text
 from test_error_provider import schema_results
@@ -15,10 +18,12 @@ def fixture(name: str) -> dict:
     return json.loads((ROOT / "spec" / "fixtures" / name).read_text(encoding="utf-8"))
 
 
-def samples(*, arrays: bool = False) -> list[tuple[str, dict]]:
+def samples(*, arrays: bool = False, legacy: bool = False) -> list[tuple[str, dict]]:
     result = []
     inventory = fixture("provider-transport.v1.json")
-    for entry in inventory["models"] + (inventory["array_controls"] if arrays else []):
+    entries = inventory["models"][:29] if legacy else inventory["models"]
+    controls = inventory["array_controls"][:2] if legacy else inventory["array_controls"]
+    for entry in entries + (controls if arrays else []):
         value = fixture(entry["fixture"])
         for key in entry["path"]:
             value = value[key]
@@ -55,11 +60,21 @@ def null_array_entries(value):
 
 
 class ProviderTransportSchemaTest(unittest.TestCase):
+    def test_original_29_model_11_array_15_negative_corpus_is_preserved_exactly(self) -> None:
+        inventory = fixture("provider-transport.v1.json")
+        original = [inventory["models"][:29], inventory["array_controls"][:2], inventory["refusal_negatives"]]
+        binding = hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(binding, "7f3ceb6b3b93a7666c78de21bdfef69e01584f2da5313fe5d0da23959964d942")
+        controls = [{"name": row["schema"], "schema": row["schema"], "wire": {}}
+                    for row in inventory["models"] if row.get("empty_allowed")]
+        self.assertTrue(all(row["valid"] for row in schema_results(controls)))
+
     def test_inventory_covers_every_new_closed_object_and_keeps_legacy_bindings(self) -> None:
         schemas = schema_document()["components"]["schemas"]
         marked = {name for name, schema in schemas.items() if schema.get("x-pennilogic-strict-provider") is True}
         self.assertEqual(marked, {name for name, _ in samples()})
-        self.assertEqual(len(marked), 29)
+        self.assertEqual(len(samples(legacy=True)), 29)
+        self.assertEqual(len(marked), 112)
         self.assertNotIn("Money", marked)
         self.assertNotIn("ProblemDetail", marked)
         for name in marked:
@@ -79,7 +94,7 @@ class ProviderTransportSchemaTest(unittest.TestCase):
                             {**wire, "PRIVATE_SYNTHETIC_CANARY": "synthetic"}):
                 cases.append({"name": name + " unknown member", "schema": name, "wire": invalid})
                 expected.append(False)
-            for required in schemas[name]["required"]:
+            for required in schemas[name].get("required", []):
                 cases.append({"name": name + " missing " + required, "schema": name,
                               "wire": {key: value for key, value in wire.items() if key != required}})
                 expected.append(False)
@@ -112,12 +127,19 @@ class ProviderTransportSchemaTest(unittest.TestCase):
             if isinstance(value, list)
         }
         self.assertEqual(represented, declared)
-        self.assertEqual(len(declared), 11)
+        legacy_arrays = {(name, key) for name, wire in samples(arrays=True, legacy=True)
+                         for key, value in wire.items() if isinstance(value, list)}
+        self.assertEqual(len(legacy_arrays), 11)
+        self.assertTrue(legacy_arrays.issubset(declared))
+        self.assertEqual(len(declared), 34)
         cases = [
             {"name": name + " null array entry", "schema": name, "wire": invalid}
             for name, wire in samples(arrays=True) for invalid in null_array_entries(wire)
         ]
-        self.assertEqual(len(cases), 15)
+        legacy_cases = [invalid for _, wire in samples(arrays=True, legacy=True)
+                        for invalid in null_array_entries(wire)]
+        self.assertEqual(len(legacy_cases), 15)
+        self.assertEqual(len(cases), 43)
         self.assertFalse(any(result["valid"] for result in schema_results(cases)))
 
     def test_generated_models_wire_guards_on_every_closed_provider(self) -> None:
@@ -144,15 +166,47 @@ class ProviderWiringNegativeTest(unittest.TestCase):
         self.addCleanup(self.spec.cleanup)
 
     def test_a_missing_strict_binding_fails_for_each_closed_provider(self) -> None:
-        for name, _ in samples():
+        sources = []
+        evidence = ROOT / "build" / "provider-wiring-negative" / str(time.time_ns())
+        evidence.mkdir(parents=True)
+        for name, _ in samples(legacy=True):
+            spec = SpecDir()
+            self.addCleanup(spec.cleanup)
+            anchor = f"    {name}:\n      type: object\n      x-pennilogic-strict-provider: true\n"
+            text = replace_once(spec_text(), anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
+            sources.append((name, spec.write(text)))
+        def lint_source(source):
+            name, path = source
+            started = time.perf_counter()
+            result = run_script("lint_spec.py", "--spec", str(path))
+            (evidence / (name + ".stdout.txt")).write_text(result.stdout, encoding="utf-8")
+            (evidence / (name + ".stderr.txt")).write_text(result.stderr, encoding="utf-8")
+            (evidence / (name + ".json")).write_text(json.dumps({
+                "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "spec_directory": str(path.parent), "exit": result.returncode,
+                "seconds": time.perf_counter() - started,
+            }) + "\n", encoding="utf-8")
+            return name, result
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lint_source, sources))
+        self.assertEqual([name for name, _ in results], [name for name, _ in samples(legacy=True)])
+        for name, result in results:
             with self.subTest(schema=name):
-                anchor = f"    {name}:\n      type: object\n      x-pennilogic-strict-provider: true\n"
-                text = replace_once(spec_text(), anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
-                result = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 expected = ("must select x-pennilogic-strict-provider" if name.startswith("CustomDestination")
                             else "strict generated conversion and serialization")
                 self.assertIn(expected, result.stderr)
+
+    def test_all_added_core_strict_bindings_are_enforced_by_the_real_cli(self) -> None:
+        text = spec_text()
+        added = samples()[29:]
+        self.assertEqual(len(added), 83)
+        for name, _ in added:
+            anchor = f"    {name}:\n      type: object\n      x-pennilogic-strict-provider: true\n"
+            text = replace_once(text, anchor, anchor.replace("      x-pennilogic-strict-provider: true\n", ""))
+        result = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertGreaterEqual(result.stderr.count("strict generated conversion and serialization"), len(added))
 
     def test_a_local_copy_without_runtime_metadata_still_fails_inline_duplicate_guard(self) -> None:
         shape = schema_document()["components"]["schemas"]["DedupOutcome"]

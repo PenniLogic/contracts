@@ -83,6 +83,89 @@ class ProviderTransportTest {
         "AuthenticationProblemDetail" to codec<AuthenticationProblemDetail>(),
         "AuthenticationRequiredProblemDetail" to codec<AuthenticationRequiredProblemDetail>(),
         "OperationProblemDetail" to codec<OperationProblemDetail>(),
+        "ApplicationProblemDetail" to codec<ApplicationProblemDetail>(),
+        "AuthenticationChallengeProblemDetail" to codec<AuthenticationChallengeProblemDetail>(),
+        "AuthenticationContextProblemDetail" to codec<AuthenticationContextProblemDetail>(),
+        "AuthPublicKey" to codec<AuthPublicKey>(),
+        "AuthDeviceInput" to codec<AuthDeviceInput>(),
+        "AuthEnrollmentRequest" to codec<AuthEnrollmentRequest>(),
+        "AuthEnrollmentAccepted" to codec<AuthEnrollmentAccepted>(),
+        "AuthChannelProofRequest" to codec<AuthChannelProofRequest>(),
+        "AuthEnrollmentVerified" to codec<AuthEnrollmentVerified>(),
+        "AuthCredentialDescriptor" to codec<AuthCredentialDescriptor>(),
+        "AuthCredentialAlgorithm" to codec<AuthCredentialAlgorithm>(),
+        "AuthRelyingParty" to codec<AuthRelyingParty>(),
+        "AuthPasskeyUser" to codec<AuthPasskeyUser>(),
+        "AuthAuthenticatorSelection" to codec<AuthAuthenticatorSelection>(),
+        "AuthCreationExtensions" to codec<AuthCreationExtensions>(),
+        "AuthCreationOptions" to codec<AuthCreationOptions>(),
+        "AuthRegistrationOptionsRequest" to codec<AuthRegistrationOptionsRequest>(),
+        "AuthAttestationResponse" to codec<AuthAttestationResponse>(),
+        "AuthRegistrationResultRequest" to codec<AuthRegistrationResultRequest>(),
+        "AuthAuthenticationOptionsRequest" to codec<AuthAuthenticationOptionsRequest>(),
+        "AuthAssertionOptions" to codec<AuthAssertionOptions>(),
+        "AuthAssertionResponse" to codec<AuthAssertionResponse>(),
+        "AuthAssertionResultRequest" to codec<AuthAssertionResultRequest>(),
+        "AuthTokenSet" to codec<AuthTokenSet>(),
+        "AuthBrowserTokenSet" to codec<AuthBrowserTokenSet>(),
+        "AuthRefreshRequest" to codec<AuthRefreshRequest>(),
+        "AuthBrowserRefreshRequest" to codec<AuthBrowserRefreshRequest>(),
+        "AuthProfile" to codec<AuthProfile>(),
+        "AuthCredential" to codec<AuthCredential>(),
+        "AuthCredentialList" to codec<AuthCredentialList>(),
+        "AuthCredentialNameRequest" to codec<AuthCredentialNameRequest>(),
+        "AuthSession" to codec<AuthSession>(),
+        "AuthSessionList" to codec<AuthSessionList>(),
+        "AuthDevice" to codec<AuthDevice>(),
+        "AuthDeviceList" to codec<AuthDeviceList>(),
+        "AuthChannelInput" to codec<AuthChannelInput>(),
+        "AuthChannel" to codec<AuthChannel>(),
+        "AuthChannelList" to codec<AuthChannelList>(),
+        "AuthRecoveryCodeCount" to codec<AuthRecoveryCodeCount>(),
+        "AuthRecoveryCodeSet" to codec<AuthRecoveryCodeSet>(),
+        "AuthRecoveryStartRequest" to codec<AuthRecoveryStartRequest>(),
+        "AuthRecoveryAccepted" to codec<AuthRecoveryAccepted>(),
+        "AuthRecoveryVerifyRequest" to codec<AuthRecoveryVerifyRequest>(),
+        "AuthRecoveryProgress" to codec<AuthRecoveryProgress>(),
+        "AuthRecoveryActionRequest" to codec<AuthRecoveryActionRequest>(),
+        "AuthRecoveryCredentialRequest" to codec<AuthRecoveryCredentialRequest>(),
+        "AuthRegistrationGrant" to codec<AuthRegistrationGrant>(),
+        "AuthDeviceChallenge" to codec<AuthDeviceChallenge>(),
+        "AuthDeviceRegistrationRequest" to codec<AuthDeviceRegistrationRequest>(),
+        "AuthRecoveryCompletion" to codec<AuthRecoveryCompletion>(),
+        "AuthStepUpIntentTarget" to codec<AuthStepUpIntentTarget>(),
+        "AuthStepUpIntentBody" to codec<AuthStepUpIntentBody>(),
+        "AuthStepUpIntent" to codec<AuthStepUpIntent>(),
+        "AuthStepUpResultRequest" to codec<AuthStepUpResultRequest>(),
+        "AuthStepUpGrant" to codec<AuthStepUpGrant>(),
+        "SessionRevokedProblemDetail" to codec<SessionRevokedProblemDetail>(),
+        "CursorPage" to codec<CursorPage>(),
+        "CreateAccountRequest" to codec<CreateAccountRequest>(),
+        "UpdateAccountRequest" to codec<UpdateAccountRequest>(),
+        "Account" to codec<Account>(),
+        "AccountPage" to codec<AccountPage>(),
+        "OpeningBalanceRequest" to codec<OpeningBalanceRequest>(),
+        "LedgerEntryInput" to codec<LedgerEntryInput>(),
+        "LedgerEntry" to codec<LedgerEntry>(),
+        "PostTransactionRequest" to codec<PostTransactionRequest>(),
+        "Transaction" to codec<Transaction>(),
+        "TransactionPage" to codec<TransactionPage>(),
+        "ReverseTransactionRequest" to codec<ReverseTransactionRequest>(),
+        "CorrectTransactionRequest" to codec<CorrectTransactionRequest>(),
+        "TransactionCorrection" to codec<TransactionCorrection>(),
+        "CategorisationView" to codec<CategorisationView>(),
+        "CategoryAllocationLine" to codec<CategoryAllocationLine>(),
+        "CategoryExactLineInput" to codec<CategoryExactLineInput>(),
+        "CategoryWeightedLineInput" to codec<CategoryWeightedLineInput>(),
+        "CategoryEntryAssignmentInput" to codec<CategoryEntryAssignmentInput>(),
+        "CategoryAssignmentRequest" to codec<CategoryAssignmentRequest>(),
+        "Categorisation" to codec<Categorisation>(),
+        "CreateCategoryRequest" to codec<CreateCategoryRequest>(),
+        "UpdateCategoryRequest" to codec<UpdateCategoryRequest>(),
+        "Category" to codec<Category>(),
+        "CategoryPage" to codec<CategoryPage>(),
+        "RedirectCategoryRequest" to codec<RedirectCategoryRequest>(),
+        "CategoryRedirect" to codec<CategoryRedirect>(),
     )
     private fun sample(entry: JsonObject): JsonElement {
         var value: JsonElement = Fixtures.load(entry.getValue("fixture").jsonPrimitive.content)
@@ -110,21 +193,25 @@ class ProviderTransportTest {
     @Test fun everyNestedProviderModelAndPrimitiveArrayRejectsNullBeforeActualTransport() = runBlocking<Unit> {
         val transforms = codecs()
         var cases = 0
+        var legacyCases = 0
         val inventory = Fixtures.load("provider-transport.v1.json")
+        val legacy = inventory.getValue("models").jsonArray.take(29).map { it.jsonObject.getValue("schema").jsonPrimitive.content }.toSet()
         (inventory.getValue("models").jsonArray + inventory.getValue("array_controls").jsonArray).forEach { entry ->
             val transform = transforms.getValue(entry.jsonObject.getValue("schema").jsonPrimitive.content)
             nullArrayEntries(sample(entry.jsonObject)).forEach { wire ->
                 assertSafe(assertFails { transform.decode(wire) })
                 assertSafe(assertFails { transform.transport(wire) })
                 cases += 1
+                if (entry.jsonObject.getValue("schema").jsonPrimitive.content in legacy) legacyCases += 1
             }
         }
-        assertEquals(15, cases)
+        assertEquals(15, legacyCases)
+        assertEquals(43, cases)
     }
 
     @Test fun everyMarkedRootRejectsNullInOrdinaryAndGeneratedTransportButNullableLegacyRemains() = runBlocking<Unit> {
         val transforms = codecs()
-        assertEquals(29, transforms.size)
+        assertEquals(112, transforms.size)
         transforms.forEach { (name, transform) ->
             assertSafe(assertFails(name) { transform.decode(JsonNull) })
             assertSafe(assertFails(name) { transform.transport(JsonNull) })
@@ -172,7 +259,8 @@ class ProviderTransportTest {
     @Test fun everyClosedProviderUsesStrictOrdinarySerializationAndActualGeneratedTransport() = runBlocking {
         val declared = Fixtures.load("provider-transport.v1.json").getValue("models").jsonArray
         val transforms = codecs()
-        assertEquals(29, declared.size)
+        assertEquals(29, declared.take(29).size)
+        assertEquals(112, declared.size)
         assertEquals(transforms.keys, declared.map { it.jsonObject.getValue("schema").jsonPrimitive.content }.toSet())
         declared.forEach { entry ->
             val name = entry.jsonObject.getValue("schema").jsonPrimitive.content
@@ -186,8 +274,13 @@ class ProviderTransportTest {
                 assertSafe(assertFails(name) { transform.transport(invalid) })
             }
             val missing = JsonObject(wire.jsonObject - wire.jsonObject.keys.first())
-            assertSafe(assertFails(name) { transform.decode(missing) })
-            assertSafe(assertFails(name) { transform.transport(missing) })
+            if (entry.jsonObject["empty_allowed"]?.jsonPrimitive?.boolean == true) {
+                assertEquals(missing, transform.decode(missing), name)
+                assertEquals(missing, transform.transport(missing), name)
+            } else {
+                assertSafe(assertFails(name) { transform.decode(missing) })
+                assertSafe(assertFails(name) { transform.transport(missing) })
+            }
         }
     }
 

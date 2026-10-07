@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "spec" / "openapi.yaml"
 RULESET = ROOT / "spec" / ".spectral.yaml"
 REGISTRY = ROOT / "spec" / "currency-registry.v1.json"
-PROVIDER_SOURCE_NAMES = ("error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json")
+PROVIDER_SOURCE_NAMES = ("error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json",
+                         "category-seed.v1.json")
 FIXTURES = ROOT / "spec" / "fixtures"
 VERSIONS = ROOT / "toolchain" / "versions.json"
 GENERATOR_DIR = ROOT / "generator"

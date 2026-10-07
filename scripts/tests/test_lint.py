@@ -130,10 +130,10 @@ class PlantedDefectTest(unittest.TestCase):
 
     def test_money_behind_a_reference_chain_cannot_be_exempt(self) -> None:
         # Entry -> lines[] -> Line -> allOf -> Money, plus a self-reference (Entry.parent) that must not loop the walk.
-        chain = ("  schemas:\n    Entry:\n      type: object\n      properties:\n        lines:\n          type: array\n          items:\n            $ref: '#/components/schemas/Line'\n"
+        chain = ("    Entry:\n      type: object\n      properties:\n        lines:\n          type: array\n          items:\n            $ref: '#/components/schemas/Line'\n"
                  "        parent:\n          $ref: '#/components/schemas/Entry'\n    Line:\n      type: object\n      allOf:\n        - type: object\n          properties:\n"
                  "            value:\n              $ref: '#/components/schemas/Money'\n    Money:\n")
-        text = replace_once(with_probe_paths(spec_text()), "  schemas:\n    Money:\n", chain)
+        text = replace_once(with_probe_paths(spec_text()), "    Money:\n", chain)
         indirect = replace_once(text, "      parameters:\n        - $ref: '#/components/parameters/IdempotencyKey'\n      requestBody:\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                total:\n                  $ref: '#/components/schemas/Money'\n",
                                 "      x-idempotency: not-applicable\n      requestBody:\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/Entry'\n")
         output = self.lint(indirect)

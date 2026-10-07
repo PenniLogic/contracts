@@ -19,7 +19,25 @@ functions:
   - noInferenceAddress
   - providerErrors
   - providerImports
+  - coreEndpointContract
+  - categorySeedBinding
 rules:
+  pl-category-seed-binding:
+    description: Category keys and presentation registries derive from exact protected-accepted source bytes.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: categorySeedBinding
+  pl-core-endpoint-contract:
+    description: Original contracts#1 operations share authenticated proof, idempotency, immutable ledger, bounded pagination and no-raw-content boundaries.
+    message: "{{error}}"
+    severity: error
+    resolved: false
+    given: $
+    then:
+      function: coreEndpointContract
   # The shared components are a library consumed by contract expansion tickets and by every
   # generated client; the document intentionally publishes them before any operation references them.
   oas3-unused-component: off

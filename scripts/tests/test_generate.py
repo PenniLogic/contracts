@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import copy
+import hashlib
 import json
 import os
 import re
@@ -10,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -72,6 +75,88 @@ class RegistryRenderingTest(unittest.TestCase):
                 self.assertIn(entry["minor_unit_name"], content, language)
             self.assertTrue(path.endswith((".py", ".ts", ".kt")))
 
+class DeclarationSharingTest(unittest.TestCase):
+    def test_target_batch_is_bounded_and_joins_every_worker_before_return_or_failure(self) -> None:
+        lock = threading.Lock()
+        barrier = threading.Barrier(2)
+        state = {"active": 0, "maximum": 0, "completed": []}
+        def build(language):
+            with lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+            try:
+                if language != "python":
+                    barrier.wait(timeout=10)
+                if language == "kotlin":
+                    raise pl_contracts.PipelineError("synthetic target failure")
+                return {"target": language}
+            finally:
+                with lock:
+                    state["completed"].append(language)
+                    state["active"] -= 1
+        with self.assertRaisesRegex(pl_contracts.PipelineError, "synthetic target failure"):
+            gc._target_batch(["kotlin", "typescript", "python"], build)
+        self.assertEqual(state["maximum"], 2)
+        self.assertEqual(state["active"], 0)
+        self.assertEqual(set(state["completed"]), set(gc.LANGUAGES))
+        with self.assertRaisesRegex(pl_contracts.PipelineError, "duplicate generation target"):
+            gc._target_batch(["python", "python"], lambda language: {"target": language})
+
+    def test_same_invocation_shares_only_verified_equal_inputs_and_returns_independent_copies(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        with mock.patch.object(gc, "run", wraps=gc.run) as run:
+            with gc._declaration_scope():
+                first = gc._provider_declarations(source)
+                original = copy.deepcopy(first)
+                first["roots"].append("MUTATED_CALLER_COPY")
+                self.assertEqual(gc._provider_declarations(source), original)
+                self.assertEqual(run.call_count, 1)
+                source.write_text(spec_text() + "\n", encoding="utf-8")
+                self.assertEqual(gc._provider_declarations(source), original)
+                self.assertEqual(run.call_count, 2)
+            gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 3)
+
+    def test_changed_companion_and_unsupported_inputs_revalidate_and_never_cache_failures(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        companion = spec.path / "category-seed.v1.json"
+        before = companion.read_bytes()
+        with mock.patch.object(gc, "run", wraps=gc.run) as run, gc._declaration_scope():
+            gc._provider_declarations(source)
+            companion.write_bytes(before + b"\n")
+            for _ in range(2):
+                with self.assertRaisesRegex(pl_contracts.PipelineError, "provider constraint generation rejected"):
+                    gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 3)
+            companion.write_bytes(before)
+            source.write_text(replace_once(spec_text(), "  schemas:\n",
+                "  schemas:\n    SharedUnsupported:\n      type: object\n"
+                "      x-pennilogic-strict-provider: true\n      additionalProperties: false\n"
+                "      properties: {value: {type: number}}\n"), encoding="utf-8")
+            with self.assertRaisesRegex(pl_contracts.PipelineError, "unsupported type"):
+                gc._provider_declarations(source)
+            self.assertEqual(run.call_count, 4)
+
+    def test_real_requested_three_target_set_compiles_source_once_without_reusing_outputs(self) -> None:
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(spec_text())
+        output = spec.path / "generated"
+        tools = toolchain.ensure_installed()
+        with mock.patch.object(gc, "run", wraps=gc.run) as run:
+            manifests = gc.generate_all(list(gc.LANGUAGES), output, tools, source)
+        compiler = [call for call in run.call_args_list
+                    if any(str(value).endswith("provider_constraints.cjs") for value in call.args[0])]
+        self.assertEqual(len(compiler), 1)
+        self.assertEqual(set(manifests), set(gc.LANGUAGES))
+        for language, manifest in manifests.items():
+            self.assertEqual(pl_contracts.tree_hash(output / language, exclude=("contracts-manifest.json",))[0],
+                             manifest["tree_sha256"])
+
 
 class GoldenAndManifestTest(unittest.TestCase):
     def test_golden_file_matches_the_generator_configuration(self) -> None:
@@ -129,6 +214,7 @@ class SeamWiringTest(unittest.TestCase):
         cls.spec_path = cls.spec.write(text)
         cls.output = Path(tempfile.mkdtemp(prefix="pl-gen-"))
         cls.tools = toolchain.ensure_installed()
+        gc.generate("python", cls.output / "python", cls.tools, cls.spec_path)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -156,7 +242,8 @@ class SeamWiringTest(unittest.TestCase):
         gc.generate("typescript", self.output / "typescript", self.tools, self.spec_path)
         model = (self.output / "typescript" / "src/models/SyntheticEnvelope.ts").read_text(encoding="utf-8")
         self.assertIn("MoneyFromJSON(json['total'])", model)
-        self.assertIn("MoneyToJSON(value['total'])", model)
+        self.assertRegex(model, r"const member = value\['total'\];\s+return requiredWireValue\(MoneyToJSON\(member\)\)")
+        self.assertIn("total': NonNullable<ReturnType<typeof MoneyToJSON>>", model)
         self.assertIn("InstantFromJSON(json['recorded_at'])", model)
         self.assertIn("LocalDateFromJSON(json['booked_on'])", model)
         self.assertIn("total: Money;", model)
@@ -171,7 +258,6 @@ class SeamWiringTest(unittest.TestCase):
             self.assertFalse((self.output / "typescript" / forbidden).exists(), forbidden)
 
     def test_python_model_uses_the_wrappers_and_imports_the_instant_seam(self) -> None:
-        gc.generate("python", self.output / "python", self.tools, self.spec_path)
         model = (self.output / "python" / "pennilogic_contracts/models/synthetic_envelope.py").read_text(encoding="utf-8")
         self.assertIn("from pennilogic_contracts.models.money import Money", model)
         self.assertIn("from pennilogic_contracts.models.instant import Instant", model)
@@ -193,7 +279,6 @@ class SeamWiringTest(unittest.TestCase):
         interpreter = ROOT / "build" / "venv" / ("Scripts/python.exe" if sys.platform.startswith("win") else "bin/python")
         if not interpreter.is_file():
             self.skipTest("smoke venv missing; run python scripts/smoke.py python first (CI runs it before this suite)")
-        gc.generate("python", self.output / "python", self.tools, self.spec_path)
         probe = (
             "import json, sys\n"
             "from pydantic import ValidationError\n"
@@ -236,9 +321,37 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         with zipfile.ZipFile(jar) as archive:
             return archive.read(name).decode("utf-8")
 
+    def test_every_template_uses_exact_lf_bytes_before_native_generation(self) -> None:
+        for path in (ROOT / "generator" / "templates").rglob("*.mustache"):
+            with self.subTest(template=path.relative_to(ROOT)):
+                self.assertNotIn(b"\r", path.read_bytes(),
+                                 "native templates must match committed LF bytes before golden generation")
+
     def replace_once(self, text: str, old: str, new: str) -> str:
         self.assertEqual(text.count(old), 1, f"stock template anchor changed: {old[:60]!r}")
         return text.replace(old, new)
+
+    def core_adapter(self, text: str, name: str) -> str:
+        record = json.loads((ROOT / "scripts" / "tests" / "template-adapter-edits.v1.json").read_text(encoding="utf-8"))[name]
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), record["base_sha256"])
+        lines = text.splitlines(keepends=True)
+        for edit in reversed(record["edits"]):
+            self.assertEqual("".join(lines[edit["start"]:edit["end"]]), edit["old"])
+            lines[edit["start"]:edit["end"]] = edit["new"].splitlines(keepends=True)
+        return "".join(lines)
+
+    def nullable_enum_items(self, text: str) -> str:
+        start = text.index("{{^items.isEnum}}")
+        suffix = "{{#items.isNullable}}?{{/items.isNullable}}"
+        end = text.index(suffix, start) + len(suffix)
+        items = text[start:end]
+        return self.replace_once(
+            text, items,
+            "{{#vendorExtensions.x-pennilogic-nullable-enum-items}}{{#items}}{{>provider_type}}{{/items}}"
+            "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}"
+            "{{^vendorExtensions.x-pennilogic-nullable-enum-items}}" + items +
+            "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}",
+        )
 
     def test_python_api_override_adds_precise_types_typed_responses_and_private_diagnostics(self) -> None:
         expected = self.stock("python/api.mustache")
@@ -268,7 +381,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             self.assertEqual(expected.count(old), count, old)
             expected = expected.replace(old, new)
         actual = (ROOT / "generator" / "templates" / "python" / "api.mustache").read_text(encoding="utf-8")
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, self.core_adapter(expected, "python/api.mustache"))
 
     def test_python_api_client_override_types_the_existing_transport_not_string_named_models(self) -> None:
         expected = self.stock("python/api_client.mustache")
@@ -317,7 +430,7 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         ]:
             expected = self.replace_once(expected, old, new)
         actual = (ROOT / "generator" / "templates" / "python" / "rest.mustache").read_text(encoding="utf-8")
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, self.core_adapter(expected, "python/rest.mustache"))
 
     def test_python_model_override_is_stock_plus_known_edits(self) -> None:
         stock = self.stock("python/model_generic.mustache")
@@ -378,15 +491,92 @@ class TemplateOverrideDriftTest(unittest.TestCase):
         )
         self.assertEqual(override, expected, "generator/templates/kotlin/build.gradle.mustache drifted from the pinned generator's template; re-apply the documented edits")
 
+    def test_status_api_overrides_are_exact_anchored_edits_of_pinned_stock(self) -> None:
+        for name, stock in (
+            ("typescript/apis.mustache", "typescript-fetch/apis.mustache"),
+            ("kotlin/libraries/jvm-ktor/api.mustache", "kotlin-client/libraries/jvm-ktor/api.mustache"),
+        ):
+            with self.subTest(template=name):
+                actual = (ROOT / "generator" / "templates" / name).read_text(encoding="utf-8")
+                self.assertEqual(actual, self.core_adapter(self.stock(stock), name))
+
+    def test_small_null_query_and_return_partials_have_exact_finite_bindings(self) -> None:
+        root = ROOT / "generator" / "templates"
+        optional = (root / "kotlin" / "data_class_opt_var.mustache").read_text(encoding="utf-8")
+        marker = "{{^vendorExtensions.x-pennilogic-null-presence}}\n"
+        self.assertEqual(optional.count(marker), 1)
+        fallback = optional.split(marker, 1)[1].removesuffix("{{/vendorExtensions.x-pennilogic-null-presence}}\n")
+        self.assertEqual(fallback, self.nullable_enum_items(self.stock("kotlin-client/data_class_opt_var.mustache")) + "\n")
+        expected = {
+            "kotlin/data_class_opt_var.mustache": "5691f16143389ce56506592ee7009fad19166fbe73f6770718ce6bac79b4ecdd",
+            "kotlin/provider_type.mustache": "1f62966332688ca916a8422b31dd9a1fdd08a469d234a20b20e061434771c6e6",
+            "python/provider_type.mustache": "5a8fbdab26f3babe49da0985a19c1398605eaccf34327e6dab5cf5931271114b",
+            "typescript/apisAssignQueryParam.mustache": "3bc65469c980da7cecb24b45461c271a4b7f089e035fb7de964ecf67cd47d917",
+            "typescript/provider_type.mustache": "6384986536cbe34f4bcd72c0ff94517529742c59944be92a80e6550d1eda9bb9",
+            "typescript/provider_enum_read.mustache": "a69ab168a5abb26851699082eb5d3f88e3368134def948e142b7f454740091c0",
+            "typescript/provider_enum_write.mustache": "9e2f18dd273b713a12d9ca07461f508ed908800aeb6ec4de96047e460e854719",
+            "typescript/providerField.mustache": "378ee2817d00d90e254c90b66eda4ad6ff0f56a2104b690112f63572249217b3",
+            "typescript/wireEnumType.mustache": "68ee5bdc79721fe161b528a8a14e9cbfd6a6438e56c63486b43afe122bb5e928",
+            "typescript/wireEnumValue.mustache": "1b10ebcdb566726c03e9d27a92752d9f564d837df5a59bde387d76ee616d5406",
+            "typescript/wireField.mustache": "1ea11e360838133b00ef95519ac8e22082ee3b0db739677908bc55d9017aad98",
+            "typescript/wireInput.mustache": "148a76344dd3e38dc5749a5f9ef5f199699ec8eb452e3dc68c4d92418e0d3678",
+            "typescript/wireMember.mustache": "12cd7965b634734d48bb4d6a1734c1529a54b89b22e99093d563b6c2b11152bb",
+            "typescript/wireType.mustache": "79b2531f359378f3e14f022fb8f2b788586204505f86bed7ce029fdb2aa8eb5a",
+            "typescript/wireValue.mustache": "7fa512f482ac75a494d6372abdd700f8bff9fa2813ce0d7a810c055601928b30",
+            "python/success_return_type.mustache": "cec162ef157593fd357de58d0240c16a58b44ab67ec99f6bb04ed621264d41d9",
+        }
+        for name, digest in expected.items():
+            text = (root / name).read_text(encoding="utf-8")
+            self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), digest, name)
+        self.assertNotIn("\n", (root / "python" / "success_return_type.mustache").read_text(encoding="utf-8"))
+
+    def test_nullable_enum_partial_overrides_are_exact_edits_of_pinned_stock(self) -> None:
+        for name, stock, old, new in (
+            ("kotlin/data_class_req_var.mustache", "kotlin-client/data_class_req_var.mustache",
+             "{{#isNullable}}?{{/isNullable}}{{#defaultValue}}",
+             "{{#isNullable}}?{{/isNullable}}{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}"
+             "?{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}}{{#defaultValue}}"),
+            ("typescript/modelGenericInterfaces.mustache", "typescript-fetch/modelGenericInterfaces.mustache",
+             "{{#isNullable}} | null{{/isNullable}};",
+             "{{#isNullable}} | null{{/isNullable}}{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}"
+             " | null{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}};"),
+        ):
+            with self.subTest(template=name):
+                expected = self.replace_once(self.stock(stock), old, new)
+                if name.startswith("kotlin/"):
+                    expected = self.nullable_enum_items(expected)
+                else:
+                    expected = self.replace_once(expected, "{{{datatypeWithEnum}}}{{#isNullable}}",
+                        "{{#vendorExtensions.x-pennilogic-nullable-enum-items}}"
+                        "{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}Array{{/uniqueItems}}"
+                        "<{{#items}}{{>provider_type}}{{/items}}>"
+                        "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}"
+                        "{{^vendorExtensions.x-pennilogic-nullable-enum-items}}{{{datatypeWithEnum}}}"
+                        "{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{#isNullable}}")
+                actual = (ROOT / "generator" / "templates" / name).read_text(encoding="utf-8")
+                self.assertEqual(actual, expected + "\n")
+
     def test_no_other_template_is_overridden(self) -> None:
         overrides = sorted(p.relative_to(ROOT / "generator" / "templates").as_posix() for p in (ROOT / "generator" / "templates").rglob("*.mustache"))
         self.assertEqual(overrides, ["kotlin/build.gradle.mustache", "kotlin/data_class.mustache",
+                                    "kotlin/data_class_opt_var.mustache",
+                                    "kotlin/data_class_req_var.mustache",
+                                    "kotlin/libraries/jvm-ktor/api.mustache",
                                     "kotlin/libraries/jvm-ktor/infrastructure/ApiClient.kt.mustache",
+                                    "kotlin/provider_type.mustache",
                                     "python/api.mustache", "python/api_client.mustache",
                                     "python/model_enum.mustache", "python/model_generic.mustache", "python/model_provider.mustache",
+                                    "python/provider_type.mustache",
                                     "python/rest.mustache",
-                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache",
-                                    "typescript/providerField.mustache"])
+                                    "python/success_return_type.mustache",
+                                    "typescript/apis.mustache", "typescript/apisAssignQueryParam.mustache",
+                                    "typescript/modelEnum.mustache", "typescript/modelGeneric.mustache", "typescript/modelGenericInterfaces.mustache",
+                                    "typescript/providerField.mustache", "typescript/provider_enum_read.mustache",
+                                    "typescript/provider_enum_write.mustache", "typescript/provider_type.mustache",
+                                    "typescript/wireEnumType.mustache", "typescript/wireEnumValue.mustache",
+                                    "typescript/wireField.mustache", "typescript/wireInput.mustache",
+                                    "typescript/wireMember.mustache", "typescript/wireType.mustache",
+                                    "typescript/wireValue.mustache"])
 
     def test_kotlin_data_class_override_is_stock_plus_provider_only_registration(self) -> None:
         stock = self.stock("kotlin-client/data_class.mustache")
@@ -427,7 +617,9 @@ class TemplateOverrideDriftTest(unittest.TestCase):
             "import { providerObject, providerPattern, providerWire, ProviderWireError, type ProviderField } from '../providerGuard{{importFileExtension}}';\n"
             "{{/vendorExtensions.x-pennilogic-strict-provider}}\n" + stock
         )
-        field_block = override.split("{{>modelGenericInterfaces}}\n", 1)[1].split("\n\n/**", 1)[0]
+        provider = "{{#vendorExtensions.x-pennilogic-strict-provider}}\n\nconst providerFields"
+        tail = override.split("{{>modelGenericInterfaces}}\n", 1)[1]
+        field_block = tail[tail.index(provider):].split("\n\n/**", 1)[0]
         self.assertTrue(field_block.startswith("{{#vendorExtensions.x-pennilogic-strict-provider}}"))
         self.assertTrue(field_block.rstrip().endswith("{{/vendorExtensions.x-pennilogic-strict-provider}}"))
         expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n", "{{>modelGenericInterfaces}}\n" + field_block)
@@ -460,6 +652,54 @@ class TemplateOverrideDriftTest(unittest.TestCase):
                                      "    const wire = Object.fromEntries(Object.entries(result).filter(([, member]) => member !== undefined));\n"
                                      '    providerWire(wire, "{{name}}");\n    return wire;\n'
                                      "    {{/vendorExtensions.x-pennilogic-strict-provider}}\n")
+        expected = self.core_adapter(expected, "typescript/modelGeneric.mustache")
+        expected = self.replace_once(expected, "        {{#vars}}\n        {{#isPrimitiveType}}\n",
+            "        {{#vars}}\n"
+            "        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        '{{name}}': {{^required}}json['{{baseName}}'] === undefined ? undefined : {{/required}}"
+            "{{#isNullable}}json['{{baseName}}'] === null ? null : {{/isNullable}}"
+            "{{#uniqueItems}}new Set({{/uniqueItems}}(json['{{baseName}}'] as Array<any>).map("
+            "{{#items}}{{>provider_enum_read}}{{/items}}){{#uniqueItems}}){{/uniqueItems}},\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{#isPrimitiveType}}\n")
+        expected = self.replace_once(expected, "        {{/isPrimitiveType}}\n        {{/vars}}\n",
+            "        {{/isPrimitiveType}}\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{/vars}}\n")
+        expected = self.replace_once(expected, "        {{^isReadOnly}}\n        {{#isPrimitiveType}}\n",
+            "        {{^isReadOnly}}\n"
+            "        {{#vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        '{{baseName}}': {{^required}}value['{{name}}'] === undefined ? undefined : {{/required}}"
+            "{{#isNullable}}value['{{name}}'] === null ? null : {{/isNullable}}"
+            "{{#uniqueItems}}Array.from(value['{{name}}'] as Set<any>){{/uniqueItems}}"
+            "{{^uniqueItems}}(value['{{name}}'] as Array<any>){{/uniqueItems}}"
+            ".map({{#items}}{{>provider_enum_write}}{{/items}}),\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n"
+            "        {{^vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{#isPrimitiveType}}\n")
+        expected = self.replace_once(expected, "        {{/isPrimitiveType}}\n        {{/isReadOnly}}\n",
+            "        {{/isPrimitiveType}}\n"
+            "        {{/vendorExtensions.x-pennilogic-nullable-enum-items}}\n        {{/isReadOnly}}\n")
+        self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
+                         "2e3ed688cafa7ec02f7d79aae2f58ff8a20cf2f84f740a8696e92243619e1a01",
+                         "the complete pre-M1 adapter must still match immutable892 before the exact correction")
+        imports = "import { mapValues{{#isDateLibraryDate}}{{#vendorExtensions.x-hasDateVars}}, parseDate, parseDateTime, serializeDate, serializeDateTime{{/vendorExtensions.x-hasDateVars}}{{/isDateLibraryDate}} } from '../runtime{{importFileExtension}}';\n"
+        expected = self.replace_once(expected, imports, imports +
+            "import { requiredWireValue, omitOptionalWire, mapWireRecord, type WireOutput } from '../wireSerialization{{importFileExtension}}';\n")
+        wire_type = (
+            "export type {{classname}}Wire = {{#parent}}NonNullable<ReturnType<typeof {{{.}}}ToJSON>> & {{/parent}}{\n"
+            "    {{#additionalPropertiesType}}\n    [key: string]: unknown;\n    {{/additionalPropertiesType}}\n"
+            "    {{#vars}}\n    {{^isReadOnly}}\n"
+            "    {{>wireField}}\n"
+            "    {{/isReadOnly}}\n"
+            "    {{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}\n"
+            "    {{>wireField}}\n"
+            "    {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}\n"
+            "    {{/vars}}\n};\n"
+        )
+        expected = self.replace_once(expected, "{{>modelGenericInterfaces}}\n",
+                                     "{{>modelGenericInterfaces}}\n" + wire_type)
+        start = expected.index("export function {{classname}}ToJSON(json: any): {{classname}} {")
+        writer = (ROOT / "scripts" / "tests" / "fixtures" / "typescript-wire-writer.v1.mustache").read_text(encoding="utf-8")
+        expected = expected[:start] + writer
         self.assertEqual(override, expected)
         self.assertIn("{{>providerField}}", field_block)
         partial = (ROOT / "generator" / "templates" / "typescript" / "providerField.mustache").read_text(encoding="utf-8")

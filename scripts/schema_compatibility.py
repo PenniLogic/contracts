@@ -56,6 +56,17 @@ class SourceProof:
         self.base, self.revision = base, revision
         self.work = 0
         self.closed: dict[tuple[int, int], tuple[object, object, int]] = {}
+        self.tag_domains: dict[tuple[int, int, str, int], set[str] | None] = {}
+        self.tag_frames: dict[tuple[int, int, str, str, int], dict | None] = {}
+        self.relations: dict[tuple[int, int, bool], tuple[dict, dict, bool]] = {}
+        self.diffs: dict[tuple[int, int], tuple[dict, dict, dict]] = {}
+
+    def clear(self) -> None:
+        self.closed.clear()
+        self.tag_domains.clear()
+        self.tag_frames.clear()
+        self.relations.clear()
+        self.diffs.clear()
 
     def step(self, depth: int) -> None:
         self.work += 1
@@ -105,8 +116,13 @@ class SourceProof:
             if ref in active:
                 raise Unproved("cyclic reference")
             self.audit(target, document, active | {ref}, depth + 1)
-        if "type" in node and node["type"] not in ("object", "array", "string", "integer", "number", "boolean", "null"):
-            raise Unproved("unsupported type")
+        if "type" in node:
+            declared = node["type"]
+            nullable = isinstance(declared, list) and len(declared) == 2 and \
+                all(isinstance(kind, str) for kind in declared) and len(set(declared)) == 2 and \
+                "null" in declared and all(kind in ("string", "integer", "boolean", "null") for kind in declared)
+            if not nullable and declared not in ("object", "array", "string", "integer", "number", "boolean", "null"):
+                raise Unproved("unsupported type")
         if "enum" in node:
             finite(node["enum"])
         if "const" in node:
@@ -204,15 +220,33 @@ class SourceProof:
 
     def scalar_view(self, nodes: list[dict], document: dict) -> tuple[str, set | None]:
         parts = [part for node in nodes for part in self.conjuncts(node, document)]
+        if any(isinstance(part.get("type"), list) for part in parts):
+            raise Unproved("nullable discriminator or scalar projection")
         types = {part["type"] for part in parts if "type" in part}
         if len(types) != 1 or next(iter(types)) not in ("string", "integer", "number", "boolean", "null") or \
-                any(set(part) & (NEGATIVE_POSITIONS | {"properties", "items"}) for part in parts):
+                any(set(part) & ({"if", "then", "else", "properties", "items"}) for part in parts):
             raise Unproved("non-scalar intersection")
         domain: set | None = None
         for part in parts:
             for values in ([part["enum"]] if "enum" in part else []) + ([[part["const"]]] if "const" in part else []):
                 members = set(finite(values))
                 domain = members if domain is None else domain & members
+            for keyword in ("anyOf", "oneOf"):
+                if keyword in part:
+                    members: set = set()
+                    for child in part[keyword]:
+                        if set(child) not in ({"const"}, {"enum"}):
+                            raise Unproved("unsupported scalar union")
+                        values = finite([child["const"]] if "const" in child else child["enum"])
+                        if keyword == "oneOf" and members & set(values):
+                            raise Unproved("overlapping scalar union")
+                        members.update(values)
+                    domain = members if domain is None else domain & members
+            if "not" in part:
+                child = part["not"]
+                if domain is None or set(child) not in ({"const"}, {"enum"}):
+                    raise Unproved("unsupported scalar exclusion")
+                domain -= set(finite([child["const"]] if "const" in child else child["enum"]))
         if domain == set():
             raise Unproved("empty scalar upper bound")
         return next(iter(types)), domain
@@ -261,12 +295,281 @@ class SourceProof:
             finite([fixed["const"]] if "const" in fixed else fixed["enum"])
         return True
 
-    def preserves(self, before: dict, after: dict, depth: int = 0) -> bool:
+    def tag_values(self, node: dict, document: dict, field: str, depth: int = 0) -> set[str] | None:
         self.step(depth)
+        key = id(document), id(node), field, depth
+        if key in self.tag_domains:
+            return self.tag_domains[key]
+        parts = self.conjuncts(node, document, depth)
+        fields = [part["properties"][field] for part in parts if field in part.get("properties", {})]
+        values: set[str] | None = None
+        if fields:
+            augmented = [{"type": "string"}, *fields]
+            kind, domain = self.scalar_view(augmented, document)
+            if kind != "string" or domain is None or any(kind != "str" or not value for kind, value in domain):
+                raise Unproved("unbounded or non-string tag")
+            values = {value for _, value in domain}
+        for part in parts:
+            for keyword in ("oneOf", "anyOf"):
+                if keyword not in part:
+                    continue
+                children = [self.tag_values(child, document, field, depth + 1) for child in part[keyword]]
+                if any(child is None for child in children):
+                    raise Unproved("unbound object union")
+                union = set().union(*children)
+                values = union if values is None else values & union
+        self.tag_domains[key] = values
+        return values
+
+    def tag_condition(self, node: dict, field: str, tag: str) -> bool | None:
+        if set(node) != {"properties", "required"} or node["required"] != [field] or \
+                set(node["properties"]) != {field}:
+            return None
+        predicate = node["properties"][field]
+        negate = set(predicate) == {"not"}
+        if negate:
+            predicate = predicate["not"]
+        if set(predicate) not in ({"const"}, {"enum"}):
+            return None
+        members = finite([predicate["const"]] if "const" in predicate else predicate["enum"])
+        if any(kind != "str" or not value for kind, value in members):
+            raise Unproved("non-string tag predicate")
+        result = ("str", tag) in members
+        return not result if negate else result
+
+    def tag_frame(self, node: dict, document: dict, field: str, tag: str, depth: int = 0) -> dict | None:
+        """Retain every reachable assertion; only a known required discriminator selects a branch."""
+        self.step(depth)
+        key = id(document), id(node), field, tag, depth
+        if key in self.tag_frames:
+            return self.tag_frames[key]
+        values = self.tag_values(node, document, field, depth)
+        if values is not None and tag not in values:
+            self.tag_frames[key] = None
+            return None
+        frame = {"required": set(), "forbidden": set(), "closed": None, "properties": {},
+                 "opaque": [], "unions": [], "references": []}
+
+        def collect(value: dict, level: int) -> None:
+            self.step(level)
+            if "$ref" in value:
+                frame["references"].append(value["$ref"])
+                collect(self.reference(document, value["$ref"]), level + 1)
+            frame["required"].update(value.get("required", []))
+            if value.get("additionalProperties") is False:
+                names = set(value.get("properties", {}))
+                frame["closed"] = names if frame["closed"] is None else frame["closed"] & names
+            for name, child in value.get("properties", {}).items():
+                frame["properties"].setdefault(name, []).append(child)
+            for child in value.get("allOf", []):
+                collect(child, level + 1)
+            if "if" in value:
+                selected = self.tag_condition(value["if"], field, tag)
+                if selected is None:
+                    frame["opaque"].append({key: value[key] for key in ("if", "then", "else") if key in value})
+                else:
+                    collect(value.get("then" if selected else "else", {}), level + 1)
+            if "not" in value:
+                excluded = value["not"]
+                terms = excluded.get("anyOf", []) if set(excluded) == {"anyOf"} else [excluded]
+                if not terms or any(set(term) != {"required"} or len(term["required"]) != 1 for term in terms):
+                    raise Unproved("unsupported object exclusion")
+                frame["forbidden"].update(term["required"][0] for term in terms)
+            for keyword in ("oneOf", "anyOf"):
+                if keyword in value:
+                    frame["unions"].append((keyword, value[keyword]))
+            stable = {key: item for key, item in value.items()
+                      if key not in ANNOTATIONS | {"$ref", "properties", "required", "additionalProperties",
+                                                  "allOf", "if", "then", "else", "not", "oneOf", "anyOf"}}
+            if stable:
+                frame["opaque"].append(stable)
+
+        collect(node, depth)
+        if frame["required"] & frame["forbidden"] or \
+                (frame["closed"] is not None and not frame["required"] <= frame["closed"]):
+            self.tag_frames[key] = None
+            return None
+        self.tag_frames[key] = frame
+        return frame
+
+    def frames_preserve(self, before: dict | None, after: dict | None, field: str, tag: str,
+                        response: bool, depth: int, *, partial: bool = False) -> bool:
+        self.step(depth)
+        source, target = (after, before) if response else (before, after)
+        if source is None:
+            return True
+        if partial and before is not None and after is not None and \
+                set(before["properties"]) != set(after["properties"]):
+            return False
+        if target is None or before["references"] != after["references"] or \
+                len(before["opaque"]) != len(after["opaque"]) or any(
+                    not self.same(left, right) for left, right in zip(before["opaque"], after["opaque"])):
+            return False
+        if not target["required"] <= source["required"]:
+            return False
+        allowed_source, allowed_target = source["closed"], target["closed"]
+        if partial and allowed_source is None and allowed_target is None:
+            if set(source["properties"]) != set(target["properties"]):
+                return False
+            allowed_source = set(source["properties"])
+            allowed_target = set(target["properties"])
+        elif allowed_source is None or allowed_target is None:
+            raise Unproved("open tagged object")
+        allowed_source -= source["forbidden"]
+        allowed_target -= target["forbidden"]
+        if target["forbidden"] & allowed_source:
+            return False
+        if not allowed_source <= allowed_target:
+            return False
+        for name in allowed_source:
+            old = before["properties"].get(name, [])
+            new = after["properties"].get(name, [])
+            if name == field:
+                kind_old, values_old = self.scalar_view([{"type": "string"}, *old], self.base)
+                kind_new, values_new = self.scalar_view([{"type": "string"}, *new], self.revision)
+                if kind_old != kind_new or values_old is None or values_new is None or \
+                        ("str", tag) not in values_old or ("str", tag) not in values_new or \
+                        len(old) != len(new) or any(self.scalar_structure(left, self.base) !=
+                                                   self.scalar_structure(right, self.revision)
+                                                   for left, right in zip(old, new)):
+                    return False
+            else:
+                if len(old) != len(new):
+                    return False
+                if all(self.same(left, right) for left, right in zip(old, new)):
+                    continue
+                try:
+                    kind_old, values_old = self.scalar_view(old, self.base)
+                    kind_new, values_new = self.scalar_view(new, self.revision)
+                    scalar = kind_old == kind_new and all(
+                        self.scalar_structure(left, self.base) == self.scalar_structure(right, self.revision)
+                        for left, right in zip(old, new)) and (
+                            values_old is None and values_new is None or
+                            values_old is not None and values_new is not None and
+                            (values_new <= values_old if response else values_old <= values_new))
+                except Unproved:
+                    scalar = False
+                if not scalar and any(not self.preserves(left, right, depth + 1, response=response)
+                                      for left, right in zip(old, new)):
+                    return False
+        if len(before["unions"]) != len(after["unions"]):
+            return False
+        for (keyword, old), (other, new) in zip(before["unions"], after["unions"]):
+            if keyword != other or len(old) != len(new):
+                return False
+            for left, right in zip(old, new):
+                if left.get("$ref") != right.get("$ref") or not self.frames_preserve(
+                        self.tag_frame(left, self.base, field, tag, depth + 1),
+                        self.tag_frame(right, self.revision, field, tag, depth + 1),
+                        field, tag, response, depth + 1, partial=True):
+                    return False
+        return True
+
+    def tagged_preserves(self, before: dict, after: dict, response: bool, depth: int) -> bool:
+        old_parts, new_parts = self.conjuncts(before, self.base), self.conjuncts(after, self.revision)
+        old_required = set().union(*(set(part.get("required", [])) for part in old_parts))
+        new_required = set().union(*(set(part.get("required", [])) for part in new_parts))
+        old_names = set().union(*(set(part.get("properties", {})) for part in old_parts))
+        new_names = set().union(*(set(part.get("properties", {})) for part in new_parts))
+        if new_names - old_names - (after.get("properties", {}).keys() - before.get("properties", {}).keys()) and \
+                not self.has_addition(before, after):
+            return False
+        if {identity(part["type"]) for part in old_parts if "type" in part} != {'"object"'} or \
+                {identity(part["type"]) for part in new_parts if "type" in part} != {'"object"'}:
+            return False
+
+        prefix, revised = before.get("allOf", []), after.get("allOf", [])
+        if len(revised) > len(prefix):
+            old_names = set(before.get("properties", {}))
+            new_names = set(after.get("properties", {})) - old_names
+            for branch in revised[len(prefix):]:
+                if set(branch) - {"if", "then", "else"} or "if" not in branch or "then" not in branch:
+                    return False
+                consequence = branch["then"]
+                if set(consequence) - {"properties", "required", "not"} or \
+                        not set(consequence.get("required", [])) <= new_names:
+                    return False
+                for name, constraint in consequence.get("properties", {}).items():
+                    if name in old_names and set(constraint) not in ({"const"}, {"enum"}):
+                        return False
+                if "else" in branch and set(branch["else"]) != {"not"}:
+                    return False
+                for value in (consequence.get("not"), branch.get("else", {}).get("not")):
+                    if value is not None:
+                        terms = value.get("anyOf", []) if set(value) == {"anyOf"} else [value]
+                        if not terms or any(set(term) != {"required"} or len(term["required"]) != 1 or
+                                            term["required"][0] not in new_names for term in terms):
+                            return False
+        for field in sorted(old_required & new_required):
+            self.step(depth)
+            try:
+                old = self.tag_values(before, self.base, field, depth)
+                new = self.tag_values(after, self.revision, field, depth)
+                if not old or not new:
+                    continue
+                source, target = (new, old) if response else (old, new)
+                if not source <= target:
+                    return False
+                used: set[str] = set()
+                for branch in revised[len(prefix):]:
+                    predicate = branch["if"]
+                    if set(predicate) != {"properties", "required"} or predicate["required"] != [field] or \
+                            set(predicate["properties"]) != {field}:
+                        raise Unproved("unbound appended tag guard")
+                    value = predicate["properties"][field]
+                    if set(value) in ({"const"}, {"enum"}):
+                        members = finite([value["const"]] if "const" in value else value["enum"])
+                        if any(kind != "str" or not tag for kind, tag in members):
+                            raise Unproved("non-string appended guard")
+                        tags = {tag for _, tag in members}
+                        if not tags <= new - old or used & tags:
+                            return False
+                        used.update(tags)
+                if all(self.frames_preserve(self.tag_frame(before, self.base, field, tag, depth),
+                                            self.tag_frame(after, self.revision, field, tag, depth),
+                                            field, tag, response, depth + 1) for tag in sorted(source)):
+                    return True
+            except Unproved:
+                continue
+        return False
+
+    def plain_preserves(self, before: dict, after: dict, response: bool, depth: int) -> bool:
+        old = self.conjuncts(before, self.base)
+        new = self.conjuncts(after, self.revision)
+        if any(set(part) & NEGATIVE_POSITIONS for part in old + new) or \
+                {identity(part["type"]) for part in old if "type" in part} != {'"object"'} or \
+                {identity(part["type"]) for part in new if "type" in part} != {'"object"'}:
+            return False
+        return self.frames_preserve(self.tag_frame(before, self.base, "", "", depth),
+                                    self.tag_frame(after, self.revision, "", "", depth),
+                                    "", "", response, depth + 1)
+
+    def preserves(self, before: dict, after: dict, depth: int = 0, *, response: bool = False) -> bool:
+        self.step(depth)
+        key = id(before), id(after), response
+        cached = self.relations.get(key)
+        if cached is not None:
+            self.closed_value(before, self.base, frozenset(), depth)
+            self.closed_value(after, self.revision, frozenset(), depth)
+            return cached[2]
+        result = self.preserves_uncached(before, after, depth, response=response)
+        self.relations[key] = before, after, result
+        return result
+
+    def preserves_uncached(self, before: dict, after: dict, depth: int = 0, *, response: bool = False) -> bool:
         if self.same(before, after):
             return True
         if before.get("$ref") != after.get("$ref"):
             return False
+        if "$ref" in before and not (set(before) | set(after)) - {"$ref", "description"}:
+            return self.preserves(self.reference(self.base, before["$ref"]),
+                                  self.reference(self.revision, after["$ref"]), depth + 1, response=response)
+        if identity(before) == identity(after):
+            try:
+                if self.schema_diff(before, after, depth + 1) == {}:
+                    return True
+            except Unproved:
+                pass
         try:
             old_type, old_domain = self.scalar_view([before], self.base)
             new_type, new_domain = self.scalar_view([after], self.revision)
@@ -276,11 +579,16 @@ class SourceProof:
             return old_type == new_type and self.scalar_structure(before, self.base) == \
                 self.scalar_structure(after, self.revision) and (
                     old_domain is None and new_domain is None or
-                    old_domain is not None and new_domain is not None and old_domain <= new_domain)
+                    old_domain is not None and new_domain is not None and
+                    (new_domain <= old_domain if response else old_domain <= new_domain))
+        if self.tagged_preserves(before, after, response, depth + 1):
+            return True
+        if self.plain_preserves(before, after, response, depth + 1):
+            return True
         if set(before) & NEGATIVE_POSITIONS or set(after) & NEGATIVE_POSITIONS:
             return False
         if "$ref" in before and not self.preserves(self.reference(self.base, before["$ref"]),
-                                                 self.reference(self.revision, after["$ref"]), depth + 1):
+                                                 self.reference(self.revision, after["$ref"]), depth + 1, response=response):
             return False
         stable = set(before) | set(after)
         stable -= {"$ref", "description", "properties", "items", "allOf"}
@@ -288,18 +596,20 @@ class SourceProof:
             return False
         old_properties, new_properties = before.get("properties", {}), after.get("properties", {})
         if set(old_properties) != set(new_properties) or any(
-                not self.preserves(child, new_properties[name], depth + 1) for name, child in old_properties.items()):
+                not self.preserves(child, new_properties[name], depth + 1, response=response) for name, child in old_properties.items()):
             return False
         if ("items" in before) != ("items" in after) or \
-                ("items" in before and not self.preserves(before["items"], after["items"], depth + 1)):
+                ("items" in before and not self.preserves(before["items"], after["items"], depth + 1, response=response)):
             return False
         prefix, revised = before.get("allOf", []), after.get("allOf", [])
         if len(revised) < len(prefix) or any(identity(member) != identity(revised[index]) or
-                not self.preserves(member, revised[index], depth + 1) for index, member in enumerate(prefix)):
+                not self.preserves(member, revised[index], depth + 1, response=response) for index, member in enumerate(prefix)):
             return False
         used: set[str] = set()
         discriminator = None
         for member in revised[len(prefix):]:
+            if response:
+                return False
             if not self.new_guard(member, before, after):
                 return False
             field, predicate = next(iter(member["if"]["properties"].items()))
@@ -340,27 +650,51 @@ class SourceProof:
     def schema_diff(self, before: dict, after: dict, depth: int = 0) -> dict:
         """Reconstruct only the complete supported oasdiff record, never trust its summary."""
         self.step(depth)
+        key = id(before), id(after)
+        cached = self.diffs.get(key)
+        if cached is not None:
+            self.closed_value(before, self.base, frozenset(), depth)
+            self.closed_value(after, self.revision, frozenset(), depth)
+            return cached[2]
+        result = self.schema_diff_uncached(before, after, depth)
+        self.diffs[key] = before, after, result
+        return result
+
+    def schema_diff_uncached(self, before: dict, after: dict, depth: int = 0) -> dict:
+        if before.get("$ref") != after.get("$ref"):
+            raise Unproved("changed reference identity")
         before, after = self.effective(before, self.base), self.effective(after, self.revision)
         result = {}
         for key in set(before) | set(after):
             left, right = before.get(key), after.get(key)
             if key == "properties":
-                if not isinstance(left, dict) or not isinstance(right, dict) or set(left) != set(right):
+                if not isinstance(left, dict) or not isinstance(right, dict):
                     raise Unproved("changed property envelope")
-                children = {name: self.schema_diff(value, right[name], depth + 1) for name, value in left.items()}
+                children = {name: self.schema_diff(left[name], right[name], depth + 1)
+                            for name in left.keys() & right.keys()}
                 changed = {name: value for name, value in children.items() if value}
+                record = {}
+                if right.keys() - left.keys():
+                    record["added"] = sorted(right.keys() - left.keys())
+                if left.keys() - right.keys():
+                    record["deleted"] = sorted(left.keys() - right.keys())
                 if changed:
-                    result[key] = {"modified": changed}
+                    record["modified"] = changed
+                if record:
+                    result[key] = record
             elif key == "items":
                 if not isinstance(left, dict) or not isinstance(right, dict):
                     raise Unproved("changed item envelope")
                 child = self.schema_diff(left, right, depth + 1)
                 if child:
                     result[key] = child
-            elif key == "allOf":
+            elif key in ("allOf", "oneOf", "anyOf"):
                 left, right = left or [], right or []
-                if len(right) < len(left):
+                if len(right) < len(left) or (key != "allOf" and len(left) != len(right)):
                     raise Unproved("removed conjunction")
+                if key != "allOf" and any(identity(member) != identity(right[index])
+                                          for index, member in enumerate(left)):
+                    raise Unproved("changed union member identity")
                 change = {}
                 modified = []
                 for index, member in enumerate(left):
@@ -423,7 +757,8 @@ class SourceProof:
             for child in node:
                 self.component_references(child, document, names, visited, depth + 1)
 
-    def component_records(self, before: dict, after: dict, changes: dict) -> bool:
+    def component_records(self, before: dict, after: dict, changes: dict, *,
+                          audited: bool = False, use_site_proved: bool = False) -> bool:
         """Bind changed reference dependencies as well as their expanded use-site records."""
         try:
             names: set[str] = set()
@@ -436,10 +771,13 @@ class SourceProof:
                     return False
                 if self.same(left, right):
                     continue
-                self.audit(left, self.base)
-                self.audit(right, self.revision)
-                if not self.preserves(left, right) or not self.record_equal(
-                        self.schema_diff(left, right), changes.get(name)):
+                if not audited:
+                    self.audit(left, self.base)
+                    self.audit(right, self.revision)
+                expected = self.schema_diff(left, right)
+                if (not use_site_proved and not self.preserves(left, right)) or \
+                        (expected and not self.record_equal(expected, changes.get(name))) or \
+                        (not expected and name in changes and not self.record_equal(expected, changes[name])):
                     return False
             return True
         except Unproved:
@@ -448,19 +786,20 @@ class SourceProof:
     def schema(self, before: dict, after: dict, change: object, changes: dict) -> bool:
         try:
             self.work = 0
-            self.closed.clear()
+            self.clear()
             self.documents()
             self.audit(before, self.base)
             self.audit(after, self.revision)
             return self.preserves(before, after) and self.record_equal(self.schema_diff(before, after), change) and \
-                self.component_records(before, after, changes)
+                self.component_records(before, after, changes, audited=True, use_site_proved=True)
         except Unproved:
             return False
 
-    def response(self, before: dict, after: dict, change: object, changes: dict) -> bool:
+    def response(self, before: dict, after: dict, change: object, changes: dict, *,
+                 producer: bool = True) -> bool:
         try:
             self.work = 0
-            self.closed.clear()
+            self.clear()
             self.documents()
             if before.get("$ref") != after.get("$ref"):
                 return False
@@ -481,14 +820,16 @@ class SourceProof:
                     return False
                 self.audit(entry["schema"], self.base)
                 self.audit(other["schema"], self.revision)
-                if not self.preserves(entry["schema"], other["schema"]):
+                if not self.preserves(entry["schema"], other["schema"], response=producer):
                     return False
-                if not self.component_records(entry["schema"], other["schema"], changes):
+                if not self.component_records(entry["schema"], other["schema"], changes,
+                                              audited=True, use_site_proved=True):
                     return False
                 child = self.schema_diff(entry["schema"], other["schema"])
                 if child:
                     modified[media] = {"schema": child}
-            return bool(modified) and self.record_equal({"content": {"modified": modified}}, change)
+            expected = {"content": {"modified": modified}} if modified else {}
+            return self.record_equal(expected, change)
         except Unproved:
             return False
 
@@ -516,6 +857,7 @@ class SourceProof:
     def candidate(self, before: dict, after: dict) -> bool:
         try:
             self.work = 0
+            self.clear()
             return self.has_addition(before, after)
         except Unproved:
             return True

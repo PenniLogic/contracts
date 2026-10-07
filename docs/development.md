@@ -26,6 +26,12 @@ Their source authority, safe diagnostics, group version, replay/override rules, 
 entry points and remaining rollout obligations are in [provider-contracts.md](provider-contracts.md).
 The accepted scaffold components themselves are unchanged.
 
+The local `0.4.0` [core contract](core-contract.md) adds original contracts#1's four endpoint
+groups after the accepted provider/performance source. All three client targets are mandatory.
+The original #16 catalogue is `1.2.0`; contextual authentication errors are isolated from
+unchanged legacy/custom-destination response shapes. It remains source preparation, not
+server adoption, a released client or Infra #22 qualification.
+
 ## Layout
 
 | Path | Owner / purpose |
@@ -33,6 +39,7 @@ The accepted scaffold components themselves are unchanged.
 | `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is a source candidate until the owner publishes the matching `vX.Y.Z` tag. |
 | `spec/currency-registry.v1.json` | ISO 4217 codes and minor-unit exponents accepted by the codecs (ADR-015 §1.4); rendered into every client. |
 | `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json`, `spec/import-group.v1.json` | Proposed provider diagnostics/retry/key policy, accepted taxonomy 1.1.0 identifier projection and new T-CON-10 import/dedup group policy. Copied/hash-bound into each client and prepared as standalone release assets. |
+| `spec/category-seed.v1.json` | Exact accepted API `fd58da67` category bytes; SYSTEM key, icon/colour and localized defaults derive from this one companion, copied/hash-bound into all three clients and release assets. |
 | `spec/fixtures/*.json` | Money and instant wire vectors (hand-written) and `money-roundtrip-generated.v1.json` (10 000 seeded values + boundaries, regenerated deterministically by `scripts/generate_money_fixtures.py`), consumed unchanged by all three smoke consumers (ADR-015 §7). Synthetic values only. |
 | `spec/.spectral.yaml`, `spec/spectral-functions/` | Committed lint ruleset and its custom functions. |
 | `spec/adr022/` | Byte-identical accepted consequence and closed-schema inputs; provenance and immutable digests are documented in custom-destinations.md. |
@@ -153,6 +160,30 @@ registry as source, and writes `contracts-manifest.json` (specification version 
 generator name/version/jar SHA-256, config/runtime/template hashes, per-file and tree SHA-256).
 Outputs live in `build/generated/<language>/`.
 
+### Core null, temporal query and success adapters
+
+Declared null is supported on scalar/null pairs, scalar reference aliases, arrays/items and
+literal-null assertions. The full compiled declaration remains authoritative; generator-only
+projections never relax the wire guard. Required null cannot be omitted, while optional absent/
+null/value remain distinct. Kotlin optional-null fields use `ProviderPresence`; Python retains
+explicit `model_fields_set` nulls and TypeScript omits undefined without dropping null.
+Ambiguous unions, nullable object references and unsupported alias refinements fail before output
+promotion. No global JSON/legacy DTO or Money configuration is relaxed.
+
+Distinct declared 2xx body/empty cases use generated status-discriminated HTTP carriers and
+exact branch validators. This fixes the actual 201/202 decoder, not the wire envelope; malformed
+body/media, unexpected success status and nonempty declared empty bodies refuse. TypeScript's
+Fetch platform itself forbids constructing a nonempty 204 response. Native synthetic consumers
+exercise the real generator, compilers and normal transport paths, not a replacement runtime.
+Temporal query templates call the existing Instant/LocalDate seams. Bootstrap proof auth settings
+cannot replace the required per-call DPoP argument with configured static proof.
+
+API overrides are pinned-stock plus exact anchored edits in the template drift tests; unchanged
+single-success APIs and Kotlin field fallback remain covered. Never modify generated files.
+The versioned component history is `x-contract-changelog` in the source document, and the exact
+ADR-019 mirror is `AuthenticationParameters.x-adr-019-auth-parameters`; neither is a runtime issuer
+configuration or a published version.
+
 | Language | Money | Instant / dates | Client wiring |
 | --- | --- | --- | --- |
 | Kotlin (`jvm-ktor`, kotlinx.serialization) | `com.pennilogic.contracts.money.Money` (`Long` minor units + currency, `@Serializable(with = MoneySerializer)`), mapped for every `$ref: Money`; the raw `Money.kt` model is not generated and the internal `MoneyWire` shape is not serializable — the only serializable money type is `Money`. | Generated models type instants as `@Contextual java.time.OffsetDateTime` and dates as `@Contextual java.time.LocalDate` (the Kotlin generator's `dateLibrary` overrides CLI type mappings); `InstantSerializer`/`LocalDateSerializer` enforce the grammar, calendar validity and offset Z; `InstantCodec` converts to and from `java.time.Instant`. | The generated `ApiClient` installs `json(PennilogicJson.json)` as its `ContentNegotiation` converter (template override) and the generated `build.gradle` carries `ktor-serialization-kotlinx-json`; `PennilogicJson.json` registers `PennilogicSerializers.module` and `ignoreUnknownKeys` (additive evolution). A consumer that builds its own `Json` must use `PennilogicJson.json` or its module; `smoke/kotlin/.../GeneratedClientWiringTest.kt` round-trips `Money` + instant + date through the generated client with a `MockEngine`. |
@@ -179,7 +210,8 @@ wire format nor ledger admission: registry acceptance of JPY/KWD does not admit 
 
 ### Generator templates
 
-Twelve templates/partials are overridden; stock portions remain bound to the pinned generator:
+The model/API/transport templates and finite partials are overridden; stock portions remain
+bound to the pinned generator:
 
 - `generator/templates/python/api.mustache`, `api_client.mustache`, `rest.mustache`: precise
   parameter/body/return types, actual typed Pydantic `ApiResponse` validation and urllib3's real
@@ -221,9 +253,57 @@ Twelve templates/partials are overridden; stock portions remain bound to the pin
   before invoking a required child writer; required references and explicit null remain guarded.
   Declared undefined optional output members are omitted after native-field validation and before
   validating the emitted object, so closed union branches see actual JSON rather than phantom keys.
+  Public writers now declare `ModelWire` output and domain input, not the stock's false domain
+  return/`any` implementation. Exact field-metadata partials recursively type and convert the
+  wire keys, Money/time seams and arrays/sets/references. The finite `wireSerialization.ts`
+  helpers narrow actual codec output and omit only statically optional undefined members;
+  no output assertion equates domain wrappers with plain wire data.
 - `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
   for marked models, including model-valued array items. Array indices must be present and their
-  values non-null/non-undefined before conversion; property omission is not array-item omission.
+  values non-undefined and non-null unless the source declares null; property omission is not
+  array-item omission.
+- The Kotlin required/optional property partials, TypeScript interface partial and each target's
+  `provider_type.mustache` preserve source-declared nullable enum references without forking
+  their shared enum. Source-derived metadata selects only homogeneous array chains ending in a
+  declared nullable enum; TypeScript's finite enum read/write partials preserve nested arrays/sets.
+  Python uses a required union or optional default with explicit-null presence retained.
+- The three API templates and Python success-return partial bind distinct declared success statuses
+  without changing their wire bodies; TypeScript's query partial uses the canonical time seams.
+
+`scripts/tests/test_typescript_wire.py` compiles real generated public consumers with strict
+settings and no casts/suppressions, executes actual Money-wire counterexamples/roundtrips,
+and checks every paired negative diagnostic. It covers normal/typed/nested/collection/null/
+optional writers, generic read-only response members and refusal of unbound/request-owned
+read-only models. `ModelToJSON` no longer permits a false domain assignment; reconstruct with
+`ModelFromJSON` when domain behavior is needed. This is an explicit TypeScript source-compatibility
+correction, not a blanket unchanged-ABI or migrated-consumer claim.
+
+Marked response models with locally declared `readOnly` fields require a bounded complete-source
+usage proof that they are response-only. Their serializers retain the received projection,
+including required null, while write DTOs remain separate closed schemas. Unsupported annotation
+placements and unbound/mixed request usage fail before output promotion. Transaction projection
+omission remains supported; explicit null is not normalized into absence.
+
+`spec/spectral-functions/_schemaUsage.js` is shared by that compiler proof and the core lint
+guard. Its physical schema-edge inventory is extracted from the accepted custom-destination
+guard, which reuses it without changing its enum-copy findings. Evaluated object/map/dependent
+schemas, applicators, proper local references, callbacks/webhooks, Path Items, parameters/media
+and encoding headers remain separate from `example`/`default`/`enum`/extension data. Unknown or
+unproved layouts cannot receive a response-only exemption. The existing 16,384-node/64-depth
+bounds and explicit cycle/refusal behavior remain, including cached-reference height checks.
+Unreferenced `$defs` declarations are not applications; referenced schema definitions are inspected.
+
+`scripts/tests/test_schema_usage.py` covers real full-YAML source lint and all-target refusal
+before promotion, same-model direct/map/callback/webhook controls, genuine annotations and
+response-only positives, and cast-free generated mock transports. Its paired Node matrix also
+checks context/ref/budget adversaries and exact prior physical-container traversal. These controls
+do not authorize an arbitrary request model, a backend write, or new callback product scope.
+
+`scripts/tests/test_core_cli_guards.py` uses full valid YAML and the real lint/generation CLIs,
+not a partial JSON/version failure or function-only stand-in. It checks distinct shared 202
+financial decisions and legitimate object-key reorderings alongside semantic/array/type/extra-field/
+pin negatives. The strict structural comparator is existing accepted custom-destination prior art;
+exact category seed bytes and ordered vocabularies are not reformatted or weakened.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other
@@ -233,6 +313,15 @@ on the new stock template and update the test.
 The TypeScript target also uses its committed template directory. Manual source edits use LF
 as required by `.gitattributes`; in particular templates must not acquire CRLF fragments that
 would change generated bytes between Windows and Linux. The runtime copy already normalizes LF.
+The template drift suite checks actual raw LF bytes before native generation, not only
+newline-normalized text comparisons. Goldens must be generated from those committed LF inputs.
+
+Source-test performance preserves the complete method/assertion graph. The two Python seam
+checks share one freshly generated, immutable class fixture; both source and native assertions
+still run. The 29 legacy missing-binding CLI cases use at most two subprocesses, each with its
+own source directory, exact companions and separate output/receipt logs. No global unittest
+parallelism is used, and the accepted Node helper's concurrency-two/combined-one-MiB behavior
+is unchanged. Local profiling and reductions do not qualify the actual hosted under-600 gates.
 
 ### Provider conformance
 
@@ -293,7 +382,7 @@ flattens into extra required fields or scalar enums. The full original constrain
 first and remain the runtime authority. `generation_model_projection` binds the effective input,
 selected models and retained constraint digest; no source field or runtime guard is dropped.
 
-The supported subset is explicit: objects/arrays/strings/integers/booleans; local acyclic schema
+The supported subset is explicit: objects/arrays/strings/integers/booleans/null; local acyclic schema
 references; string enums and scalar constants; anchored portable ASCII regular expressions;
 code-point string lengths; inclusive/exclusive safe-integer bounds; nested min/max/unique item
 rules (including zero upper bounds); required/closed members and allOf/anyOf/oneOf/not/conditional
@@ -303,7 +392,11 @@ references receive ASCII/escape/parser checks, not an arbitrary format or IRI ce
 Enum/constant predicates may constrain integer/boolean fields without introducing a new scalar
 enum serializer. Referencing an unmarked legacy DTO does not make that DTO globally strict.
 
-Generation fails explicitly for unknown keywords, untyped value/items, floating-number or nullable
+Explicit null, scalar-plus-null pairs, nullable scalar references and array/item nullability are
+declaration-driven. Required null cannot be omitted; optional null is not absence. Nullable
+object unions and unions with multiple non-null types remain unsupported.
+
+Generation fails explicitly for unknown keywords, untyped value/items, floating-number or unsupported
 union schemas, tuple/contains/map-schema features, external/unresolved/cyclic references,
 nonportable patterns, unsupported formats/defaults/scalar-enum representations, malformed
 metadata or contradictory/unrepresentable bounds. No unsupported declaration is silently treated
@@ -372,7 +465,12 @@ mismatch is unintended.
 Every generation builds in a fresh owned sibling staging directory, including runtime,
 companions and the complete manifest. One requested target set is promoted only after every
 target succeeds; downstream generator/companion failures leave previous caller output intact
-and discard staging. Verification double-generates and compares before promoting any client;
+and discard staging after joining every worker. Independent target staging uses at most two workers.
+Checked provider declarations may be shared only inside one generation batch after rehashing
+the exact source, companions, compiler dependencies and pins; each target gets an independent
+copy. Changed inputs recompile, failures are never cached, and no generated outcome is reused.
+The two determinism batches have separate declaration scopes and fresh native generations.
+Verification double-generates and compares before promoting any client;
 golden updates are committed together with that verified client set, never on a failed run.
 Promotion errors restore prior directories/files. If filesystem restoration itself fails or
 receives a catchable `KeyboardInterrupt`, including during rollback cleanup,

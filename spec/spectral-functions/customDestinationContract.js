@@ -3,6 +3,7 @@ const { isDeepStrictEqual } = require("node:util");
 const { schema: validateSchema } = require("@stoplight/spectral-functions");
 const { SOURCE, loadSource } = require("./_customDestinationSource");
 const { HTTP_METHODS } = require("./_shared");
+const { schemaChildren } = require("./_schemaUsage");
 
 module.exports = function customDestinationContract(document, _options, context) {
   const results = [];
@@ -39,17 +40,7 @@ module.exports = function customDestinationContract(document, _options, context)
         }
       }
     }
-    // Map keys are schema names; enum/const/example/default values are data, not schemas.
-    for (const key of ["properties", "patternProperties", "dependentSchemas", "$defs"]) {
-      entries(value[key], [...at, key], enums);
-    }
-    for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
-      if (Array.isArray(value[key])) entries(value[key], [...at, key], enums);
-    }
-    for (const key of ["items", "additionalProperties", "unevaluatedProperties", "unevaluatedItems",
-      "contains", "propertyNames", "not", "if", "then", "else", "contentSchema"]) {
-      enums(value[key], [...at, key]);
-    }
+    for (const child of schemaChildren(value, at)) enums(child.value, child.path);
   }
   function headers(value, at) {
     entries(value, at, message);

@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased initial core contract 0.4.0
+
+- Correct the c440 response-only usage-proof gap: one bounded context-aware walker now covers
+  schema-valued map/dependent/application edges, proper local references and callback/webhook/
+  Path Item request roles before metadata or output promotion. The owning core guard uses the
+  same traversal; genuine annotations/literals and response-only positives stay distinct.
+  Preserve the existing node/depth/ref bounds, earlier false-admission/native evidence and all
+  M1/F2/Q1 corrections. No product callback feature, backend exploit or new-head approval is claimed.
+- Remediate measured graph work without reducing tests: share checked declarations only within
+  one exact-input batch, retain independent fresh determinism batches, stage independent targets
+  with at most two workers, and share the freshly generated Python seam fixture. Isolate all
+  29 legacy strict-binding CLI cases before bounded concurrency two. Preserve actual c440's
+  908-job/912-whole functional-success/timing-failure record and the unchanged hosted600 gates.
+- Correct the independently reproduced public TypeScript writer defect: generated `ModelToJSON`
+  and `ModelToJSONTyped` return a distinct recursive wire type rather than falsely promising a
+  domain `Money` wrapper. Preserve canonical codecs/wire values; validate strict portable consumers
+  and paired compile-negative domain/wire assignments. This necessary typing correction may
+  reject consumers that relied on the old false return or untyped writer input.
+- Declare ADR-016's transaction/categorisation projections read-only and preserve transaction
+  omission versus explicit null. Generic response-only metadata retains response fields on
+  serialization without adding them to write payloads or making the transaction field mandatory.
+- Bind financial duplicate-screen decisions to the shared distinct 202 response at the actual
+  whole-source lint gate. Use strict structural metadata equality instead of object insertion
+  order, retaining array/type/value/extra-field/pin and exact category-byte guards. Preserve all
+  original 89224d4/1f2abdf evidence, reviewer findings and failed author correction attempts.
+- Add original contracts#1's authentication, accounts, transactions and categories, including
+  mutations, canonical Money and both transaction instants, closed synthetic request fixtures,
+  bounded cursors/filters/stable sorts and declared financial P30D/P14D idempotency.
+- Reuse accepted ADR-019 DPoP/session/recovery and Root's exact `step-up-request@1` binding.
+  Mirror the complete accepted authentication parameters; retain unbound owner inputs.
+  Keep mature-passkey and one-shot recovering-device credential grants separate.
+- Extend the original #16 catalogue to `1.2.0` with the six contextual authentication codes.
+  Isolate them in the canonical `AuthenticationContextProblemDetail` family and new core
+  responses; preserve the actual legacy authentication/custom-destination wire domains.
+- Generate Kotlin, TypeScript and Python through the pinned generator, with declaration-driven
+  null/presence handling, canonical temporal query seams and typed distinct success statuses.
+  SDK carriers do not change the resource/dedup wire bodies. No issuer, verifier or retry signer
+  is implemented by these contracts.
+- Record exact component changes in the versioned OpenAPI `x-contract-changelog`, separate
+  from this prose. Declare deprecation/sunset headers and immutable version re-pinning.
+- Copy the exact protected-accepted API `fd58da679672a4de7aabee2562644bed3799e614`
+  `category-seed.v1.json` bytes; derive the shared key/icon/colour enums and typed immutable
+  localized defaults in all three clients, with explicit en-IN fallback. Bind the source
+  SHA256/size/Git blob and publication companions; do not implement seed materialisation.
+- Preserve the complete accepted source-test scheduling/raw-byte/error/cleanup controls from
+  `2c4a1f1545599949f1a6ac1e061c7219fb841c8e`, all earlier failures and every retained corpus.
+  Bounded source proofs check request/response variance, actual reachable legacy domains and
+  exact diff/reference records without an acknowledgement or increased proof budget.
+
+LOCAL PREPARATION ONLY: no release/artifact publication, backend real-response acceptance,
+consumer rollout, independent review, protected integration or original #1/Infra #22 closure
+is asserted. Local corrections are not fresh independent approval or hosted-budget qualification.
+Category source acceptance is not API9 runtime completion or released client
+publication. See [the core contract](docs/core-contract.md).
+
 ## Unreleased pipeline timing correction
 
 - Correct the initial `8d3e199` asynchronous helper's separate per-stream buffer allowance.

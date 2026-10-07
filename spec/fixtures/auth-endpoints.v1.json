@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "owner": "PenniLogic/contracts#1",
+  "evidence_scope": "SYNTHETIC_WIRE_ONLY_NOT_CRYPTOGRAPHIC_OR_RUNTIME_PROOF",
+  "payloads": {
+    "enrollment_accepted": {"enrollment_id": "00000000-0000-7000-8000-000000000021", "expires_at": "2026-10-01T00:00:00.000Z"},
+    "enrollment_verified": {"enrollment_id": "00000000-0000-7000-8000-000000000021", "registration_grant": "synthetic_registration_grant", "expires_at": "2026-10-01T00:00:00.000Z"},
+    "registration_grant": {"registration_grant": "synthetic_registration_grant", "expires_at": "2026-10-01T00:00:00.000Z"},
+    "device_challenge": {"challenge_id": "00000000-0000-7000-8000-000000000021", "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-01T00:00:00.000Z"},
+    "creation_options": {
+      "ceremony_id": "00000000-0000-7000-8000-000000000021", "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "rp": {"id": "pennilogic.example", "name": "PenniLogic"},
+      "user": {"id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "name": "synthetic@example.invalid", "displayName": "Synthetic profile"},
+      "pubKeyCredParams": [{"type": "public-key", "alg": -7}, {"type": "public-key", "alg": -8}, {"type": "public-key", "alg": -257}],
+      "authenticatorSelection": {"residentKey": "required", "userVerification": "required"},
+      "attestation": "none", "timeout": 300000,
+      "excludeCredentials": [{"type": "public-key", "id": "c3ludGhldGlj", "transports": ["internal"]}],
+      "extensions": {"credProps": true}
+    },
+    "assertion_options": {"ceremony_id": "00000000-0000-7000-8000-000000000021", "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "rpId": "pennilogic.example", "timeout": 300000, "userVerification": "required"},
+    "credential": {"credential_id": "00000000-0000-7000-8000-000000000021", "name": "Synthetic passkey", "created_at": "2026-10-01T00:00:00.000Z", "backup_eligible": false, "backed_up": false, "clone_suspected": false},
+    "credential_list": {"credentials": []},
+    "session": {"session_id": "00000000-0000-7000-8000-000000000022", "device_id": "00000000-0000-7000-8000-000000000023", "created_at": "2026-10-01T00:00:00.000Z", "is_current": true},
+    "session_list": {"sessions": []},
+    "device": {"device_id": "00000000-0000-7000-8000-000000000023", "name": "Synthetic device", "platform": "android", "trust": "unattested", "attestation": "none", "created_at": "2026-10-01T00:00:00.000Z"},
+    "device_list": {"devices": []},
+    "channel": {"channel_id": "00000000-0000-7000-8000-000000000025", "type": "email", "verified": false, "suspect": false},
+    "channel_list": {"channels": []},
+    "code_count": {"unused_count": 10},
+    "code_set": {"codes": ["0-ABCDE-FGHJ", "1-ABCDE-FGHJ", "2-ABCDE-FGHJ", "3-ABCDE-FGHJ", "4-ABCDE-FGHJ", "5-ABCDE-FGHJ", "6-ABCDE-FGHJ", "7-ABCDE-FGHJ", "8-ABCDE-FGHJ", "9-ABCDE-FGHJ"]},
+    "recovery_accepted": {"recovery_id": "00000000-0000-7000-8000-000000000024", "state": "unproven"},
+    "step_up_grant": {"step_up_token": "synthetic_step_up_grant", "expires_at": "2026-10-01T00:00:00.000Z"},
+    "session_error": {"type": "urn:pennilogic:problem:session_revoked", "title": "Session ended", "status": 401, "detail": "Authenticate again to continue.", "code": "session_revoked", "correlation_id": "cor_00000000-0000-4000-8000-000000000001", "revocation_reason": "signout"},
+    "validation_error": {"type": "urn:pennilogic:problem:validation_rejected", "title": "Validation rejected", "status": 422, "detail": "Review the indicated field.", "code": "validation_rejected", "correlation_id": "cor_00000000-0000-4000-8000-000000000001", "field": "amount", "reason": "scale_mismatch", "validation_errors": [{"field": "amount", "reason": "scale_mismatch"}]},
+    "recovery_completion": {
+      "tokens": {"access_token": "synthetic.access.signature", "token_type": "DPoP", "expires_in": 900, "session_id": "00000000-0000-7000-8000-000000000022", "device_id": "00000000-0000-7000-8000-000000000023", "trust": "recovering"},
+      "recovery": {"recovery_id": "00000000-0000-7000-8000-000000000024", "state": "restricted_after_recovery", "recovery_proof": "synthetic_restricted_recovery_instrument", "restricted_until": "2026-10-02T00:00:00.000Z", "not_me_until": "2026-10-02T00:00:00.000Z"}
+    },
+    "enrollment": {"email": "synthetic@example.invalid", "display_name": "Synthetic profile", "time_zone": "Asia/Kolkata", "eligibility_receipt": "synthetic_verified_receipt"},
+    "channel_proof": {"code": "123456"},
+    "registration_options": {"registration_grant": "synthetic_registration_grant"},
+    "device_input": {
+      "platform": "android", "name": "Synthetic device",
+      "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+    },
+    "registration_result": {
+      "ceremony_id": "00000000-0000-7000-8000-000000000021",
+      "id": "c3ludGhldGlj", "rawId": "c3ludGhldGlj", "type": "public-key",
+      "response": {"clientDataJSON": "c3ludGhldGlj", "attestationObject": "c3ludGhldGlj"},
+      "name": "Synthetic passkey",
+      "device": {"platform": "android", "name": "Synthetic device", "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}
+    },
+    "authentication_options": {"mediation": "conditional"},
+    "assertion_result": {
+      "ceremony_id": "00000000-0000-7000-8000-000000000021",
+      "id": "c3ludGhldGlj", "rawId": "c3ludGhldGlj", "type": "public-key",
+      "response": {"clientDataJSON": "c3ludGhldGlj", "authenticatorData": "c3ludGhldGlj", "signature": "c3ludGhldGlj", "userHandle": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+      "device": {"platform": "android", "name": "Synthetic device", "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}
+    },
+    "refresh": {"grant_type": "refresh_token", "refresh_token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+    "browser_refresh": {"grant_type": "refresh_token"},
+    "profile": {"display_name": "Synthetic profile", "time_zone": "Asia/Kolkata"},
+    "credential_name": {"name": "Synthetic passkey"},
+    "device_registration": {
+      "challenge_id": "00000000-0000-7000-8000-000000000021",
+      "device": {"platform": "android", "name": "Synthetic device", "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}
+    },
+    "channel_input": {"type": "email", "value": "synthetic@example.invalid"},
+    "recovery_start": {"route": "recovery_code", "email": "synthetic@example.invalid"},
+    "recovery_verify": {"recovery_code": "0-ABCDE-FGHJ"},
+    "recovery_action": {"proof": "synthetic_recovery_instrument"},
+    "recovery_credential": {"proof": "synthetic_recovery_instrument", "name": "Synthetic recovery passkey"},
+    "step_up_intent": {
+      "version": "step-up-request@1", "operation": "renameCredential", "method": "PATCH",
+      "target": {"credentialId": "00000000-0000-7000-8000-000000000021"},
+      "body": {"name": "Synthetic passkey"}
+    },
+    "step_up_result": {
+      "ceremony_id": "00000000-0000-7000-8000-000000000021",
+      "response": {
+        "ceremony_id": "00000000-0000-7000-8000-000000000021",
+        "id": "c3ludGhldGlj", "rawId": "c3ludGhldGlj", "type": "public-key",
+        "response": {"clientDataJSON": "c3ludGhldGlj", "authenticatorData": "c3ludGhldGlj", "signature": "c3ludGhldGlj", "userHandle": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+        "device": {"platform": "android", "name": "Synthetic device", "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}
+      }
+    },
+    "tokens": {
+      "access_token": "synthetic.access.signature", "token_type": "DPoP", "expires_in": 900,
+      "session_id": "00000000-0000-7000-8000-000000000022", "device_id": "00000000-0000-7000-8000-000000000023",
+      "trust": "unattested"
+    },
+    "notification_pending": {
+      "recovery_id": "00000000-0000-7000-8000-000000000024",
+      "state": "notification_pending", "recovery_proof": "synthetic_recovery_instrument", "window_ends_at": null, "retry_after_seconds": 30
+    },
+    "cooling_off": {
+      "recovery_id": "00000000-0000-7000-8000-000000000024",
+      "state": "cooling_off", "recovery_proof": "synthetic_recovery_instrument", "window_ends_at": "2026-10-02T00:00:00.000Z"
+    }
+  },
+  "endpoints": [
+    {"operation_id": "startEnrollment", "method": "POST", "path": "/auth/enrollments", "valid": {"body_ref": "enrollment"}, "invalid": {"body_add": {"password": "SYNTHETIC_FORBIDDEN"}}, "rejection": "validation_rejected"},
+    {"operation_id": "verifyEnrollmentChannel", "method": "POST", "path": "/auth/enrollments/{enrollmentId}/verify", "valid": {"path_parameters": {"enrollmentId": "00000000-0000-7000-8000-000000000021"}, "body_ref": "channel_proof"}, "invalid": {"body_set": {"code": "12345"}}, "rejection": "validation_rejected"},
+    {"operation_id": "registrationOptions", "method": "POST", "path": "/auth/passkeys/registration/options", "valid": {"body_ref": "registration_options"}, "invalid": {"body_add": {"owner_id": "SYNTHETIC_FORBIDDEN"}}, "rejection": "validation_rejected"},
+    {"operation_id": "registrationResult", "method": "POST", "path": "/auth/passkeys/registration/result", "valid": {"body_ref": "registration_result"}, "invalid": {"body_add": {"trust": "trusted"}}, "rejection": "validation_rejected"},
+    {"operation_id": "authenticationOptions", "method": "POST", "path": "/auth/passkeys/authentication/options", "valid": {"body_ref": "authentication_options"}, "invalid": {"body_add": {"username": "SYNTHETIC_FORBIDDEN"}}, "rejection": "validation_rejected"},
+    {"operation_id": "authenticationResult", "method": "POST", "path": "/auth/passkeys/authentication/result", "valid": {"body_ref": "assertion_result"}, "invalid": {"body_add": {"sms_login": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "refreshSession", "method": "POST", "path": "/auth/token", "valid": {"body_ref": "refresh"}, "invalid": {"body_set": {"grant_type": "password"}}, "rejection": "validation_rejected"},
+    {"operation_id": "refreshBrowserSession", "method": "POST", "path": "/auth/token/browser", "valid": {"body_ref": "browser_refresh", "cookie": {"pennilogic_refresh": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}, "invalid": {"body_add": {"refresh_token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}, "rejection": "validation_rejected"},
+    {"operation_id": "getProfile", "method": "GET", "path": "/auth/profile", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "updateProfile", "method": "PUT", "path": "/auth/profile", "valid": {"body_ref": "profile"}, "invalid": {"body_set": {"time_zone": "+05:30"}}, "rejection": "validation_rejected"},
+    {"operation_id": "listCredentials", "method": "GET", "path": "/auth/credentials", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "addCredential", "method": "POST", "path": "/auth/credentials", "valid": {"body_ref": "credential_name"}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "renameCredential", "method": "PATCH", "path": "/auth/credentials/{credentialId}", "valid": {"path_parameters": {"credentialId": "00000000-0000-7000-8000-000000000021"}, "body_ref": "credential_name"}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "removeCredential", "method": "DELETE", "path": "/auth/credentials/{credentialId}", "valid": {"path_parameters": {"credentialId": "00000000-0000-7000-8000-000000000021"}}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "listSessions", "method": "GET", "path": "/auth/sessions", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "revokeSession", "method": "DELETE", "path": "/auth/sessions/{sessionId}", "valid": {"path_parameters": {"sessionId": "00000000-0000-7000-8000-000000000022"}}, "invalid": {"path_set": {"sessionId": "not-a-resource-id"}}, "rejection": "validation_rejected"},
+    {"operation_id": "revokeAllSessions", "method": "POST", "path": "/auth/sessions/revoke-all", "valid": {}, "invalid": {"body_add": {"except_current": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "listDevices", "method": "GET", "path": "/auth/devices", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "registerDevice", "method": "POST", "path": "/auth/devices", "valid": {"body_ref": "device_registration"}, "invalid": {"body_add": {"attestation": "hardware"}}, "rejection": "validation_rejected"},
+    {"operation_id": "deviceChallenge", "method": "POST", "path": "/auth/devices/challenge", "valid": {}, "invalid": {"body_add": {"device_identifier": "SYNTHETIC_FORBIDDEN"}}, "rejection": "validation_rejected"},
+    {"operation_id": "removeDevice", "method": "DELETE", "path": "/auth/devices/{deviceId}", "valid": {"path_parameters": {"deviceId": "00000000-0000-7000-8000-000000000023"}}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "listChannels", "method": "GET", "path": "/auth/channels", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "addChannel", "method": "POST", "path": "/auth/channels", "valid": {"body_ref": "channel_input"}, "invalid": {"body_set": {"type": "phone"}}, "rejection": "validation_rejected"},
+    {"operation_id": "verifyChannel", "method": "POST", "path": "/auth/channels/{channelId}/verify", "valid": {"path_parameters": {"channelId": "00000000-0000-7000-8000-000000000025"}, "body_ref": "channel_proof"}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "removeChannel", "method": "DELETE", "path": "/auth/channels/{channelId}", "valid": {"path_parameters": {"channelId": "00000000-0000-7000-8000-000000000025"}}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "restoreRemovedChannel", "method": "POST", "path": "/auth/channels/{channelId}/restore", "valid": {"path_parameters": {"channelId": "00000000-0000-7000-8000-000000000025"}, "body_ref": "recovery_action"}, "invalid": {"body_add": {"restore_session": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "recoveryCodeStatus", "method": "GET", "path": "/auth/recovery-codes", "valid": {}, "invalid": {"header_remove": ["DPoP"]}, "rejection": "authentication_required"},
+    {"operation_id": "regenerateRecoveryCodes", "method": "POST", "path": "/auth/recovery-codes", "valid": {}, "invalid": {"header_remove": ["Step-Up-Token"]}, "rejection": "step_up_required"},
+    {"operation_id": "startRecovery", "method": "POST", "path": "/auth/recoveries", "valid": {"body_ref": "recovery_start"}, "invalid": {"body_set": {"route": "sms_login"}}, "rejection": "validation_rejected"},
+    {"operation_id": "verifyRecovery", "method": "POST", "path": "/auth/recoveries/{recoveryId}/verify", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "body_ref": "recovery_verify"}, "invalid": {"body_add": {"channel_proof": {"code": "123456"}}}, "rejection": "validation_rejected"},
+    {"operation_id": "recoveryProgress", "method": "GET", "path": "/auth/recoveries/{recoveryId}", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "headers": {"Recovery-Proof": "synthetic_recovery_instrument"}}, "invalid": {"header_remove": ["Recovery-Proof"]}, "rejection": "authentication_required"},
+    {"operation_id": "cancelRecovery", "method": "POST", "path": "/auth/recoveries/{recoveryId}/cancel", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "body_ref": "recovery_action"}, "invalid": {"body_add": {"skip_notification": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "cancelRecoveryFromSession", "method": "POST", "path": "/auth/recoveries/{recoveryId}/cancel-from-session", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}}, "invalid": {"body_add": {"charge_owner": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "completeRecovery", "method": "POST", "path": "/auth/recoveries/{recoveryId}/complete", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "body_ref": "recovery_action"}, "invalid": {"body_add": {"trust": "trusted"}}, "rejection": "validation_rejected"},
+    {"operation_id": "reverseRecovery", "method": "POST", "path": "/auth/recoveries/{recoveryId}/not-me", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "body_ref": "recovery_action"}, "invalid": {"body_add": {"restore_ai": true}}, "rejection": "validation_rejected"},
+    {"operation_id": "addRecoveryCredential", "method": "POST", "path": "/auth/recoveries/{recoveryId}/credential-grant", "valid": {"path_parameters": {"recoveryId": "00000000-0000-7000-8000-000000000024"}, "body_ref": "recovery_credential"}, "invalid": {"body_add": {"device_id": "00000000-0000-7000-8000-000000000023"}}, "rejection": "validation_rejected"},
+    {"operation_id": "stepUpOptions", "method": "POST", "path": "/auth/step-up/options", "valid": {"body_ref": "step_up_intent"}, "invalid": {"body_add": {"sid": "SYNTHETIC_FORBIDDEN_AUTHORITY"}}, "rejection": "validation_rejected"},
+    {"operation_id": "stepUpResult", "method": "POST", "path": "/auth/step-up/result", "valid": {"body_ref": "step_up_result"}, "invalid": {"body_add": {"rq": "SYNTHETIC_FORBIDDEN_AUTHORITY"}}, "rejection": "validation_rejected"}
+  ]
+}
