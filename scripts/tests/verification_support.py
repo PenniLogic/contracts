@@ -1,0 +1,458 @@
+"""Synthetic published contract releases for the contract-verification tests (no committed archives, no network).
+
+A SyntheticContracts instance owns one temporary directory, never a path inside this repository:
+
+- repo/: a contracts-like repository with the specification, registry, provider sources, fixtures,
+  toolchain pins and generator/golden.json at the same relative paths as this repository, committed
+  and tagged with hermetic git;
+- origin.git/: a temporary bare origin that the annotated tag is pushed to;
+- generated/<language>/: synthetic generated client trees. Each carries a contracts-manifest.json
+  with the keys generate_clients.py writes, computed with the real pl_contracts.tree_hash;
+- dist/: release sets built by the real release.build_release_set, with its module-level paths
+  (DIST, GENERATED, SPEC, REGISTRY, FIXTURES and pl_contracts.VERSIONS) patched to the temporary tree;
+- downloads/: the published Release assets. release.publish uploads every file of the release set
+  except RELEASE_NOTES.md.
+
+Hermetic git: every command runs with `-c user.name`, `-c user.email`, `commit.gpgSign` and
+`tag.gpgSign` off, no global ignore or attributes file, GIT_CONFIG_GLOBAL set to the null device,
+GIT_CONFIG_NOSYSTEM=1, fixed author/committer dates and no inherited GIT_* variable. Commits and tag
+objects are therefore deterministic. All content is synthetic.
+"""
+
+from __future__ import annotations
+
+import ast
+import copy
+import gzip
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+from typing import Callable
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+import generate_clients  # noqa: E402
+import pl_contracts  # noqa: E402
+import release  # noqa: E402
+from pl_contracts import combined_digest, sha256_bytes, tree_hash  # noqa: E402
+
+SYNTHETIC_EPOCH = 1767323045  # 2026-01-02T03:04:05Z: fixed commit, tag and archive time
+SYNTHETIC_DATE = f"{SYNTHETIC_EPOCH} +0000"
+GIT_OPTIONS = (
+    "-c", "user.name=PenniLogic synthetic", "-c", "user.email=synthetic@example.invalid",
+    "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "init.defaultBranch=main",
+    "-c", "core.autocrlf=false", "-c", f"core.excludesFile={os.devnull}", "-c", f"core.attributesFile={os.devnull}",
+)
+MANIFEST_NAME = generate_clients.MANIFEST_NAME
+SPEC_RELATIVE = pl_contracts.SPEC.relative_to(pl_contracts.ROOT).as_posix()
+REGISTRY_RELATIVE = pl_contracts.REGISTRY.relative_to(pl_contracts.ROOT).as_posix()
+FIXTURES_RELATIVE = pl_contracts.FIXTURES.relative_to(pl_contracts.ROOT).as_posix()
+VERSIONS_RELATIVE = pl_contracts.VERSIONS.relative_to(pl_contracts.ROOT).as_posix()
+GOLDEN_RELATIVE = generate_clients.GOLDEN.relative_to(pl_contracts.ROOT).as_posix()
+SPEC_DIRECTORY = pl_contracts.SPEC.parent.relative_to(pl_contracts.ROOT).as_posix()
+FIXTURE_NAMES = ("synthetic-money-wire.v1.json", "synthetic-probe.v1.json")
+SPEC_TEMPLATE = (
+    "openapi: 3.1.0\n"
+    "info:\n"
+    "  title: PenniLogic synthetic contract (verification tests only)\n"
+    "  version: {version}\n"
+    "  description: Synthetic document; not a product contract.\n"
+    "paths: {{}}\n"
+)
+GENERATED_FILES = {
+    "kotlin": {
+        "build.gradle.kts": "// Synthetic generated Kotlin client (verification tests only).\n",
+        "gradlew": "#!/bin/sh\n# Synthetic wrapper (verification tests only).\nexit 0\n",
+        "src/main/kotlin/com/pennilogic/synthetic/SyntheticProbe.kt":
+            "package com.pennilogic.synthetic\n\ndata class SyntheticProbe(val total: String)\n",
+    },
+    "typescript": {
+        "package.json": '{\n  "name": "@pennilogic/synthetic-client",\n  "private": true\n}\n',
+        "src/index.ts": "export * from './models/SyntheticProbe';\n",
+        "src/models/SyntheticProbe.ts": "export interface SyntheticProbe {\n  total: string;\n}\n",
+    },
+    "python": {
+        "pyproject.toml": '[project]\nname = "pennilogic-synthetic-client"\nversion = "0.0.0"\n',
+        "pennilogic_synthetic/__init__.py": '"""Synthetic generated Python client (verification tests only)."""\n',
+        "pennilogic_synthetic/models/synthetic_probe.py": "class SyntheticProbe:\n    total: str\n",
+    },
+}
+GENERATOR_NAMES = {"kotlin": "kotlin", "typescript": "typescript-fetch", "python": "python"}
+
+
+def synthetic_digest(label: str) -> str:
+    return sha256_bytes(f"synthetic:{label}".encode("utf-8"))
+
+
+def json_text(value: object) -> str:
+    return json.dumps(value, indent=2, ensure_ascii=True) + "\n"
+
+
+def hermetic_environment() -> dict[str, str]:
+    """The process environment without inherited GIT_* variables, plus the hermetic git settings."""
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update({
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
+        "GIT_AUTHOR_DATE": SYNTHETIC_DATE, "GIT_COMMITTER_DATE": SYNTHETIC_DATE,
+    })
+    return environment
+
+
+def git(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *GIT_OPTIONS, *args], cwd=str(cwd), env=hermetic_environment(), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=60, check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed with exit {completed.returncode}: {completed.stderr.strip()}")
+    return completed.stdout.strip()
+
+
+def temporary_root(prefix: str = "pl-verify-") -> Path:
+    """A new temporary directory outside this repository; the caller removes it."""
+    path = Path(tempfile.mkdtemp(prefix=prefix)).resolve()
+    if path == ROOT.resolve() or ROOT.resolve() in path.parents:
+        shutil.rmtree(path, ignore_errors=True)
+        raise AssertionError("the temporary directory is inside the repository; set TMPDIR elsewhere")
+    return path
+
+
+class SyntheticContracts:
+    """One synthetic contracts repository with its bare origin, generated trees and release builds."""
+
+    def __init__(self, root: Path, version: str = "1.2.3") -> None:
+        self.root = root
+        self.version = version
+        self.tag = f"v{version}"
+        self.repo = root / "repo"
+        self.origin = root / "origin.git"
+        self.generated = root / "generated"
+        self.dist = root / "dist"
+        self.downloads = root / "downloads"
+        self.commit = ""
+        self.tag_object = ""
+
+    # --- the tag's tree -------------------------------------------------------------------------
+
+    def init_repository(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        git(self.root, "init", "--quiet", "--bare", str(self.origin))
+        git(self.root, "init", "--quiet", str(self.repo))
+        git(self.repo, "remote", "add", "origin", str(self.origin))
+
+    def write(self, relative: str, content: str | bytes) -> Path:
+        path = self.repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
+        return path
+
+    def write_source(self) -> None:
+        self.write(SPEC_RELATIVE, SPEC_TEMPLATE.format(version=self.version))
+        self.write(REGISTRY_RELATIVE, json_text({"schema_version": 1, "synthetic": "currency registry placeholder"}))
+        for name in pl_contracts.PROVIDER_SOURCE_NAMES:
+            self.write(f"{SPEC_DIRECTORY}/{name}", json_text({"schema_version": 1, "synthetic": f"provider source {name}"}))
+        for name in FIXTURE_NAMES:
+            self.write(f"{FIXTURES_RELATIVE}/{name}", json_text({"schema_version": 1, "synthetic": f"fixture {name}"}))
+        self.write(VERSIONS_RELATIVE, json_text({
+            "openapi_generator": {"version": "0.0.0-synthetic", "sha256": synthetic_digest("generator jar")},
+            "spectral": {"version": "0.0.0-synthetic"},
+            "oasdiff": {"version": "0.0.0-synthetic"},
+        }))
+        self.write("README.md", "# Synthetic contracts repository (verification tests only)\n")
+
+    def write_generated(self) -> None:
+        """Synthetic generated trees from the current source files, as generate_clients.py lays them out."""
+        for language, files in GENERATED_FILES.items():
+            output = self.generated / language
+            if output.exists():
+                shutil.rmtree(output)
+            for relative, content in files.items():
+                path = output / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content.encode("utf-8"))
+            self.refresh_embedded_manifest(language)
+
+    def refresh_embedded_manifest(self, language: str) -> dict:
+        """Write contracts-manifest.json for the current generated tree, with generate_clients.py's keys."""
+        output = self.generated / language
+        spec = (self.repo / SPEC_RELATIVE).read_bytes().replace(b"\r\n", b"\n")
+        pins = json.loads((self.repo / VERSIONS_RELATIVE).read_text(encoding="utf-8"))
+        digest, entries = tree_hash(output, exclude=(MANIFEST_NAME,))
+        manifest = {
+            "schema_version": 1,
+            "target": language,
+            "spec_version": pl_contracts.spec_version(spec.decode("utf-8")),
+            "spec_sha256": sha256_bytes(spec),
+            "currency_registry_sha256": sha256_bytes((self.repo / REGISTRY_RELATIVE).read_bytes()),
+            "provider_sources_sha256": {
+                name: sha256_bytes((self.repo / SPEC_DIRECTORY / name).read_bytes()) for name in pl_contracts.PROVIDER_SOURCE_NAMES
+            },
+            "provider_constraints_sha256": synthetic_digest("provider constraints"),
+            "generator": {
+                "name": "openapi-generator-cli",
+                "version": pins["openapi_generator"]["version"],
+                "jar_sha256": pins["openapi_generator"]["sha256"],
+                "generator_name": GENERATOR_NAMES[language],
+                "config": f"generator/{language}.json",
+                "config_sha256": synthetic_digest(f"{language} generator config"),
+                "ignore_override_sha256": synthetic_digest("generator ignore override"),
+                "template_override_sha256": None,
+            },
+            "runtime_sha256": synthetic_digest(f"{language} runtime"),
+            "file_count": len(entries),
+            "tree_sha256": digest,
+            "files": [{"path": path, "sha256": file_digest} for path, file_digest in entries],
+        }
+        (output / MANIFEST_NAME).write_text(json_text(manifest), encoding="utf-8", newline="\n")
+        return manifest
+
+    def write_golden(self, edit: Callable[[dict], None] | None = None) -> None:
+        """generator/golden.json exactly as `generate_clients.py --update-golden` records the generated trees."""
+        golden = {}
+        for language in sorted(pl_contracts.LANGUAGES):
+            manifest = json.loads((self.generated / language / MANIFEST_NAME).read_text(encoding="utf-8"))
+            golden[language] = {
+                "tree_sha256": manifest["tree_sha256"], "spec_version": manifest["spec_version"],
+                "spec_sha256": manifest["spec_sha256"], "file_count": manifest["file_count"],
+                "files": {item["path"]: item["sha256"] for item in manifest["files"]},
+            }
+        if edit is not None:
+            edit(golden)
+        self.write(GOLDEN_RELATIVE, json_text(golden))
+
+    def commit_all(self, message: str = "Synthetic contract source", uncommitted: tuple[str, ...] = ()) -> str:
+        """Commit the whole tree except `uncommitted`, which stays in the working tree only."""
+        git(self.repo, "add", "--all")
+        for relative in uncommitted:
+            git(self.repo, "rm", "--cached", "--quiet", "--", relative)
+        git(self.repo, "commit", "--quiet", "-m", message)
+        self.commit = git(self.repo, "rev-parse", "HEAD")
+        return self.commit
+
+    def tag_annotated(self, name: str | None = None, target: str | None = None, message: str | None = None,
+                      force: bool = False) -> str:
+        name = name or self.tag
+        git(self.repo, "tag", *(["--force"] if force else []), "-a", name, "-m", message or f"PenniLogic contracts {name}",
+            target or self.commit)
+        object_id = git(self.repo, "rev-parse", f"refs/tags/{name}")
+        if name == self.tag:
+            self.tag_object = object_id
+        return object_id
+
+    def push_tag(self, name: str | None = None, force: bool = False) -> None:
+        reference = f"refs/tags/{name or self.tag}"
+        git(self.repo, "push", "--quiet", *(["--force"] if force else []), "origin", f"{reference}:{reference}")
+
+    # --- release builds -------------------------------------------------------------------------
+
+    def build(self, head: str | None = None) -> Path:
+        """Run the real release.build_release_set against this tree; return the release set directory."""
+        with mock.patch.object(release, "DIST", self.dist), \
+                mock.patch.object(release, "GENERATED", self.generated), \
+                mock.patch.object(release, "SPEC", self.repo / SPEC_RELATIVE), \
+                mock.patch.object(release, "REGISTRY", self.repo / REGISTRY_RELATIVE), \
+                mock.patch.object(release, "FIXTURES", self.repo / FIXTURES_RELATIVE), \
+                mock.patch.object(pl_contracts, "VERSIONS", self.repo / VERSIONS_RELATIVE):
+            return release.build_release_set(self.version, head or self.commit, SYNTHETIC_EPOCH)
+
+    def download(self, release_set: Path, name: str = "assets") -> Path:
+        """The Release assets as published: release.publish uploads every file except RELEASE_NOTES.md."""
+        target = self.downloads / name
+        target.mkdir(parents=True)
+        for path in sorted(p for p in release_set.iterdir() if p.is_file() and p.name != "RELEASE_NOTES.md"):
+            shutil.copyfile(path, target / path.name)
+        return target
+
+    def publish(self, *, after_source: Callable[["SyntheticContracts"], None] | None = None,
+                golden_edit: Callable[[dict], None] | None = None, uncommitted: tuple[str, ...] = (),
+                before_build: Callable[["SyntheticContracts"], None] | None = None) -> Path:
+        """The standard sequence: source, generated trees, golden, commit, annotated tag, push, build, download.
+
+        Each hook applies one mutation at its step; with no hook the result is the valid published release.
+        """
+        self.init_repository()
+        self.write_source()
+        if after_source is not None:
+            after_source(self)
+        self.write_generated()
+        self.write_golden(golden_edit)
+        self.commit_all(uncommitted=uncommitted)
+        self.tag_annotated()
+        self.push_tag()
+        if before_build is not None:
+            before_build(self)
+        return self.download(self.build())
+
+    def copy_to(self, root: Path) -> "SyntheticContracts":
+        """An independent copy of the repository and its origin, for tests that change git state."""
+        other = SyntheticContracts(root, self.version)
+        shutil.copytree(self.repo, other.repo, symlinks=True)
+        shutil.copytree(self.origin, other.origin, symlinks=True)
+        shutil.copytree(self.generated, other.generated, symlinks=True)
+        git(other.repo, "remote", "set-url", "origin", str(other.origin))
+        other.commit, other.tag_object = self.commit, self.tag_object
+        return other
+
+
+# --- release-set mutations ---------------------------------------------------------------------------
+
+def copy_release(release_dir: Path, root: Path, name: str = "release") -> Path:
+    target = root / name
+    shutil.copytree(release_dir, target)
+    return target
+
+
+def read_sums(release_dir: Path) -> dict[str, str]:
+    lines = (release_dir / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    return {name: digest for digest, name in (line.split("  ", 1) for line in lines)}
+
+
+def write_sums(release_dir: Path, entries: dict[str, str]) -> None:
+    """SHA256SUMS in the builder's format."""
+    text = "".join(f"{digest}  {name}\n" for name, digest in sorted(entries.items()))
+    (release_dir / "SHA256SUMS").write_text(text, encoding="utf-8", newline="\n")
+
+
+def reseal(release_dir: Path, edit: Callable[[dict], None] | None = None,
+           text_edit: Callable[[str], str] | None = None) -> None:
+    """Recompute every digest the release set derives from asset bytes, as a consistent asset swap would.
+
+    Updates release-manifest.json (files, spec_sha256, provider_sources_sha256 and each client's
+    archive and provider digests), then applies `edit`/`text_edit`, then rewrites SHA256SUMS from the
+    bytes for the names it already lists. Without edits on an untouched release set this reproduces
+    the builder's bytes exactly (test_consistent_reseal_reproduces_builder_bytes).
+    """
+    manifest_path = release_dir / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    digests = {name: sha256_bytes((release_dir / name).read_bytes()) for name in manifest["files"] if (release_dir / name).is_file()}
+    manifest["files"].update(digests)
+    spec = f"openapi-{manifest['tag']}.yaml"
+    if spec in digests:
+        manifest["spec_sha256"] = digests[spec]
+    manifest["provider_sources_sha256"].update({name: digests[name] for name in manifest["provider_sources_sha256"] if name in digests})
+    for client in manifest["clients"].values():
+        if client["archive"] in digests:
+            client["archive_sha256"] = digests[client["archive"]]
+        client["provider_sources_sha256"] = dict(manifest["provider_sources_sha256"])
+    if edit is not None:
+        edit(manifest)
+    text = json.dumps(manifest, indent=2) + "\n"
+    if text_edit is not None:
+        text = text_edit(text)
+    manifest_path.write_bytes(text.encode("utf-8"))
+    names = read_sums(release_dir)
+    write_sums(release_dir, {name: sha256_bytes((release_dir / name).read_bytes()) for name in names if (release_dir / name).is_file()})
+
+
+Members = list[tuple[tarfile.TarInfo, bytes | None]]
+
+
+def read_archive(data: bytes) -> Members:
+    members: Members = []
+    with tarfile.open(fileobj=io.BytesIO(gzip.decompress(data)), mode="r:") as archive:
+        for member in archive.getmembers():
+            handle = archive.extractfile(member) if member.isfile() else None
+            members.append((member, None if handle is None else handle.read()))
+    return members
+
+
+def write_archive(members: Members) -> bytes:
+    """A gzip-compressed PAX tar of exactly these members, in this order (no safety rules applied)."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for info, data in members:
+            info = copy.copy(info)
+            if data is None:
+                archive.addfile(info)
+            else:
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+    compressed = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0, filename="") as handle:
+        handle.write(buffer.getvalue())
+    return compressed.getvalue()
+
+
+def member(name: str, data: bytes | None = b"synthetic\n", kind: bytes = tarfile.REGTYPE, linkname: str = "") -> tuple[tarfile.TarInfo, bytes | None]:
+    info = tarfile.TarInfo(name)
+    info.type = kind
+    info.mtime = SYNTHETIC_EPOCH
+    info.mode = 0o755 if kind == tarfile.DIRTYPE else 0o644
+    info.linkname = linkname
+    return info, (data if kind in (tarfile.REGTYPE, tarfile.AREGTYPE) else None)
+
+
+def refresh_embedded(members: Members, prefix: str) -> Members:
+    """Rewrite the archive's contracts-manifest.json so that it describes the current members."""
+    manifest_name = f"{prefix}/{MANIFEST_NAME}"
+    files = {info.name[len(prefix) + 1:]: sha256_bytes(data) for info, data in members
+             if data is not None and info.name != manifest_name}
+    refreshed: Members = []
+    for info, data in members:
+        if info.name == manifest_name and data is not None:
+            manifest = json.loads(data.decode("utf-8"))
+            manifest["files"] = [{"path": path, "sha256": files[path]} for path in sorted(files)]
+            manifest["file_count"] = len(files)
+            manifest["tree_sha256"] = combined_digest(files)
+            data = json_text(manifest).encode("utf-8")
+        refreshed.append((info, data))
+    return refreshed
+
+
+def rewrite_archive(release_dir: Path, tag: str, language: str, transform: Callable[[Members], Members]) -> None:
+    path = release_dir / f"pennilogic-contracts-{language}-{tag}.tar.gz"
+    path.write_bytes(write_archive(transform(read_archive(path.read_bytes()))))
+
+
+def replace_member_data(members: Members, name: str, change: Callable[[bytes], bytes]) -> Members:
+    found = [index for index, (info, _) in enumerate(members) if info.name == name]
+    if len(found) != 1:
+        raise AssertionError(f"expected one archive member {name}, found {len(found)}")
+    result = list(members)
+    info, data = result[found[0]]
+    assert data is not None
+    result[found[0]] = (info, change(data))
+    return result
+
+
+def snapshot(root: Path) -> dict[str, tuple]:
+    """Every path under root with its kind, content digest and modification time, for no-write assertions."""
+    state: dict[str, tuple] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            state[relative] = ("link", os.readlink(path))
+        elif path.is_file():
+            state[relative] = ("file", sha256_bytes(path.read_bytes()), path.stat().st_mtime_ns)
+        else:
+            state[relative] = ("directory",)
+    return state
+
+
+def generator_manifest_keys() -> set[str]:
+    """The top-level contracts-manifest.json keys generate_clients._generate_target writes (read from its source)."""
+    tree = ast.parse(Path(generate_clients.__file__).read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_generate_target":
+            for statement in ast.walk(node):
+                if isinstance(statement, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "manifest"
+                                                             for target in statement.targets):
+                    if isinstance(statement.value, ast.Dict):
+                        keys |= {key.value for key in statement.value.keys if isinstance(key, ast.Constant)}
+                if isinstance(statement, ast.Assign):
+                    keys |= {target.slice.value for target in statement.targets
+                             if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                             and target.value.id == "manifest" and isinstance(target.slice, ast.Constant)}
+    if not keys:
+        raise AssertionError("generate_clients._generate_target no longer builds a `manifest` dict literal; "
+                             "re-check contract_artifact.EMBEDDED_MANIFEST_KEYS against the generator")
+    return keys
