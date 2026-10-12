@@ -2,6 +2,21 @@
 
 ## Unreleased initial core contract 0.4.0
 
+- Prepare the manual complete-source runner with serial generation/global-patch work followed
+  by at most two isolated Python process lanes for source-proved CLI modules. Require every
+  automatically discovered method, exact identity/assignment receipts, actual JVM/state and
+  shared-output fences, joined cleanup and unhidden failures. Canonical Infra activation is
+  pending; preserve 6e's actual 941-job/945-whole timing FAIL and every original test/budget.
+- Extend only source-inspected pure-CLI import/error/auth/refusal modules into those same two
+  lanes. Use hash-proved pristine exact-input class targets only for two staging/rollback
+  tests, not real-generator failure, fresh publication or determinism. Preserve the measured
+  221-method LOCAL 1113.800-second result and earlier 220-method fixture failure; no projected
+  timing pass, test omission or canonical activation is implied.
+- Correct the independently reproduced 6e natural-webhook-name admission: keep `x-`-prefixed
+  names in webhook and other natural-name maps, while preserving genuine OpenAPI specification
+  extensions as data in their actual contexts. Retain the exact frozen false admission and
+  promoted output; add paired real lint/compiler/all-target refusal and response-only positives.
+  This does not add a product webhook feature or qualify a new hosted result.
 - Correct the c440 response-only usage-proof gap: one bounded context-aware walker now covers
   schema-valued map/dependent/application edges, proper local references and callback/webhook/
   Path Item request roles before metadata or output promotion. The owning core guard uses the

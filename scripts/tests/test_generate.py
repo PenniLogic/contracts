@@ -141,6 +141,61 @@ class DeclarationSharingTest(unittest.TestCase):
                 gc._provider_declarations(source)
             self.assertEqual(run.call_count, 4)
 
+    def test_provider_fixture_shares_one_source_compilation_without_replacing_ordered_targets(self) -> None:
+        import test_provider_composition as composition
+
+        class Fixture(composition.ProviderCompositionTest):
+            pass
+
+        home = Path(tempfile.mkdtemp(prefix="pl-provider-sharing-unit-"))
+        self.addCleanup(shutil.rmtree, home)
+        tools = {"openapi_generator": "synthetic-never-executed", "oasdiff": "synthetic-never-executed"}
+        declarations = []
+        expected = None
+
+        def target(language: str, output: Path, selected_tools: dict, spec: Path) -> dict:
+            nonlocal expected
+            self.assertIs(selected_tools, tools)
+            self.assertEqual(spec, Fixture.spec_path)
+            current = gc._provider_declarations(spec)
+            if expected is None:
+                expected = copy.deepcopy(current)
+            self.assertEqual(current, expected)
+            declarations.append(current)
+            output.mkdir()
+            (output / "synthetic-target.json").write_text(json.dumps({"target": language}), encoding="utf-8")
+            current["roots"].append("SYNTHETIC_CALLER_COPY_" + language)
+            return {"target": language}
+
+        previous_scope = gc._DECLARATIONS.get()
+        try:
+            with mock.patch.object(composition, "ROOT", home), \
+                    mock.patch.object(toolchain, "ensure_installed", return_value=tools) as installed, \
+                    mock.patch.object(gc, "generate", side_effect=target) as generated, \
+                    mock.patch.object(gc, "run", wraps=gc.run) as compiler, \
+                    mock.patch.object(gc, "sha256_file", wraps=gc.sha256_file) as hashes, \
+                    mock.patch.object(gc, "ThreadPoolExecutor", side_effect=AssertionError("fixture must remain serial")):
+                Fixture.setUpClass()
+                installed.assert_called_once_with()
+                self.assertEqual([call.args[0] for call in generated.call_args_list],
+                                 ["kotlin", "typescript", "python"])
+                self.assertEqual([call.args[1] for call in generated.call_args_list],
+                                 [Fixture.output / language for language in gc.LANGUAGES])
+                self.assertEqual(compiler.call_count, 1)
+                self.assertTrue(str(compiler.call_args.args[0][1]).endswith("provider_constraints.cjs"))
+                self.assertEqual(sum(call.args[0] == Fixture.spec_path for call in hashes.call_args_list), 3)
+                self.assertEqual(len({id(value) for value in declarations}), 3)
+                self.assertEqual(len({id(value["roots"]) for value in declarations}), 3)
+                for language in gc.LANGUAGES:
+                    self.assertEqual(json.loads((Fixture.output / language / "synthetic-target.json").read_bytes()),
+                                     {"target": language})
+                self.assertIs(gc._DECLARATIONS.get(), previous_scope)
+                self.assertEqual(gc._provider_declarations(Fixture.spec_path), expected)
+                self.assertEqual(compiler.call_count, 2, "declarations must not survive their invocation scope")
+        finally:
+            Fixture.doClassCleanups()
+            self.assertEqual(Fixture.tearDown_exceptions, [])
+
     def test_real_requested_three_target_set_compiles_source_once_without_reusing_outputs(self) -> None:
         spec = SpecDir()
         self.addCleanup(spec.cleanup)

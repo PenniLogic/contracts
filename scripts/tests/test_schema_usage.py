@@ -191,6 +191,134 @@ class SchemaUsageTest(unittest.TestCase):
                 self.assertNotIn("info.version", compiler.stderr)
                 self.assertFalse((spec.path / "generated").exists())
 
+    def test_actual_natural_x_webhook_names_and_genuine_extensions_keep_context_and_promotion_boundaries(self) -> None:
+        control = usage_source({"type": "object", "additionalProperties": False,
+                                "properties": {"x-natural-caption": {"type": "string"}}})
+
+        def incoming(operation: str, request: dict, response: dict | None = None) -> dict:
+            return {"post": {
+                "operationId": operation, "tags": ["RequestUsage"],
+                "description": "Synthetic named schema-use boundary, never a product endpoint.",
+                "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+                "requestBody": {"required": True, "content": {"application/json": {"schema": request}}},
+                "responses": {"200": {"description": "Synthetic readonly response.",
+                                     "content": {"application/json": {"schema": response}}}}
+                    if response else {"204": {"description": "Synthetic empty response."}},
+            }}
+
+        money_model = {
+            "type": "object", "x-pennilogic-strict-provider": True, "additionalProperties": False,
+            "required": ["total", "snapshot_kind"], "properties": {
+                "total": {"$ref": "#/components/schemas/Money"},
+                "snapshot_kind": {"type": "string", "readOnly": True},
+            },
+        }
+        money_control = replace_once(control, "  schemas:\n",
+            "  schemas:\n    MoneySnapshotReceipt: " + json.dumps(money_model) + "\n")
+        money_control = replace_once(money_control, "paths:\n",
+            "paths:\n  /money-schema-usage:\n    get:\n      operationId: readMoneyUsage\n"
+            "      tags: [RequestUsage]\n      description: Synthetic Money-bearing response.\n"
+            "      responses:\n        '200':\n          description: Synthetic snapshot.\n"
+            "          content: {application/json: {schema: {$ref: '#/components/schemas/MoneySnapshotReceipt'}}}\n")
+        cases = {}
+        for model in ("UsageReceipt", "Transaction", "MoneySnapshotReceipt"):
+            model_control = money_control if model == "MoneySnapshotReceipt" else control
+            item = incoming("naturalWebhookUsage", {"$ref": "#/components/schemas/" + model})
+            forms = ("direct", "path-item-ref") if model == "UsageReceipt" else ("direct",)
+            for form in forms:
+                base = model_control
+                webhook = item
+                if form == "path-item-ref":
+                    components = section_text(base, ("components",))
+                    base = replace_section(base, ("components",),
+                        "components:\n  pathItems: " + json.dumps({"NaturalWebhook": item}) + "\n" +
+                        components.partition("\n")[2])
+                    webhook = {"$ref": "#/components/pathItems/NaturalWebhook"}
+                for name in ("signal", "x-natural-delivery"):
+                    cases[model + " " + form + " " + name] = base + "webhooks: " + json.dumps({
+                        name: webhook,
+                    }) + "\n"
+                normal = parsed(cases[model + " " + form + " signal"])
+                renamed = parsed(cases[model + " " + form + " x-natural-delivery"])
+                renamed["webhooks"]["signal"] = renamed["webhooks"].pop("x-natural-delivery")
+                self.assertEqual(normal, renamed, "only the natural webhook name changes")
+        for name, text in cases.items():
+            with self.subTest(webhook=name):
+                spec = SpecDir()
+                self.addCleanup(spec.cleanup)
+                source = spec.write(text)
+                lint = run_script("lint_spec.py", "--spec", str(source))
+                self.assertEqual(lint.returncode, 1, lint.stdout + lint.stderr)
+                self.assertIn("[pl-core-endpoint-contract]", lint.stderr)
+                self.assertIn("readOnly response members", lint.stderr)
+                compiler = subprocess.run(
+                    [node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(source)],
+                    cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
+                )
+                self.assertEqual(compiler.returncode, 1, compiler.stdout + compiler.stderr)
+                self.assertIn("readOnly model must be response-only", compiler.stderr)
+                for language in ("typescript", "kotlin", "python"):
+                    directory = spec.path / "generated" / language
+                    directory.mkdir(parents=True)
+                    marker = directory / "preserve-output.txt"
+                    marker.write_bytes(b"preserve-prior-valid-output\n")
+                    generated = run_script("generate_clients.py", "--language", language, "--spec", str(source),
+                                           "--output-dir", str(spec.path / "generated"))
+                    self.assertEqual(generated.returncode, 1, generated.stdout + generated.stderr)
+                    self.assertIn("readOnly model must be response-only", generated.stderr)
+                    self.assertNotIn("info.version", generated.stderr)
+                    self.assertNotIn("openapi-generator failed", generated.stderr)
+                    self.assertEqual(marker.read_bytes(), b"preserve-prior-valid-output\n")
+                self.assertFalse(any(spec.path.glob(".contracts-generation-*")))
+
+        safe_request = {"type": "object", "additionalProperties": False,
+                        "properties": {"x-natural-caption": {"type": "string"}}}
+        positive = replace_section(control, ("paths", "/schema-usage", "get", "responses"),
+            "      responses:\n        '204': {description: No ordinary receipt.}\n"
+            "        x-responses-data: " + json.dumps(incoming("ignoredResponseData", REFERENCE)) + "\n")
+        callback = {
+            "x-natural-callback": {
+                "{$request.query.callback}": incoming("naturalCallbackUsage", safe_request),
+                "x-callbacks-data": incoming("ignoredCallbackData", REFERENCE),
+            },
+        }
+        positive = replace_once(positive, "      operationId: readUsage\n",
+            "      operationId: readUsage\n      callbacks: " + json.dumps(callback) + "\n"
+            "      x-operation-data: " + json.dumps(incoming("ignoredOperationData", REFERENCE)) + "\n")
+        positive = replace_once(positive, "paths:\n",
+            "paths:\n  x-paths-data: " + json.dumps(incoming("ignoredPathsData", REFERENCE)) + "\n")
+        positive += "x-root-data: " + json.dumps({"webhooks": {
+            "signal": incoming("ignoredRootData", REFERENCE),
+        }}) + "\n"
+        positive += "webhooks: " + json.dumps({
+            "x-natural-delivery": {
+                **incoming("naturalWebhookResponse", safe_request, REFERENCE),
+                "x-path-item-data": incoming("ignoredPathItemData", REFERENCE),
+            },
+        }) + "\n"
+        document = parsed(positive)
+        self.assertEqual(document["webhooks"]["x-natural-delivery"]["post"]["requestBody"]["content"]
+                         ["application/json"]["schema"], safe_request)
+        spec = SpecDir()
+        self.addCleanup(spec.cleanup)
+        source = spec.write(positive)
+        lint = run_script("lint_spec.py", "--spec", str(source))
+        self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
+        compiler = subprocess.run(
+            [node_executable(), str(ROOT / "scripts" / "provider_constraints.cjs"), str(source)],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(compiler.returncode, 0, compiler.stdout + compiler.stderr)
+        projection = json.loads(compiler.stdout)["generation_input"]["components"]["schemas"]["UsageReceipt"]
+        self.assertIs(projection["x-pennilogic-read-only-response"], True)
+        self.assertIs(projection["properties"]["result"]["x-pennilogic-read-only-response"], True)
+        generated = run_script("generate_clients.py", "--spec", str(source),
+                               "--output-dir", str(spec.path / "generated"))
+        self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
+        for language in ("typescript", "kotlin", "python"):
+            self.assertTrue((spec.path / "generated" / language / "contracts-manifest.json").is_file())
+        self.assertFalse(any(spec.path.glob(".contracts-generation-*")))
+
     def test_actual_response_only_and_annotation_positive_generates_all_targets_and_mock_transports(self) -> None:
         shape = {"type": "object", "additionalProperties": {"type": "string"},
                  "example": {"caption": "synthetic", "examples": "natural key"},

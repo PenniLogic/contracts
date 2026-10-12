@@ -58,7 +58,7 @@
         },
         {
           "name": "Run checks",
-          "run": "python scripts/check_repository.py\nnpm ci --no-audit --no-fund\npython scripts/toolchain.py install\npython scripts/lint_spec.py\npython scripts/check_breaking_changes.py\npython scripts/generate_clients.py --verify\npython scripts/smoke.py python\npython scripts/smoke.py typescript\npython scripts/smoke.py kotlin\npython -m unittest discover -s scripts/tests -p \"test_*.py\""
+          "run": "python scripts/check_repository.py\nnpm ci --no-audit --no-fund\npython scripts/toolchain.py install\npython scripts/lint_spec.py\npython scripts/check_breaking_changes.py\npython scripts/generate_clients.py --verify\npython scripts/smoke.py python\npython scripts/smoke.py typescript\npython scripts/smoke.py kotlin\npython scripts/run_source_tests.py"
         }
       ]
     }

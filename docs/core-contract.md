@@ -205,10 +205,16 @@ OpenAPI request/response/header/Path Item/callback context.
 
 Operation callbacks, root webhooks, referenced Path Items, parameter/media schemas and encoding
 headers are inspected as distinct request/response roles, not silently omitted from the proof.
+Webhook and other name-map keys remain names even with an `x-` prefix. Specification-extension
+skipping applies only in contexts that actually admit extensions, such as Paths, Responses and
+Callback Objects, not their surrounding natural-name maps.
 Unknown clauses, unsupported/dynamic references, malformed containers, ambiguous reference
 siblings, cycles and work/depth bounds fail explicitly before response-only metadata or output
 promotion. This is a finite source-use proof, not a general JSON Schema implication engine
 or a product callback/webhook implementation.
+It also does not replace structural OpenAPI validation. Malformed Media Type or encoding
+containers admitted by the standalone compiler are still subject to stock lint and native
+generator refusal; those no-promotion failures are not valid-source request-use bypasses.
 The lint-only walk can inspect a finite legacy recursive schema graph without revisiting
 active edges; every other edge still runs its guards. That preserves existing valid cyclic
 lint controls, not a code-generation exemption: the compiler's response-only proof still

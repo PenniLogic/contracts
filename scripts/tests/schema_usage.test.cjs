@@ -121,6 +121,84 @@ test("OpenAPI request contexts, headers, callbacks, webhooks and proper Path Ite
   cases.forEach((doc, index) => refusesMixed(doc, index));
 });
 
+test("natural x-prefixed names retain schema usages in every OpenAPI name map", () => {
+  const incoming = { post: { operationId: "naturalUsage", requestBody: {
+    content: { "application/json": { schema: ref } },
+  }, responses: { "204": { description: "Synthetic empty response." } } } };
+  for (const name of ["signal", "x-natural-delivery"]) {
+    const webhook = specimen({ type: "string" });
+    webhook.webhooks = { [name]: structuredClone(incoming) };
+    refusesMixed(webhook, "webhook " + name);
+    const aliased = specimen({ type: "string" });
+    aliased.components.pathItems = { NaturalUsage: structuredClone(incoming) };
+    aliased.webhooks = { [name]: { $ref: "#/components/pathItems/NaturalUsage" } };
+    refusesMixed(aliased, "referenced webhook " + name);
+    const callback = specimen({ type: "string" });
+    callback.paths["/usage-proof"].get.callbacks = {
+      [name]: { "{$request.query.callback}": structuredClone(incoming) },
+    };
+    refusesMixed(callback, "operation callback name " + name);
+  }
+  const media = specimen({ type: "string" });
+  media.paths["/usage-proof"].post.requestBody.content = { "x-natural/synthetic": { schema: ref } };
+  refusesMixed(media, "media type name");
+  const encoded = specimen({ type: "string" });
+  encoded.paths["/usage-proof"].post.requestBody.content = { "multipart/form-data": {
+    schema: { type: "object", properties: { "x-natural-part": { type: "string" } } },
+    encoding: { "x-natural-part": { headers: { "x-natural-header": { schema: ref } } } },
+  } };
+  refusesMixed(encoded, "encoding and header names");
+  for (const keyword of ["properties", "patternProperties", "dependentSchemas"]) {
+    refusesMixed(specimen({ type: "object", [keyword]: { "x-natural-schema": ref } }), keyword);
+  }
+  const definition = specimen({ $ref: "#/components/schemas/NaturalDefinitions/$defs/x-natural-definition" });
+  definition.components.schemas.NaturalDefinitions = { $defs: { "x-natural-definition": ref } };
+  refusesMixed(definition, "referenced definition name");
+  const discriminator = specimen({ type: "object", discriminator: {
+    propertyName: "kind", mapping: { "x-natural-tag": ref.$ref },
+  } });
+  refusesMixed(discriminator, "discriminator tag name");
+  for (const value of [null, false, 17, []]) {
+    const malformed = specimen({ type: "string" });
+    malformed.webhooks = { "x-natural-malformed": value };
+    assert.throws(() => collectSchemaUsage(malformed), /malformed schema usage container/);
+    assert.throws(() => compile(malformed), /unproved readOnly usage/);
+  }
+});
+
+test("x-named webhook responses are real usages while genuine specification extensions remain opaque", () => {
+  const response = specimen({ type: "string" });
+  response.paths["/usage-proof"].get.responses = { "204": { description: "No ordinary receipt." } };
+  response.webhooks = { "x-natural-delivery": { post: { operationId: "naturalResponse",
+    requestBody: { content: { "application/json": { schema: { type: "string" } } } },
+    responses: { "200": { description: "Synthetic webhook response.",
+      content: { "application/json": { schema: ref } }, headers: { "x-natural-header": { schema: ref } } } },
+  } } };
+  const responseUsage = collectSchemaUsage(response);
+  assert.equal(responseUsage.request.has("UsageReceipt"), false);
+  assert.equal(responseUsage.response.has("UsageReceipt"), true);
+  assert.equal(compile(response).generation_input.components.schemas.UsageReceipt["x-pennilogic-read-only-response"], true);
+
+  const incoming = { post: { operationId: "extensionData", requestBody: {
+    content: { "application/json": { schema: ref } },
+  }, responses: { "204": { description: "Synthetic extension data only." } } } };
+  const data = specimen({ type: "string" });
+  data["x-root-data"] = { webhooks: { signal: incoming } };
+  data.paths["x-paths-data"] = incoming;
+  data.paths["/usage-proof"]["x-path-item-data"] = incoming;
+  data.paths["/usage-proof"].get["x-operation-data"] = incoming;
+  data.paths["/usage-proof"].get.responses["x-response-data"] = incoming;
+  data.components.callbacks = { NaturalCallback: { "x-callback-data": incoming } };
+  data.paths["/usage-proof"].get.callbacks = {
+    "x-natural-callback": { $ref: "#/components/callbacks/NaturalCallback", "x-reference-data": incoming },
+  };
+  const dataUsage = collectSchemaUsage(data);
+  assert.equal(dataUsage.request.has("UsageReceipt"), false);
+  assert.equal(dataUsage.response.has("UsageReceipt"), true);
+  assert.doesNotThrow(() => compile(data));
+  assert.deepEqual(coreLint(data), []);
+});
+
 test("genuine annotation and literal data do not become usages, while response-only and ordinary map controls remain positive", () => {
   const payload = { $ref: "#/components/schemas/UsageReceipt", readOnly: true,
     additionalProperties: ref, patternProperties: { ".*": ref }, dependentSchemas: { trigger: ref } };

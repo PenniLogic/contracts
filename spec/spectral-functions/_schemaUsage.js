@@ -124,12 +124,15 @@ function collectSchemaUsage(document, { visitSchema = () => {}, scope = () => ""
     completed.set(key, height);
     return height + 1;
   }
-  function mapping(value, path, each, extensions = false) {
+  function mapping(value, path, each) {
     if (value === undefined) return;
     object(value, path);
-    for (const [name, child] of Object.entries(value)) {
-      if (!extensions || !name.startsWith("x-")) each(child, [...path, name]);
-    }
+    for (const [name, child] of Object.entries(value)) each(child, [...path, name]);
+  }
+  function extensibleMapping(value, path, each) {
+    mapping(value, path, (child, at) => {
+      if (!at.at(-1).startsWith("x-")) each(child, at);
+    });
   }
   function schema(value, path, context, active, depth) {
     step(path, context.use, depth);
@@ -187,7 +190,7 @@ function collectSchemaUsage(document, { visitSchema = () => {}, scope = () => ""
         1 + walk(member, childKind, at, context, active, depth + 1));
     };
     if (kind === "callback") {
-      if (!Object.hasOwn(value, "$ref")) mapping(value, path, (item, at) => child(item, "pathItem", at), true);
+      if (!Object.hasOwn(value, "$ref")) extensibleMapping(value, path, (item, at) => child(item, "pathItem", at));
     } else if (kind === "pathItem") {
       if (value.parameters !== undefined && !Array.isArray(value.parameters)) fail("malformed Path Item parameters", path);
       for (const method of HTTP_METHODS) {
@@ -213,7 +216,7 @@ function collectSchemaUsage(document, { visitSchema = () => {}, scope = () => ""
             (parameters || []).forEach((parameter, index) => used(parameter, "parameter", [...at, index]));
           }
         } else {
-          mapping(operation.responses, [...operationAt, "responses"], (response, at) => used(response, "response", at), true);
+          extensibleMapping(operation.responses, [...operationAt, "responses"], (response, at) => used(response, "response", at));
         }
         mapping(operation.callbacks, [...operationAt, "callbacks"], (callback, at) => used(callback, "callback", at));
       }
@@ -237,8 +240,8 @@ function collectSchemaUsage(document, { visitSchema = () => {}, scope = () => ""
   }
   for (const use of ["request", "response"]) {
     const context = { use, scope: "", operation: undefined };
-    mapping(document.paths, ["paths"], (item, at) => walk(item, "pathItem", at, context), true);
-    mapping(document.webhooks, ["webhooks"], (item, at) => walk(item, "pathItem", at, context), true);
+    extensibleMapping(document.paths, ["paths"], (item, at) => walk(item, "pathItem", at, context));
+    mapping(document.webhooks, ["webhooks"], (item, at) => walk(item, "pathItem", at, context));
   }
   return names;
 }

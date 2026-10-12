@@ -23,7 +23,7 @@ python scripts/generate_clients.py --verify
 python scripts/smoke.py python
 python scripts/smoke.py typescript
 python scripts/smoke.py kotlin
-python -m unittest discover -s scripts/tests -p "test_*.py"
+python scripts/run_source_tests.py
 ```
 
 Repository-specific setup, commands and troubleshooting are maintained by hand in

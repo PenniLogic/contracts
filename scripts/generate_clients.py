@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from contextvars import ContextVar, copy_context
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import perf_counter, sleep
 from typing import Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -473,6 +475,30 @@ def _staging(parent: Path) -> Iterator[Path]:
             remove_tree(stage)
 
 
+def _replace(path: Path, target: Path) -> None:
+    # Windows may keep a renamed/deleted directory name unavailable until its handles close.
+    deadline = perf_counter() + 0.25
+    reported = False
+    while True:
+        try:
+            path.replace(target)
+            return
+        except OSError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32):
+                raise
+            remaining = deadline - perf_counter()
+            if remaining > 0:
+                if not reported:
+                    print("Windows generation replacement unavailable; retrying the same rename within a 250 ms window",
+                          file=sys.stderr)
+                    reported = True
+                sleep(min(0.01, remaining))
+                if perf_counter() < deadline:
+                    continue
+            error.add_note("Windows generation replacement remained unavailable after bounded retries")
+            raise
+
+
 def _publish(stage: Path, replacements: list[tuple[Path, Path]]) -> None:
     backups: list[tuple[Path, Path]] = []
     installed: list[Path] = []
@@ -487,9 +513,9 @@ def _publish(stage: Path, replacements: list[tuple[Path, Path]]) -> None:
             output.parent.mkdir(parents=True, exist_ok=True)
             if output.exists():
                 backup = backup_dir / str(index)
-                output.replace(backup)
+                _replace(output, backup)
                 backups.append((backup, output))
-            ready.replace(output)
+            _replace(ready, output)
             installed.append(output)
     except (OSError, KeyboardInterrupt) as error:
         try:
@@ -499,7 +525,7 @@ def _publish(stage: Path, replacements: list[tuple[Path, Path]]) -> None:
                 else:
                     output.unlink()
             for backup, output in reversed(backups):
-                backup.replace(output)
+                _replace(backup, output)
         except (OSError, KeyboardInterrupt) as recovery_error:
             raise _RecoveryRequired(f"generation promotion failed; recovery artifacts retained at {stage}") from recovery_error
         if isinstance(error, KeyboardInterrupt):
