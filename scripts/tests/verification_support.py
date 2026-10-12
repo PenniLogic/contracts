@@ -17,6 +17,10 @@ Hermetic git: every command runs with `-c user.name`, `-c user.email`, `commit.g
 `tag.gpgSign` off, no global ignore or attributes file, GIT_CONFIG_GLOBAL set to the null device,
 GIT_CONFIG_NOSYSTEM=1, fixed author/committer dates and no inherited GIT_* variable. Commits and tag
 objects are therefore deterministic. All content is synthetic.
+
+The compatibility, gate, report and command-line tests also use in-memory inputs from here: parsed
+OpenAPI 3.1.0 documents (synthetic_document), oasdiff-shaped detector output, and report parts
+(fixture_report_parts, synthetic_report_parts). Fixture rows carry fixture names, never real repositories.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ sys.path.insert(0, str(SCRIPTS))
 import generate_clients  # noqa: E402
 import pl_contracts  # noqa: E402
 import release  # noqa: E402
+from contract_gate import parse_instant  # noqa: E402
 from pl_contracts import combined_digest, sha256_bytes, tree_hash  # noqa: E402
 
 SYNTHETIC_EPOCH = 1767323045  # 2026-01-02T03:04:05Z: fixed commit, tag and archive time
@@ -456,3 +461,71 @@ def generator_manifest_keys() -> set[str]:
         raise AssertionError("generate_clients._generate_target no longer builds a `manifest` dict literal; "
                              "re-check contract_artifact.EMBEDDED_MANIFEST_KEYS against the generator")
     return keys
+
+
+# --- parsed documents, detector outputs and reports (compat, gate, report and command-line tests) ---------
+
+SYNTHETIC_INSTANT = "2026-01-02T03:04:05.000Z"  # SYNTHETIC_EPOCH as the fixed 24-character UTC instant
+FIXTURE_COMMIT = synthetic_digest("fixture tag commit")[:40]
+PROBE_SCHEMA = "SyntheticProbe"
+
+
+def synthetic_document(version: str, *, properties: tuple[str, ...] = ("amount", "currency", "note"),
+                       required: tuple[str, ...] = ("amount", "currency"), paths: dict | None = None) -> dict:
+    """A complete supported OpenAPI 3.1.0 document in the parsed form check_breaking_changes.source_documents returns."""
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "PenniLogic synthetic contract (verification tests only)", "version": version},
+        "paths": copy.deepcopy(paths or {}),
+        "components": {
+            "schemas": {PROBE_SCHEMA: {
+                "type": "object", "additionalProperties": False, "required": list(required),
+                "properties": {name: {"type": "string"} for name in properties},
+            }},
+            "responses": {},
+        },
+    }
+
+
+def probe_path(operation_id: str = "getSyntheticProbe") -> dict:
+    """One GET operation whose 200 response is the synthetic probe schema."""
+    return {"get": {"operationId": operation_id, "description": "Synthetic read (verification tests only).",
+                    "responses": {"200": {"description": "ok", "content": {"application/json": {
+                        "schema": {"$ref": f"#/components/schemas/{PROBE_SCHEMA}"}}}}}}}
+
+
+def version_diff(before: str, after: str) -> dict:
+    """The `info` part of an `oasdiff diff --format json` record for a version change."""
+    return {"info": {"version": {"from": before, "to": after}}}
+
+
+def fixture_report_parts() -> dict:
+    """build_report keyword arguments for a complete published-mode report whose rows are all live and passing.
+
+    In-memory test fixture only: it exists to give the acceptance-eligibility rule a passing control. Every
+    row name is a fixture name, not a real repository, and no such report is ever written or published.
+    """
+    rows = [{"language": language, "name": f"fixture-{language}-consumer", "version": "0.0.0-fixture",
+             "verified_contract_version": "1.2.3", "mode": "live", "result": "pass"} for language in pl_contracts.LANGUAGES]
+    return {
+        "mode": "published",
+        "contract": {"version": "1.2.3", "tag": "v1.2.3", "commit": FIXTURE_COMMIT, "spec_sha256": synthetic_digest("spec"),
+                     "release_manifest_sha256": synthetic_digest("release manifest")},
+        "compatibility": {"baseline": "v1.2.2", "revision_version": "1.2.3", "change_class": "additive", "findings": [],
+                          "problems": [], "result": "pass"},
+        "gate": {"mode": "block", "reason": "gate.block", "warn_until": None, "state_sha256": synthetic_digest("gate state")},
+        "provider": {"name": "fixture-provider", "version": "0.0.0-fixture", "verified_contract_version": "1.2.3",
+                     "mode": "live", "result": "pass"},
+        "consumers": rows,
+        "generated_at": parse_instant(SYNTHETIC_INSTANT),
+    }
+
+
+def synthetic_report_parts() -> dict:
+    """The same report as this repository's own runs produce it: synthetic-fixture mode and synthetic rows."""
+    parts = fixture_report_parts()
+    parts["mode"] = "synthetic-fixture"
+    parts["provider"] = dict(parts["provider"], name="synthetic-provider", mode="synthetic-fixture", version=None)
+    parts["consumers"] = [dict(row, name=f"synthetic-{row['language']}", mode="synthetic-fixture", version=None)
+                          for row in parts["consumers"]]
+    return parts

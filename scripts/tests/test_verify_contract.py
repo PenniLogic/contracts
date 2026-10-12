@@ -1,0 +1,326 @@
+"""Command line of the contract verification runner (contracts#3, T-QA-02): subcommands and exit codes.
+
+Exit codes: 0 pass (including a warning under an unexpired warning gate), 1 fail or refused, 2 usage
+error or a missing, unreadable or malformed input. Every command runs in process through
+verify_contract.main(argv) with an injected clock; there is no clock option on the command line. Inputs
+are synthetic and live in a temporary directory; the artifact command verifies a synthetic release built by
+the real release.build_release_set and published to a temporary bare origin (verification_support).
+test_runner_writes_only_inside_temp records every file-system write and every process the commands start
+through an audit hook. No network; nothing is written inside this repository.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import verification_support as support
+from verification_support import (
+    PROBE_SCHEMA, FIXTURE_NAMES, SyntheticContracts, copy_release, probe_path, synthetic_document, synthetic_report_parts,
+    temporary_root, version_diff,
+)
+
+import contract_report  # noqa: E402 - verification_support puts scripts/ on sys.path
+import contract_schema  # noqa: E402
+from contract_gate import parse_instant  # noqa: E402
+from verify_contract import main  # noqa: E402
+
+NOW = parse_instant("2026-10-12T00:00:00.000Z")
+UNTIL = "2026-11-01T00:00:00.000Z"
+REASON = "Synthetic expand-and-contract fixture: every consumer migrated first (verification tests only)."
+READ_ONLY_GIT = ("rev-parse", "config", "cat-file", "ls-remote", "ls-tree")
+
+
+class AuditRecorder:
+    """Writes and processes seen by one process-wide audit hook while a recorder is active."""
+
+    active: "AuditRecorder | None" = None
+    installed = False
+    WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+    # Event -> (indexes of written paths, indexes of directory descriptors that make those paths relative).
+    PATH_EVENTS = {
+        "os.mkdir": ((0,), (2,)), "os.remove": ((0,), (1,)), "os.rmdir": ((0,), (1,)), "os.chmod": ((0,), (2,)),
+        "os.utime": ((0,), (3,)), "os.chown": ((0,), (3,)), "os.truncate": ((0,), ()), "os.rename": ((0, 1), (2, 3)),
+        "os.symlink": ((1,), (2,)), "os.link": ((1,), (2, 3)), "shutil.rmtree": ((0,), (1,)),
+        "tempfile.mkdtemp": ((0,), ()), "tempfile.mkstemp": ((0,), ()),
+    }
+
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, str]] = []
+        self.processes: list[list[str]] = []
+        self.errors: list[str] = []
+
+    @classmethod
+    def hook(cls, event: str, args: tuple) -> None:
+        recorder = cls.active
+        if recorder is None:
+            return
+        try:
+            if event == "open":
+                path, _, flags = args
+                if isinstance(flags, int) and flags & cls.WRITE_FLAGS:
+                    recorder.record(event, path)
+            elif event in cls.PATH_EVENTS:
+                paths, descriptors = cls.PATH_EVENTS[event]
+                if any(isinstance(args[index], int) and args[index] >= 0 for index in descriptors if index < len(args)):
+                    return  # relative to a directory descriptor: a step inside a recorded shutil.rmtree
+                for index in paths:
+                    recorder.record(event, args[index])
+            elif event == "subprocess.Popen":
+                recorder.processes.append([os.fsdecode(part) for part in args[1]])
+        except Exception as error:  # never let the hook break the code under test; the test asserts no errors
+            recorder.errors.append(f"{event}: {error!r}")
+
+    def record(self, event: str, path: object) -> None:
+        if isinstance(path, int):
+            return  # wraps a descriptor that already exists (subprocess pipes); a path open of a file is recorded itself
+        absolute = os.path.abspath(os.fsdecode(path))
+        if "__pycache__" not in Path(absolute).parts:  # the interpreter's bytecode cache, not a write of the runner
+            self.writes.append((event, absolute))
+
+    def __enter__(self) -> "AuditRecorder":
+        if not AuditRecorder.installed:
+            sys.addaudithook(AuditRecorder.hook)
+            AuditRecorder.installed = True
+        AuditRecorder.active = self
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        AuditRecorder.active = None
+
+
+class CommandTestCase(unittest.TestCase):
+    """One synthetic published release and one directory of synthetic inputs per class."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.enterClassContext(mock.patch.dict(os.environ, support.hermetic_environment(), clear=True))
+        cls.root = temporary_root()
+        cls.addClassCleanup(shutil.rmtree, cls.root, True)
+        cls.inputs = cls.root / "inputs"
+        cls.inputs.mkdir()
+        base = synthetic_document("1.2.3", paths={"/probe": probe_path()})
+        removal = synthetic_document("2.0.0", properties=("amount", "currency"), paths={"/probe": probe_path()})
+        change = {"id": "response-property-removed", "level": 3, "operation": "GET", "path": "/probe",
+                  "text": "removed the optional property 'note' from the response with the '200' status"}
+        diff = {**version_diff("1.2.3", "2.0.0"), "components": {"schemas": {"modified": {PROBE_SCHEMA: {"properties": {"deleted": ["note"]}}}}}}
+        acknowledged = [{"id": "response-property-removed", "location": "GET /probe", "reason": REASON},
+                        {"id": "component-schema-property-removed", "location": f"components/schemas/{PROBE_SCHEMA}/properties/note",
+                         "reason": REASON}]
+        python_missing = synthetic_report_parts()
+        python_missing["consumers"] = [row for row in python_missing["consumers"] if row["language"] != "python"]
+        omission_as_pass = contract_report.build_report(**synthetic_report_parts())
+        omission_as_pass["consumers"].pop()
+        for name, value in {
+            "base.json": base, "removal.json": removal, "no-changes.json": [], "no-diff.json": {},
+            "removal-breaking.json": [change], "removal-diff.json": diff,
+            "acknowledgement.json": {"baseline": "v1.2.3", "target_version": "2.0.0", "acknowledged": acknowledged},
+            "acknowledgement-invalid.json": {"baseline": "v1.2.3"},
+            "breaking-invalid.json": [dict(change, level="3")],
+            "gate-warn.json": {"schema": "pennilogic-compat-gate@1", "mode": "warn", "warn_until": UNTIL},
+            "gate-warn-no-expiry.json": {"schema": "pennilogic-compat-gate@1", "mode": "warn", "warn_until": None},
+            "report-synthetic.json": contract_report.build_report(**synthetic_report_parts()),
+            "report-python-missing.json": contract_report.build_report(**python_missing),
+            "report-omission-as-pass.json": omission_as_pass,
+        }.items():
+            (cls.inputs / name).write_text(contract_schema.dumps(value), encoding="ascii", newline="\n")
+        (cls.inputs / "not-json.json").write_text("{\n", encoding="ascii", newline="\n")
+        cls.contracts = SyntheticContracts(cls.root / "contracts")
+        cls.release_dir = cls.contracts.publish()
+
+    def path(self, name: str) -> str:
+        return str(self.inputs / name)
+
+    def run_command(self, *argv: str, now=NOW) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(list(argv), clock=lambda: now)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_json(self, *argv: str, now=NOW) -> tuple[int, dict]:
+        code, out, err = self.run_command(*argv, "--json", now=now)
+        self.assertEqual(err, "")
+        payload = contract_schema.parse_strict_json(out.encode("ascii"))
+        self.assertEqual(out, contract_schema.dumps(payload), "--json prints one canonical ASCII JSON document")
+        assert isinstance(payload, dict)
+        return code, payload
+
+    def artifact_argv(self, release_dir: Path | None = None, tag: str | None = None) -> list[str]:
+        return ["artifact", "--tag", tag or self.contracts.tag, "--release-dir", str(release_dir or self.release_dir),
+                "--repo", str(self.contracts.repo)]
+
+    def compat_argv(self, revision: str = "removal.json", breaking: str = "removal-breaking.json", diff: str = "removal-diff.json",
+                    *extra: str, baseline: str = "v1.2.3") -> list[str]:
+        return ["compat", "--baseline", baseline, "--base-document", self.path("base.json"), "--revision-document",
+                self.path(revision), "--oasdiff-breaking", self.path(breaking), "--oasdiff-diff", self.path(diff), *extra]
+
+
+class UsageTest(CommandTestCase):
+    def test_help_and_usage_errors_exit_2(self) -> None:
+        code, out, _ = self.run_command("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("Exit codes: 0 pass", out)
+        for label, argv in {
+            "no subcommand": [],
+            "a subcommand of the second pull request": ["provider"],
+            "a missing required option": ["compat", "--baseline", "v1.2.3"],
+            "a clock option (the clock is never a command-line input)": ["gate", "--now", UNTIL],
+        }.items():
+            with self.subTest(label):
+                code, out, err = self.run_command(*argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("usage: verify_contract.py", err)
+
+
+class ArtifactCommandTest(CommandTestCase):
+    def test_artifact_command_exit_codes(self) -> None:
+        code, payload = self.run_json(*self.artifact_argv())
+        self.assertEqual((code, payload["verified"], payload["artifact"]["tag"]), (0, True, self.contracts.tag))
+        self.assertEqual(payload["artifact"]["checks"][-1], {"id": "github_release.presence", "status": "not_run"})
+        code, out, _ = self.run_command(*self.artifact_argv())
+        self.assertEqual(code, 0)
+        self.assertIn(f"artifact: VERIFIED {self.contracts.tag}", out)
+        self.assertIn("a verified artifact alone is not acceptance evidence", out)
+        work = temporary_root()
+        self.addCleanup(shutil.rmtree, work, True)
+        tampered = copy_release(self.release_dir, work, "tampered")
+        (tampered / FIXTURE_NAMES[0]).write_bytes((tampered / FIXTURE_NAMES[0]).read_bytes() + b" ")
+        for label, argv, expected in (
+                ("an asset changed after publication", self.artifact_argv(tampered), (1, "sums.digest_mismatch")),
+                ("a branch name instead of a tag", self.artifact_argv(tag="main"), (1, "tag.grammar"))):
+            with self.subTest(label):
+                code, payload = self.run_json(*argv)
+                self.assertEqual((code, payload["refusal"]["rule"], payload["verified"]), (*expected, False))
+        for label, argv, rule in (
+                ("missing release directory", self.artifact_argv(work / "absent"), "release_dir.missing"),
+                ("unconfigured remote", self.artifact_argv() + ["--remote", "upstream"], "remote.invalid")):
+            with self.subTest(label):
+                code, out, err = self.run_command(*argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(f"[{rule}]", err)
+
+
+class GateCommandTest(CommandTestCase):
+    def test_gate_command_exit_codes(self) -> None:
+        code, out, _ = self.run_command("gate")
+        self.assertEqual((code, out), (0, "gate: block (gate.block) at 2026-10-12T00:00:00.000Z\n"))
+        warning = self.path("gate-warn.json")
+        for label, now, expected in (("before the expiry", NOW, ("warn", "gate.warn_active")),
+                                     ("at the expiry", parse_instant(UNTIL), ("block", "gate.warn_expired"))):
+            with self.subTest(label):
+                code, payload = self.run_json("gate", "--gate-state", warning, now=now)
+                self.assertEqual((code, payload["valid"], payload["gate"]["mode"], payload["gate"]["reason"]), (0, True, *expected))
+        with self.subTest("a warning without expiry is refused, and readers block"):
+            code, payload = self.run_json("gate", "--gate-state", self.path("gate-warn-no-expiry.json"))
+            self.assertEqual((code, payload["valid"], payload["refusal"]["rule"], payload["gate"]["mode"]),
+                             (1, False, "gate.warn_until_missing", "block"))
+        for label, path, rule in (("missing", self.path("absent.json"), "input.missing"), ("a directory", str(self.inputs), "input.unreadable")):
+            with self.subTest(label):
+                code, payload = self.run_json("gate", "--gate-state", path)
+                self.assertEqual((code, payload["usage_error"]["rule"]), (2, rule))
+
+
+class CompatCommandTest(CommandTestCase):
+    def test_compat_command_exit_codes(self) -> None:
+        cases = {
+            "identical documents": (self.compat_argv("base.json", "no-changes.json", "no-diff.json"), NOW, (0, "pass", "none")),
+            "unacknowledged removal": (self.compat_argv(), NOW, (1, "fail", "breaking")),
+            "acknowledged removal with a MAJOR bump": (self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                                                        "--acknowledgement", self.path("acknowledgement.json")),
+                                                       NOW, (0, "pass", "breaking")),
+            "unacknowledged removal under a warning gate": (self.compat_argv(
+                "removal.json", "removal-breaking.json", "removal-diff.json", "--gate-state", self.path("gate-warn.json")), NOW,
+                (0, "warn", "breaking")),
+            "the same warning at its expiry": (self.compat_argv(
+                "removal.json", "removal-breaking.json", "removal-diff.json", "--gate-state", self.path("gate-warn.json")),
+                parse_instant(UNTIL), (1, "fail", "breaking")),
+            "a warning without expiry blocks": (self.compat_argv(
+                "removal.json", "removal-breaking.json", "removal-diff.json", "--gate-state", self.path("gate-warn-no-expiry.json")), NOW,
+                (1, "fail", "breaking")),
+        }
+        for label, (argv, now, expected) in cases.items():
+            with self.subTest(label):
+                code, payload = self.run_json(*argv, now=now)
+                self.assertEqual((code, payload["result"], payload["compatibility"]["change_class"]), expected)
+        code, out, _ = self.run_command(*self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                                          "--gate-state", self.path("gate-warn.json")))
+        self.assertTrue(out.startswith("compat: WARN revision 2.0.0 against v1.2.3: change class breaking\n"), out)
+        self.assertIn(f"until {UNTIL}; they block from then on", out)
+
+    def test_compat_command_input_errors_exit_2(self) -> None:
+        self.assertEqual(self.run_command(*self.compat_argv())[0], 1)
+        cases = {
+            "a missing document": (self.compat_argv("absent.json"), "input.missing"),
+            "a document that is not JSON": (self.compat_argv("not-json.json"), "input.not_json"),
+            "a baseline the base document does not declare": (self.compat_argv(baseline="v1.2.2"), "compat.baseline_version_mismatch"),
+            "malformed detector output": (self.compat_argv("removal.json", "breaking-invalid.json"), "compat.detector_output_invalid"),
+            "a missing acknowledgement": (self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                                           "--acknowledgement", self.path("absent.json")), "input.missing"),
+            "a malformed acknowledgement": (self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                                             "--acknowledgement", self.path("acknowledgement-invalid.json")),
+                                            "compat.acknowledgement_invalid"),
+        }
+        for label, (argv, rule) in cases.items():
+            with self.subTest(label):
+                code, payload = self.run_json(*argv)
+                self.assertEqual((code, payload["usage_error"]["rule"]), (2, rule))
+                code, out, err = self.run_command(*argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(f"[{rule}]", err)
+
+
+class ReportCommandTest(CommandTestCase):
+    def test_report_command_exit_codes(self) -> None:
+        code, out, _ = self.run_command("report", "--report", self.path("report-synthetic.json"))
+        self.assertEqual((code, out), (0, "report: VALID, verdict pass, acceptance_eligible false\n"))
+        code, payload = self.run_json("report", "--report", self.path("report-python-missing.json"))
+        self.assertEqual((code, payload["valid"], payload["verdict"], payload["missing_languages"], payload["reasons"]),
+                         (1, True, "fail", ["python"], [{"rule": "report.required_language_missing", "subject": "python"}]))
+        for label, name, rule in (("an omission declared as a pass", "report-omission-as-pass.json", "report.missing_languages_inconsistent"),
+                                  ("not JSON", "not-json.json", "report.not_json")):
+            with self.subTest(label):
+                code, payload = self.run_json("report", "--report", self.path(name))
+                self.assertEqual((code, payload["valid"], payload["verdict"], payload["problems"][0]["rule"]), (1, False, None, rule))
+        code, payload = self.run_json("report", "--report", self.path("absent.json"))
+        self.assertEqual((code, payload["usage_error"]["rule"]), (2, "input.missing"))
+
+
+class WriteBoundaryTest(CommandTestCase):
+    def test_runner_writes_only_inside_temp(self) -> None:
+        scratch, cwd = temporary_root("pl-verify-scratch-"), temporary_root("pl-verify-cwd-")
+        self.addCleanup(shutil.rmtree, scratch, True)
+        self.addCleanup(shutil.rmtree, cwd, True)
+        watched = (self.contracts.repo, self.contracts.origin, self.release_dir, self.inputs, support.SCRIPTS / "verification")
+        before = [support.snapshot(path) for path in watched]
+        commands = (
+            (self.artifact_argv(), 0), (self.artifact_argv(tag="v9.9.9"), 1), (["gate"], 0),
+            (["gate", "--gate-state", self.path("gate-warn.json")], 0), (self.compat_argv(), 1),
+            (self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json", "--acknowledgement",
+                              self.path("acknowledgement.json")), 0),
+            (["report", "--report", self.path("report-synthetic.json")], 0),
+        )
+        with mock.patch.object(tempfile, "tempdir", str(scratch)), contextlib.chdir(cwd), AuditRecorder() as recorder:
+            codes = [self.run_command(*argv)[0] for argv, _ in commands]
+        self.assertEqual(codes, [expected for _, expected in commands])
+        self.assertEqual(recorder.errors, [])
+        self.assertTrue(recorder.writes, "the artifact command unpacks archives, so writes must have been recorded")
+        outside = [(event, path) for event, path in recorder.writes if not Path(path).is_relative_to(scratch)]
+        self.assertEqual(outside, [])
+        self.assertEqual(list(scratch.iterdir()), [], "the loader removes its unpack directory")
+        self.assertEqual(list(cwd.iterdir()), [])
+        self.assertEqual([support.snapshot(path) for path in watched], before)
+        self.assertTrue(recorder.processes)
+        for argv in recorder.processes:
+            self.assertEqual((Path(argv[0]).name, argv[1:3]), ("git", ["-C", str(self.contracts.repo)]), argv)
+            self.assertIn(argv[3], READ_ONLY_GIT, argv)
+
+
+if __name__ == "__main__":
+    unittest.main()

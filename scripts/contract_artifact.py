@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import gzip
 import io
-import json
 import os
 import re
 import shutil
@@ -48,6 +47,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pl_contracts  # noqa: E402
 from check_breaking_changes import TAG  # noqa: E402
+from contract_schema import StrictJsonError, parse_strict_json  # noqa: E402
 from generate_clients import GOLDEN, MANIFEST_NAME, golden_inconsistency  # noqa: E402
 from pl_contracts import PipelineError, sha256_bytes, spec_version, tree_hash  # noqa: E402
 
@@ -509,29 +509,11 @@ def _read_release_set(release_dir: Path, sources: dict[str, str]) -> tuple[dict[
 # --- strict JSON shapes ------------------------------------------------------------------------------
 
 def strict_json(data: bytes, rule: str, what: str) -> object:
-    """Parse UTF-8 JSON without a byte order mark, duplicate keys or non-finite numbers."""
+    """Parse UTF-8 JSON without a byte order mark, duplicate keys or non-finite numbers (contract_schema)."""
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ArtifactRefused(rule, f"{what} is not UTF-8") from None
-    if text.startswith("\ufeff"):
-        raise ArtifactRefused(rule, f"{what} starts with a byte order mark")
-
-    def unique(pairs: list[tuple[str, object]]) -> dict:
-        value: dict = {}
-        for key, item in pairs:
-            if key in value:
-                raise ValueError("duplicate key")
-            value[key] = item
-        return value
-
-    def non_finite(_: str) -> object:
-        raise ValueError("non-finite number")
-
-    try:
-        return json.loads(text, object_pairs_hook=unique, parse_constant=non_finite)
-    except (ValueError, RecursionError):
-        raise ArtifactRefused(rule, f"{what} is not strict JSON (syntax, duplicate key or non-finite number)") from None
+        return parse_strict_json(data)
+    except StrictJsonError as error:
+        raise ArtifactRefused(rule, f"{what} {error}") from None
 
 
 def _is_hex64(value: object) -> bool:

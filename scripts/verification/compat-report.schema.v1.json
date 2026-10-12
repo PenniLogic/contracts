@@ -1,0 +1,365 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/PenniLogic/contracts/blob/main/scripts/verification/compat-report.schema.v1.json",
+  "title": "PenniLogic contract compatibility report, version 1",
+  "description": "Closed. The observability output of the contract verification runner (PenniLogic/contracts#3, T-QA-02): the contract version verified, the compatibility class and gate decision, the provider row and one row per consumer with its version and the contract version it was verified against, the verdict and whether the run is acceptance evidence. scripts/contract_report.py adds the rules this subset cannot express: a required language without a row, a not_run row or a not_run compatibility section makes the verdict fail; a synthetic-fixture report is never acceptance_eligible, which is true exactly when the mode is published and the provider and every consumer row are live; declared verdict, missing_languages and acceptance_eligible must equal the recomputed values. Uses the repository's stdlib draft-07 subset (scripts/contract_schema.py).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "generated_at",
+    "mode",
+    "contract",
+    "required_languages",
+    "compatibility",
+    "gate",
+    "provider",
+    "consumers",
+    "missing_languages",
+    "verdict",
+    "acceptance_eligible"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pennilogic-compat-report@1"
+    },
+    "generated_at": {
+      "$ref": "#/definitions/instant"
+    },
+    "mode": {
+      "enum": [
+        "published",
+        "synthetic-fixture"
+      ]
+    },
+    "contract": {
+      "$ref": "#/definitions/contract"
+    },
+    "required_languages": {
+      "const": [
+        "kotlin",
+        "typescript",
+        "python"
+      ]
+    },
+    "compatibility": {
+      "$ref": "#/definitions/compatibility"
+    },
+    "gate": {
+      "$ref": "#/definitions/gate"
+    },
+    "provider": {
+      "$ref": "#/definitions/provider"
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/consumer"
+      }
+    },
+    "missing_languages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/language"
+      }
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "acceptance_eligible": {
+      "type": "boolean"
+    }
+  },
+  "definitions": {
+    "instant": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "language": {
+      "enum": [
+        "kotlin",
+        "typescript",
+        "python"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\\s\\S])"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])"
+    },
+    "contract": {
+      "description": "The contract version this report verified; a published report names its tag, tag commit and release manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "tag",
+        "commit",
+        "spec_sha256",
+        "release_manifest_sha256"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/semver"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?(?![\\s\\S])"
+        },
+        "spec_sha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "release_manifest_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "location",
+        "detector"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*(?![\\s\\S])"
+        },
+        "location": {
+          "$ref": "#/definitions/text"
+        },
+        "detector": {
+          "$ref": "#/definitions/name"
+        }
+      }
+    },
+    "compatibility": {
+      "description": "check_breaking_changes findings and acknowledgement problems for this version against its published baseline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline",
+        "revision_version",
+        "change_class",
+        "findings",
+        "problems",
+        "result"
+      ],
+      "properties": {
+        "baseline": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+        },
+        "revision_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+        },
+        "change_class": {
+          "enum": [
+            "none",
+            "additive",
+            "breaking",
+            "not_run"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/finding"
+          }
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          }
+        },
+        "result": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "not_run"
+          ]
+        }
+      }
+    },
+    "gate": {
+      "description": "The effective gate when the report was generated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "reason",
+        "warn_until",
+        "state_sha256"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "block",
+            "warn"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "gate.block",
+            "gate.warn_active",
+            "gate.warn_expired",
+            "gate.missing",
+            "gate.unreadable",
+            "gate.malformed",
+            "gate.warn_until_missing",
+            "gate.warn_until_invalid",
+            "gate.warn_until_unexpected"
+          ]
+        },
+        "warn_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+        },
+        "state_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "verified_contract_version",
+        "mode",
+        "result"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]*(?![\\s\\S])"
+        },
+        "verified_contract_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+        },
+        "mode": {
+          "enum": [
+            "live",
+            "synthetic-fixture",
+            "not_run"
+          ]
+        },
+        "result": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_run"
+          ]
+        }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "name",
+        "version",
+        "verified_contract_version",
+        "mode",
+        "result"
+      ],
+      "properties": {
+        "language": {
+          "$ref": "#/definitions/language"
+        },
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]*(?![\\s\\S])"
+        },
+        "verified_contract_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+        },
+        "mode": {
+          "enum": [
+            "live",
+            "synthetic-fixture",
+            "not_run"
+          ]
+        },
+        "result": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_run"
+          ]
+        }
+      }
+    }
+  }
+}
