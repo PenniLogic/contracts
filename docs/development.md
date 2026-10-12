@@ -404,6 +404,10 @@ any unconfirmed cleanup retains state. An interruption during state removal stil
 failed aggregate with the original results. Linux cleanup fences the reserved group regardless
 of an empty procfs observation before accepting drain and reaping the leader; repeated scans
 alone are not a completion guarantee. Linux execution remains a separate qualification gate.
+If owner construction fails, pending POSIX cleanup uses the retained process and record with
+the same wait/fence/drain/join primitives, never the failed owner factory. Its cancellation
+recovery shares the original five-second cleanup deadline; a fence, scan, drain or join error
+still retains explicit uncertainty and the primary launch failure.
 Linux reaping begins only after confirmed reserved-group fencing/drain and is recorded as an
 irreversible transition before `Popen.wait`, which can reap and then re-raise cancellation.
 Recovery after that boundary is bounded joining/bookkeeping only: numeric group signaling

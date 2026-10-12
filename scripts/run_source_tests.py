@@ -810,6 +810,67 @@ class WindowsJob:
             self.handle = None
 
 
+def _ownership_record(windows: bool) -> dict:
+    return {
+        "kind": "Windows Job Object" if windows else "unreaped POSIX process group",
+        "acquisition_started": False, "attached_before_execution": False, "leader_exit": None,
+        "remaining_after_leader": None, "remaining_after_cleanup": None,
+        "cleanup_confirmed": False, "group_fenced": False,
+        "group_drain_confirmed": False, "reap_started": False,
+        "leader_join_confirmed": False, "lingering_after_leader": False,
+    }
+
+
+def _wait_posix_leader(process: subprocess.Popen, timeout: float | None, *,
+                       deadline: float | None = None) -> int:
+    if deadline is None and timeout is not None:
+        deadline = perf_counter() + timeout
+    while True:
+        result = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT |
+                           (os.WNOHANG if deadline is not None else 0))
+        if result is not None:
+            return result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+        if perf_counter() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        sleep(0.01)
+
+
+def _posix_group_active(pid: int) -> int:
+    count = 0
+    for directory in Path("/proc").iterdir():
+        if not directory.name.isdigit() or int(directory.name) == pid:
+            continue
+        try:
+            text = (directory / "stat").read_bytes()
+        except FileNotFoundError:
+            continue  # A process that disappeared during observation is already gone.
+        if b")" not in text:
+            raise PipelineError("owned process-group observation returned a malformed stat record")
+        fields = text[text.rindex(b")") + 2:].split()
+        if len(fields) < 3:
+            raise PipelineError("owned process-group stat record is incomplete")
+        if int(fields[2]) == pid and fields[0] not in {b"Z", b"X"}:
+            count += 1
+    return count
+
+
+def _fence_posix_group(process: subprocess.Popen, record: dict) -> None:
+    if record.get("reap_started"):
+        raise PipelineError("Linux process-group signaling refused after reaping started")
+    os.killpg(process.pid, signal.SIGKILL)
+    record["group_fenced"] = True
+
+
+def _join_posix_after_drain(process: subprocess.Popen, record: dict, timeout: float) -> int:
+    if not record.get("group_fenced") or not record.get("group_drain_confirmed"):
+        raise PipelineError("Linux leader cannot be reaped before confirmed reserved-group drain")
+    # Popen.wait can reap and then re-raise cancellation; authority must end before the call.
+    record["reap_started"] = True
+    code = process.wait(timeout=timeout)
+    record.update(leader_exit=code, leader_join_confirmed=True)
+    return code
+
+
 class OwnedProcess:
     def __init__(self, process: subprocess.Popen):
         self.process = process
@@ -817,14 +878,7 @@ class OwnedProcess:
         self.windows = os.name == "nt"
         self.job = None
         self.acquired = False
-        self.record = {
-            "kind": "Windows Job Object" if self.windows else "unreaped POSIX process group",
-            "acquisition_started": False, "attached_before_execution": False, "leader_exit": None,
-            "remaining_after_leader": None, "remaining_after_cleanup": None,
-            "cleanup_confirmed": False, "group_fenced": False,
-            "group_drain_confirmed": False, "reap_started": False,
-            "leader_join_confirmed": False, "lingering_after_leader": False,
-        }
+        self.record = _ownership_record(self.windows)
 
     def acquire(self):
         self.record["acquisition_started"] = True
@@ -842,38 +896,14 @@ class OwnedProcess:
             if self.windows:
                 self.exit = self.process.wait(timeout=timeout)
             else:
-                deadline = perf_counter() + timeout if timeout is not None else None
-                while True:
-                    result = os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOWAIT |
-                                       (os.WNOHANG if deadline is not None else 0))
-                    if result is not None:
-                        break
-                    if perf_counter() >= deadline:
-                        raise subprocess.TimeoutExpired(self.process.args, timeout)
-                    sleep(0.01)
-                self.exit = result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+                self.exit = _wait_posix_leader(self.process, timeout)
             self.record["leader_exit"] = self.exit
         return self.exit
 
     def active(self) -> int:
         if self.job:
             return self.job.active()
-        count = 0
-        for directory in Path("/proc").iterdir():
-            if not directory.name.isdigit() or int(directory.name) == self.process.pid:
-                continue
-            try:
-                text = (directory / "stat").read_bytes()
-            except FileNotFoundError:
-                continue  # A process that disappeared during observation is already gone.
-            if b")" not in text:
-                raise PipelineError("owned process-group observation returned a malformed stat record")
-            fields = text[text.rindex(b")") + 2:].split()
-            if len(fields) < 3:
-                raise PipelineError("owned process-group stat record is incomplete")
-            if int(fields[2]) == self.process.pid and fields[0] not in {b"Z", b"X"}:
-                count += 1
-        return count
+        return _posix_group_active(self.process.pid)
 
     def terminate(self):
         if self.windows:
@@ -882,18 +912,13 @@ class OwnedProcess:
             if self.job is not None and self.job.handle is not None:
                 self.job.terminate()
         else:
-            if self.record.get("reap_started"):
-                raise PipelineError("Linux process-group signaling refused after reaping started")
-            os.killpg(self.process.pid, signal.SIGKILL)
-            self.record["group_fenced"] = True
+            _fence_posix_group(self.process, self.record)
 
     def join_after_drain(self, timeout: float) -> None:
         if not self.windows:
-            if not self.record.get("group_fenced") or not self.record.get("group_drain_confirmed"):
-                raise PipelineError("Linux leader cannot be reaped before confirmed reserved-group drain")
-            # Popen.wait can reap and then re-raise cancellation; authority must end before the call.
-            self.record["reap_started"] = True
-        self.exit = self.process.wait(timeout=timeout)
+            self.exit = _join_posix_after_drain(self.process, self.record, timeout)
+        else:
+            self.exit = self.process.wait(timeout=timeout)
         self.record["leader_exit"] = self.exit
         self.record["leader_join_confirmed"] = True
 
@@ -964,24 +989,49 @@ class OwnedProcess:
                 self.record["leader_exit"] = self.exit
 
 
+def _finish_pending_posix_process(process: subprocess.Popen, record: dict, deadline: float) -> None:
+    if not record.get("reap_started"):
+        _fence_posix_group(process, record)
+        record["leader_exit"] = _wait_posix_leader(
+            process, max(0, deadline - perf_counter()), deadline=deadline)
+        try:
+            record["remaining_after_leader"] = _posix_group_active(process.pid)
+        except (OSError, ValueError, PipelineError, KeyboardInterrupt) as error:
+            try:
+                _fence_posix_group(process, record)
+            except (OSError, ValueError, PipelineError, KeyboardInterrupt) as containment_error:
+                error.add_note(
+                    f"Reserved-group containment failed: {type(containment_error).__name__}: "
+                    f"{containment_error}")
+                raise error from containment_error
+            raise
+        _fence_posix_group(process, record)
+        while _posix_group_active(process.pid):
+            if perf_counter() >= deadline:
+                raise PipelineError("owned process group/job did not drain within five seconds")
+            sleep(0.01)
+        record["group_drain_confirmed"] = True
+    _join_posix_after_drain(process, record, max(0, deadline - perf_counter()))
+    record.update(remaining_after_cleanup=0, cleanup_confirmed=True)
+
+
 def cleanup_pending_process(process: subprocess.Popen, record: dict) -> None:
-    record["cleanup_confirmed"] = False
-    owner = None if os.name == "nt" else OwnedProcess(process)
-    if owner is not None:
-        for key, value in owner.record.items():
+    windows = os.name == "nt"
+    if not windows:
+        for key, value in _ownership_record(False).items():
             record.setdefault(key, value)
-        owner.record = record
+    record["cleanup_confirmed"] = False
     cancellation = None
     deadline = perf_counter() + 5
     for attempt in range(2):
         try:
-            if owner is None:
+            if windows:
                 process.kill()
                 record["leader_exit"] = process.wait(timeout=5 if attempt == 0 else
                                                     max(0, deadline - perf_counter()))
                 record.update(remaining_after_cleanup=0, cleanup_confirmed=True)
             else:
-                owner.finish(forced=True)
+                _finish_pending_posix_process(process, record, deadline)
             break
         except KeyboardInterrupt as error:
             record["cleanup_cancellation"] = str(error)

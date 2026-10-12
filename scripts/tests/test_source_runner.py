@@ -1149,6 +1149,144 @@ class ProviderTransportSchemaTest(unittest.TestCase):
         self.assertTrue(receipt["owned_process_cleanup_confirmed"])
         self.assertTrue(receipt["state_cleaned_after_child_join"])
 
+    def test_pending_posix_cleanup_uses_retained_primitives_without_owner_reconstruction(self) -> None:
+        process = mock.Mock(pid=2901, args=["synthetic pending process"])
+        record = {"cleanup_confirmed": False, "leader_exit": None}
+        events = []
+        scans = iter((1, 1, 0))
+
+        def active(pid):
+            self.assertEqual(pid, process.pid)
+            events.append("scan")
+            return next(scans)
+
+        def join(timeout):
+            events.append("join")
+            self.assertTrue(record["group_fenced"])
+            self.assertTrue(record["group_drain_confirmed"])
+            self.assertTrue(record["reap_started"])
+            self.assertAlmostEqual(timeout, 4.6)
+            return -9
+
+        process.wait.side_effect = join
+        with mock.patch.object(source_tests.os, "name", "posix"), \
+                mock.patch.object(source_tests, "OwnedProcess",
+                                  side_effect=OSError("synthetic owner construction refused")) as factory, \
+                mock.patch.object(source_tests, "_wait_posix_leader",
+                                  side_effect=lambda *args, **kwargs: events.append("leader") or -9) as leader, \
+                mock.patch.object(source_tests, "_posix_group_active", side_effect=active) as scan, \
+                mock.patch.object(source_tests.signal, "SIGKILL", 9, create=True), \
+                mock.patch.object(source_tests.os, "killpg", create=True,
+                                  side_effect=lambda *args: events.append("fence")) as signal_group, \
+                mock.patch.object(source_tests, "perf_counter",
+                                  side_effect=(100, 100.2, 100.3, 100.4)) as clock, \
+                mock.patch.object(source_tests, "sleep") as sleep:
+            source_tests.cleanup_pending_process(process, record)
+        self.retain_linux_mock("pending constructor-independent primitives", {
+            "events": events, "ownership": record,
+            "shared_deadline": 105, "leader_timeout": leader.call_args.args[1],
+            "join_timeout": process.wait.call_args.kwargs["timeout"],
+        })
+        factory.assert_not_called()
+        self.assertEqual(events, ["fence", "leader", "scan", "fence", "scan", "scan", "join"])
+        self.assertEqual(signal_group.call_args_list, [mock.call(process.pid, 9)] * 2)
+        self.assertEqual(scan.call_count, 3)
+        self.assertEqual(clock.call_count, 4)
+        sleep.assert_called_once_with(0.01)
+        self.assertAlmostEqual(leader.call_args.args[1], 4.8)
+        self.assertEqual(leader.call_args.kwargs, {"deadline": 105})
+        self.assertEqual(record["leader_exit"], -9)
+        self.assertEqual(record["remaining_after_leader"], 1)
+        self.assertEqual(record["remaining_after_cleanup"], 0)
+        self.assertTrue(record["leader_join_confirmed"])
+        self.assertTrue(record["cleanup_confirmed"])
+        self.assertFalse(record["attached_before_execution"])
+
+    def test_pending_posix_fence_scan_drain_and_join_errors_remain_unconfirmed(self) -> None:
+        for label in ("fence", "scan", "scan-containment", "post-fence-scan", "drain", "join"):
+            with self.subTest(boundary=label):
+                process = mock.Mock(pid=2902, args=["synthetic pending process"])
+                record = {"cleanup_confirmed": False, "leader_exit": None}
+                error = OSError("synthetic pending " + label + " refused")
+                signal_effect = error if label == "fence" else (
+                    [None, OSError("synthetic pending containment denied")] if label == "scan-containment"
+                    else None)
+                scan_effect = error if label in {"scan", "scan-containment"} else (
+                    [0, error] if label == "post-fence-scan" else None)
+                process.wait.side_effect = error if label == "join" else None
+                with mock.patch.object(source_tests.os, "name", "posix"), \
+                        mock.patch.object(source_tests, "OwnedProcess",
+                                          side_effect=AssertionError("must not rebuild pending owner")) as factory, \
+                        mock.patch.object(source_tests, "_wait_posix_leader", return_value=-9) as leader, \
+                        mock.patch.object(source_tests, "_posix_group_active",
+                                          return_value=1 if label == "drain" else 0,
+                                          side_effect=scan_effect) as scan, \
+                        mock.patch.object(source_tests.signal, "SIGKILL", 9, create=True), \
+                        mock.patch.object(source_tests.os, "killpg", create=True,
+                                          side_effect=signal_effect) as signal_group, \
+                        mock.patch.object(source_tests, "perf_counter",
+                                          side_effect=(100, 100, 105) if label == "drain" else None,
+                                          return_value=100), \
+                        self.assertRaises(source_tests.PipelineError if label == "drain" else OSError) as caught:
+                    source_tests.cleanup_pending_process(process, record)
+                factory.assert_not_called()
+                self.assertFalse(record["cleanup_confirmed"])
+                self.assertFalse(record["leader_join_confirmed"])
+                self.assertEqual(record["reap_started"], label == "join")
+                self.assertEqual(record["group_drain_confirmed"], label == "join")
+                self.assertEqual(record["group_fenced"], label != "fence")
+                if label == "drain":
+                    self.assertIn("did not drain", str(caught.exception))
+                else:
+                    self.assertIs(caught.exception, error)
+                if label == "scan-containment":
+                    self.assertIn("containment denied", str(caught.exception.__cause__))
+                    self.assertTrue(any("containment denied" in note for note in caught.exception.__notes__))
+                if label != "join":
+                    process.wait.assert_not_called()
+                if label == "fence":
+                    leader.assert_not_called()
+                    scan.assert_not_called()
+                self.retain_linux_mock("pending refusal " + label, {
+                    "ownership": record, "error": str(caught.exception),
+                    "group_signal_count": signal_group.call_count,
+                    "join_count": process.wait.call_count,
+                })
+
+    def test_pending_owner_failure_keeps_closed_pipe_primary_error_and_cleanup_uncertainty(self) -> None:
+        plan = self.root / "pending-owner-plan.json"
+        plan.write_text("{}", encoding="utf-8")
+        serial, pending = mock.Mock(pid=2903), mock.Mock(pid=2904, stdin=io.BytesIO())
+        owner = mock.Mock(process=serial, exit=-9)
+        owner.record = source_tests._ownership_record(os.name == "nt")
+
+        def drained(forced):
+            owner.record.update(cleanup_confirmed=True, leader_exit=-9,
+                                leader_join_confirmed=True, remaining_after_cleanup=0)
+            return False
+
+        owner.finish.side_effect = drained
+        primary = OSError("synthetic primary pending owner construction refused")
+        secondary = OSError("synthetic pending cleanup fence refused")
+        observation = source_tests.PhaseObservation()
+        readiness = mock.Mock()
+        with mock.patch.object(source_tests.subprocess, "Popen", side_effect=(serial, pending)), \
+                mock.patch.object(source_tests, "OwnedProcess", side_effect=(owner, primary)), \
+                mock.patch.object(source_tests, "cleanup_pending_process", side_effect=secondary) as cleanup, \
+                self.assertRaises(OSError) as caught:
+            source_tests.run_phase(plan, ["serial", "cli-1"], self.root / "pending-state",
+                                   observation, serial_ready=readiness)
+        self.assertIs(caught.exception, primary)
+        self.assertTrue(pending.stdin.closed)
+        cleanup.assert_called_once_with(pending, observation.children["cli-1"]["ownership"])
+        owner.finish.assert_called_once_with(forced=True)
+        readiness.assert_not_called()
+        self.assertTrue(observation.children["serial"]["ownership"]["cleanup_confirmed"])
+        self.assertIsNone(observation.children["cli-1"]["exit"])
+        self.assertFalse(observation.children["cli-1"]["ownership"]["cleanup_confirmed"])
+        self.assertFalse(observation.cleanup_confirmed)
+        self.assertTrue(any("pending cleanup fence refused" in error for error in observation.cleanup_errors))
+
     def test_overlap_exited_serial_leader_with_live_descendant_cannot_release_sdk_readers(self) -> None:
         self.cached_overlap_tools()
         self.fixture({
@@ -2161,13 +2299,10 @@ class ProviderTransportSchemaTest(unittest.TestCase):
             with self.assertRaisesRegex(KeyboardInterrupt, "pending cleanup cancellation"):
                 source_tests.cleanup_pending_process(child, record)
         else:
-            owner = mock.Mock()
-            owner.record = dict(record)
-            def finish(forced):
+            def finish(process, pending_record, deadline):
                 child.kill()
-                record.update(leader_exit=child.wait(timeout=5), cleanup_confirmed=True)
-            owner.finish.side_effect = finish
-            with mock.patch.object(source_tests, "OwnedProcess", return_value=owner), \
+                pending_record.update(leader_exit=child.wait(timeout=5), cleanup_confirmed=True)
+            with mock.patch.object(source_tests, "_finish_pending_posix_process", side_effect=finish), \
                     self.assertRaisesRegex(KeyboardInterrupt, "pending cleanup cancellation"):
                 source_tests.cleanup_pending_process(child, record)
         self.assertEqual(child.kill.call_count, 2)
@@ -2336,12 +2471,16 @@ class ProviderTransportSchemaTest(unittest.TestCase):
         owner.process.wait.side_effect = reap
         record = {"cleanup_confirmed": False, "leader_exit": None}
         with mock.patch.object(source_tests.os, "name", "posix"), \
-                mock.patch.object(source_tests, "OwnedProcess", return_value=owner), \
+                mock.patch.object(source_tests, "OwnedProcess",
+                                  side_effect=AssertionError("must not rebuild pending owner")) as factory, \
+                mock.patch.object(source_tests, "_wait_posix_leader", return_value=0), \
+                mock.patch.object(source_tests, "_posix_group_active", return_value=0), \
                 mock.patch.object(source_tests.signal, "SIGKILL", 9, create=True), \
                 mock.patch.object(source_tests.os, "killpg", create=True,
                                   side_effect=lambda *args: events.append("signal")):
             with self.assertRaisesRegex(KeyboardInterrupt, "pending reap cancellation"):
                 source_tests.cleanup_pending_process(owner.process, record)
+        factory.assert_not_called()
         self.retain_linux_mock("pending reap interruption", {"events": events, "ownership": record})
         self.assertNotIn("signal", events[events.index("reap") + 1:])
         self.assertTrue(record["reap_started"])
@@ -2474,14 +2613,18 @@ class ProviderTransportSchemaTest(unittest.TestCase):
         events = []
         owner.process.wait.side_effect = lambda timeout: events.append("join-only") or 0
         with mock.patch.object(source_tests.os, "name", "posix"), \
-                mock.patch.object(source_tests, "OwnedProcess", return_value=owner), \
+                mock.patch.object(source_tests, "OwnedProcess",
+                                  side_effect=AssertionError("must not rebuild pending owner")) as factory, \
+                mock.patch.object(source_tests, "_wait_posix_leader") as leader, \
+                mock.patch.object(source_tests, "_posix_group_active") as active, \
                 mock.patch.object(source_tests.signal, "SIGKILL", 9, create=True), \
                 mock.patch.object(source_tests.os, "killpg", create=True) as signal_group:
             source_tests.cleanup_pending_process(owner.process, record)
+        factory.assert_not_called()
         self.retain_linux_mock("preserved pending boundary", {"events": events, "ownership": record})
         signal_group.assert_not_called()
-        owner.wait_leader.assert_not_called()
-        owner.active.assert_not_called()
+        leader.assert_not_called()
+        active.assert_not_called()
         self.assertTrue(record["reap_started"])
         self.assertTrue(record["group_drain_confirmed"])
         self.assertTrue(record["cleanup_confirmed"])
