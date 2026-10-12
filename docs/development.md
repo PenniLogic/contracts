@@ -362,6 +362,26 @@ and outcome records from the standard `TestResult`. Failed subtests retain their
 index and exact failure identity/traceback. Class/module fixture errors and unstarted methods
 remain in failed receipts; missing execution never becomes a pass or loses the original error.
 These local receipts are not an independently qualified Infra Conformance witness or CI result.
+After final receipt validation, stdout includes one bounded JSON timing block between
+`SOURCE_TEST_FINAL_TIMING_BEGIN` and `SOURCE_TEST_FINAL_TIMING_END`. It projects only exact
+method IDs/durations, class setup/teardown durations, final worker intervals, validated
+independent-prefix intervals and parent phase intervals. The plan's exact SHA256 and the
+SHA256 of its sorted compact JSON input snapshot bind the diagnostic to its source; source
+paths, environments, raw streams and failure details are not projected. Existing receipt
+schemas and worker scheduling are unchanged.
+
+Final and prefix seconds share each worker's existing start; prefix intervals are not final
+lane results. Overlapped serial/CLI parent phases share the overlap start, while conservative
+parent phases have separate starts. Complete-source seconds retain the origin before the
+input snapshot and end at summary construction, excluding final serialization/output and
+host exit. Durations are not additive, and lane-minus-method time is not measured waiting.
+The entire ASCII JSON block including markers/newline must fit one MiB; IDs must be ASCII
+dotted identifiers of at most 512 characters and timing values finite/nonnegative. Missing
+validated finals or required prefixes, invalid timing/identity/class coverage, oversized output or an output
+error explicitly fails the aggregate rather than truncating or reporting graph success.
+This public-safe projection is timing-diagnostic-only, not native cleanup, parity/IPC/
+collector, host-tail, hosted-under600, Conformance or integration qualification.
+
 During overlap each CLI worker retains an indexed independent-prefix checkpoint before
 waiting for readiness. Checkpoints are not full lane results, carry no child-exit acceptance
 and never enter the complete discovered/executed union. Final full lane receipts keep their

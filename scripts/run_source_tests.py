@@ -20,6 +20,7 @@ import ctypes
 from ctypes import wintypes
 from datetime import datetime, timezone
 import fnmatch
+import hashlib
 import json
 import math
 import os
@@ -60,6 +61,9 @@ RECEIPT_KEYS = {
     "unexpected_successes", "methods", "class_phases", "seconds", "pid", "isolation",
     "test_results", "fixture_results",
 }
+TIMING_PROJECTION_MAX_BYTES = 1024 * 1024
+TIMING_PROJECTION_BEGIN = "SOURCE_TEST_FINAL_TIMING_BEGIN"
+TIMING_PROJECTION_END = "SOURCE_TEST_FINAL_TIMING_END"
 
 
 @dataclass
@@ -692,6 +696,126 @@ def checkpoint_problems(prefix: dict, final: dict | None) -> list[str]:
     return problems
 
 
+def final_timing_projection(plan: dict, plan_sha: str | None, finals: dict, prefixes: dict,
+                            phases: list, seconds: float, *, overlap: bool) -> str:
+    def duration(value):
+        if type(value) not in (int, float) or value < 0 or value > sys.float_info.max or \
+                type(value) is float and not math.isfinite(value):
+            raise PipelineError("invalid source-test final timing duration")
+        return value
+
+    def public_identity(value):
+        return isinstance(value, str) and len(value) <= 512 and re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", value) is not None
+
+    if not isinstance(plan, dict) or set(plan) != PLAN_KEYS or \
+            type(plan["version"]) is not int or plan["version"] != 1 or \
+            not isinstance(plan["root"], str) or not isinstance(plan["inputs"], dict) or \
+            any(not isinstance(name, str) or not isinstance(digest, str) or
+                re.fullmatch("[0-9a-f]{64}", digest) is None for name, digest in plan["inputs"].items()):
+        raise PipelineError("invalid source-test final timing source binding")
+    ids, assignments = plan["ids"], plan["assignments"]
+    if not isinstance(ids, list) or not ids or any(not public_identity(identity) for identity in ids) or \
+            len(ids) != len(set(ids)) or not isinstance(assignments, dict) or set(assignments) != set(LANES) or \
+            any(not isinstance(assigned, list) or any(not public_identity(identity) for identity in assigned)
+                for assigned in assignments.values()) or \
+            Counter(identity for assigned in assignments.values() for identity in assigned) != Counter(ids):
+        raise PipelineError("invalid source-test final timing identities or assignments")
+    bound_plan = (json.dumps(plan, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    if not isinstance(plan_sha, str) or hashlib.sha256(bound_plan).hexdigest() != plan_sha:
+        raise PipelineError("invalid source-test final timing plan binding")
+    if type(overlap) is not bool:
+        raise PipelineError("invalid source-test final timing phase origin")
+    active = {lane for lane in LANES if assignments[lane]}
+    required_prefixes = {lane for lane in ("cli-1", "cli-2")
+                         if overlap and independent_ids(plan, lane)}
+    if not isinstance(finals, dict) or set(finals) != active:
+        raise PipelineError("source-test final timing omitted: validated final lanes are incomplete")
+    if not isinstance(prefixes, dict) or set(prefixes) != required_prefixes:
+        raise PipelineError("source-test final timing omitted: validated independent prefixes are incomplete")
+    total = duration(seconds)
+
+    def receipt_projection(lane, value, assigned):
+        if not isinstance(value, dict) or set(value) != RECEIPT_KEYS or \
+                value["lane"] != lane or value["plan_sha256"] != plan_sha or \
+                value["discovered_ids"] != ids or value["assigned_ids"] != assigned or \
+                not isinstance(value["executed_ids"], list) or \
+                any(not isinstance(identity, str) for identity in value["executed_ids"]) or \
+                Counter(value["executed_ids"]) != Counter(assigned):
+            raise PipelineError("invalid source-test final timing receipt subject or coverage")
+        elapsed = duration(value["seconds"])
+        methods = value["methods"]
+        if not isinstance(methods, list) or any(
+                not isinstance(row, dict) or set(row) != {"test", "seconds"} or
+                not isinstance(row["test"], str) for row in methods) or \
+                Counter(row["test"] for row in methods) != Counter(assigned):
+            raise PipelineError("invalid source-test final timing method coverage")
+        method_rows = [{"test": row["test"], "seconds": duration(row["seconds"])} for row in methods]
+        classes = {identity.rsplit(".", 1)[0] for identity in assigned}
+        class_phases = value["class_phases"]
+        if not isinstance(class_phases, list) or any(
+                not isinstance(row, dict) or set(row) != {"class", "phase", "seconds"} or
+                not isinstance(row["class"], str) or row["class"] not in classes or
+                row["phase"] not in ("setUpClass", "tearDownClass") for row in class_phases) or \
+                {(row["class"], row["phase"]) for row in class_phases} != {
+                    (name, phase) for name in classes for phase in ("setUpClass", "tearDownClass")}:
+            raise PipelineError("invalid source-test final timing class phases")
+        class_rows = [{"class": row["class"], "phase": row["phase"],
+                       "seconds": duration(row["seconds"])} for row in class_phases]
+        if elapsed > total or any(row["seconds"] > elapsed for row in method_rows + class_rows):
+            raise PipelineError("invalid source-test final timing interval bounds")
+        return {"lane": lane, "seconds": elapsed, "methods": method_rows, "class_phases": class_rows}
+
+    final_rows = [receipt_projection(lane, finals[lane], assignments[lane])
+                  for lane in LANES if lane in active]
+    prefix_rows = []
+    for lane in ("cli-1", "cli-2"):
+        if lane not in required_prefixes:
+            continue
+        row = receipt_projection(lane, prefixes[lane], independent_ids(plan, lane))
+        final = next(value for value in final_rows if value["lane"] == lane)
+        if row["seconds"] > final["seconds"] or any(
+                row[key] != final[key][:len(row[key])] for key in ("methods", "class_phases")):
+            raise PipelineError("invalid source-test final timing prefix agreement")
+        prefix_rows.append(row)
+    expected_phases = [(name, [lane for lane in lanes if lane in active]) for name, lanes in (
+        ("serial", ["serial"]), ("parallel-cli", ["cli-1", "cli-2"]),
+    ) if any(lane in active for lane in lanes)]
+    phase_keys = {"phase", "lanes", "seconds", "children", "cleanup_confirmed", "cleanup_errors"}
+    if not isinstance(phases, list) or len(phases) != len(expected_phases):
+        raise PipelineError("source-test final timing omitted: parent phase durations are incomplete")
+    phase_rows = []
+    for phase, (name, lanes) in zip(phases, expected_phases):
+        flag = "independent_cli_started_with_serial" if name == "serial" else "independent_work_started_with_serial"
+        if not isinstance(phase, dict) or not {"phase", "lanes", "seconds"} <= set(phase) <= phase_keys | {flag} or \
+                phase["phase"] != name or phase["lanes"] != lanes or \
+                type(phase.get(flag, False)) is not bool or phase.get(flag, False) != overlap:
+            raise PipelineError("invalid source-test final timing parent phase origin")
+        elapsed = duration(phase["seconds"])
+        if elapsed > total:
+            raise PipelineError("invalid source-test final timing parent interval")
+        phase_rows.append({"phase": name, "lanes": lanes, "seconds": elapsed,
+                           "origin": "shared_overlap_phase_start" if overlap else "parent_phase_start"})
+    projection = {
+        "timing_diagnostic_only": True, "hosted_600_qualification": False,
+        "plan_sha256": plan_sha,
+        "source_inputs_sha256": hashlib.sha256(json.dumps(
+            plan["inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest(),
+        "complete_source_seconds": total,
+        "final_receipts": final_rows,
+        "validated_independent_prefixes_not_final_receipts": prefix_rows,
+        "parent_phases": phase_rows,
+        "receipt_seconds_origin": "worker_start",
+        "complete_seconds_origin": "complete_start_before_input_snapshot",
+        "durations_are_not_additive_or_measured_waiting": True,
+    }
+    encoded = (TIMING_PROJECTION_BEGIN + "\n" +
+               json.dumps(projection, indent=2, sort_keys=True, allow_nan=False) + "\n" + TIMING_PROJECTION_END)
+    if len((encoded + "\n").encode("utf-8")) > TIMING_PROJECTION_MAX_BYTES:
+        raise PipelineError("source-test final timing projection exceeds one MiB; nothing truncated")
+    return encoded
+
+
 class WindowsJob:
     def __init__(self):
         self.api = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -1229,6 +1353,8 @@ def complete() -> int:
     ownership_observations = []
     profile = {"enabled": False, "reason": "resource profile not evaluated", "tools": {}}
     checkpoints = {}
+    timing_finals, timing_prefixes = {}, {}
+    plan_sha = None
 
     def orchestration_error(stage, error):
         detail = f"{stage}: {type(error).__name__}: {error}"
@@ -1246,10 +1372,13 @@ def complete() -> int:
                 artifacts / (lane + ".receipt.json"), plan, lane, plan_sha,
                 ChildExit(child["pid"], child["exit"]),
             )
+            timing_finals[lane] = receipts[lane]
         except ChildResultError as error:
             receipts[lane] = error.receipt
             problems.append(f"{lane}: {error}")
             failed = not error.test_failure_only
+            if error.test_failure_only:
+                timing_finals[lane] = error.receipt
         except (OSError, ValueError, PipelineError, subprocess.SubprocessError) as error:
             orchestration_error(lane + " receipt", error)
             failed = True
@@ -1327,6 +1456,7 @@ def complete() -> int:
                 collect_logs(lane)
                 checkpoint = artifacts / (lane + ".partial.receipt.json")
                 child = observation.children.get(lane)
+                checkpoint_validated = False
                 if independent_ids(plan, lane) and not checkpoint.is_file():
                     problems.append(f"{lane}: required independent checkpoint is missing")
                 if checkpoint.is_file() and child is not None and type(child["exit"]) is int:
@@ -1334,14 +1464,17 @@ def complete() -> int:
                         checkpoints[lane] = validate_receipt(
                             checkpoint, plan, lane, plan_sha, ChildExit(child["pid"], child["exit"]), partial=True,
                         )
+                        checkpoint_validated = True
                     except ChildResultError as error:
                         checkpoints[lane] = error.receipt
                         problems.append(f"{lane}: incomplete independent checkpoint: {error}")
                     except (OSError, ValueError, PipelineError, subprocess.SubprocessError) as error:
                         orchestration_error(lane + " independent checkpoint", error)
                 if lane in checkpoints:
-                    problems.extend(f"{lane}: {problem}" for problem in
-                                    checkpoint_problems(checkpoints[lane], receipts.get(lane)))
+                    checkpoint_errors = checkpoint_problems(checkpoints[lane], receipts.get(lane))
+                    problems.extend(f"{lane}: {problem}" for problem in checkpoint_errors)
+                    if checkpoint_validated and not checkpoint_errors:
+                        timing_prefixes[lane] = checkpoints[lane]
             if input_snapshot(ROOT) != before or sha256_file(plan_path) != plan_sha:
                 problems.append("source-test inputs or assignment plan changed")
             if source_tool_snapshot() != profile["tools"]:
@@ -1397,11 +1530,14 @@ def complete() -> int:
                             artifacts / (lane + ".receipt.json"), plan, lane, plan_sha,
                             ChildExit(child["pid"], child["exit"]),
                         )
+                        timing_finals[lane] = receipts[lane]
                     except ChildResultError as error:
                         receipts[lane] = error.receipt
                         problems.append(f"{lane}: {error}")
                         if not error.test_failure_only:
                             phase_failed = True
+                        else:
+                            timing_finals[lane] = error.receipt
                     except (OSError, ValueError, PipelineError, subprocess.SubprocessError) as error:
                         orchestration_error(lane + " receipt", error)
                         phase_failed = True
@@ -1460,6 +1596,15 @@ def complete() -> int:
         "seconds": perf_counter() - started, "state_cleaned_after_child_join": not states.exists(),
         "hosted_600_qualification": False,
     }
+    try:
+        projection = final_timing_projection(
+            plan, plan_sha, timing_finals, timing_prefixes, phases, summary["seconds"],
+            overlap=profile["enabled"],
+        )
+        print(projection, flush=True)
+    except (OSError, ValueError, PipelineError, KeyboardInterrupt) as error:
+        orchestration_error("final timing projection", error)
+        summary["complete_graph"] = False
     try:
         write_json(artifacts / "complete.receipt.json", summary)
     except (OSError, ValueError, KeyboardInterrupt) as error:

@@ -193,6 +193,308 @@ class SourceRunnerTest(unittest.TestCase):
             **value,
         }, indent=2) + "\n", encoding="utf-8")
 
+    def timing_subject(self) -> tuple:
+        plan_home = self.root / "build" / "timing-protocol"
+        plan_home.mkdir(parents=True)
+        tests = {}
+        for name in ("test_generate", "test_allocation_refusal", "test_category_seed", "test_lint"):
+            fixture = type("Fixture", (unittest.TestCase,), {
+                "__module__": name, "test_control": lambda test: test.assertTrue(True),
+            })
+            tests[name] = fixture("test_control")
+        assignments = {
+            "serial": [tests["test_generate"].id()],
+            "cli-1": [tests[name].id() for name in ("test_allocation_refusal", "test_category_seed")],
+            "cli-2": [tests["test_lint"].id()],
+        }
+        ids = sorted(test.id() for test in tests.values())
+        plan = {"version": 1, "root": str(self.root), "ids": ids, "assignments": assignments,
+                "inputs": source_tests.input_snapshot(self.root)}
+        plan_path = plan_home / "plan.json"
+        source_tests.write_json(plan_path, plan)
+        plan_sha = source_tests.sha256_file(plan_path)
+        finals, prefixes = {}, {}
+        for lane in source_tests.LANES:
+            environment = source_tests.worker_environment(plan_home / "state" / lane, lane != "serial")
+            isolation = {name: environment.get(name) for name in (
+                "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+                "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "GRADLE_USER_HOME",
+            )}
+            if lane != "serial":
+                isolation.update({"user.home": environment["HOME"], "java.io.tmpdir": environment["TEMP"]})
+            selected = [test for test in tests.values() if test.id() in assignments[lane]]
+            origin = time.perf_counter()
+
+            def checkpoint(result, lane=lane):
+                early = source_tests.independent_ids(plan, lane)
+                if early:
+                    path = plan_home / (lane + ".partial.receipt.json")
+                    source_tests.write_json(path, source_tests.worker_receipt(
+                        plan, lane, early, result, isolation, plan_sha, origin,
+                    ))
+                    prefixes[lane] = source_tests.validate_receipt(
+                        path, plan, lane, plan_sha, source_tests.ChildExit(os.getpid(), 0), partial=True,
+                    )
+
+            early_ids = set(source_tests.independent_ids(plan, lane))
+            suite = source_tests.TrackingSuite(selected) if lane == "serial" else source_tests.GatedSuite(
+                [test for test in selected if test.id() in early_ids],
+                [test for test in selected if test.id() not in early_ids], checkpoint, lambda: None,
+            )
+            with mock.patch.dict(sys.modules, {name: types.ModuleType(name) for name in tests}):
+                result = unittest.TextTestRunner(stream=io.StringIO(), resultclass=source_tests.TrackingResult).run(suite)
+            self.assertTrue(result.wasSuccessful())
+            path = plan_home / (lane + ".receipt.json")
+            source_tests.write_json(path, source_tests.worker_receipt(
+                plan, lane, assignments[lane], result, isolation, plan_sha, origin,
+            ))
+            finals[lane] = source_tests.validate_receipt(
+                path, plan, lane, plan_sha, source_tests.ChildExit(os.getpid(), 0),
+            )
+        total = max(value["seconds"] for value in finals.values()) + 3
+        phases = [
+            {"phase": "serial", "lanes": ["serial"], "seconds": total - 2,
+             "independent_cli_started_with_serial": True},
+            {"phase": "parallel-cli", "lanes": ["cli-1", "cli-2"], "seconds": total - 1,
+             "independent_work_started_with_serial": True},
+        ]
+        return plan, plan_sha, finals, prefixes, phases, total
+
+    def projected_timing(self, output: str) -> dict:
+        self.assertEqual(output.count(source_tests.TIMING_PROJECTION_BEGIN), 1)
+        self.assertEqual(output.count(source_tests.TIMING_PROJECTION_END), 1)
+        body = output.split(source_tests.TIMING_PROJECTION_BEGIN + "\n", 1)[1].split(
+            "\n" + source_tests.TIMING_PROJECTION_END, 1)[0]
+        return json.loads(body)
+
+    def test_final_timing_projection_exact_validated_coverage_bindings_and_private_field_exclusion(self) -> None:
+        subject = self.timing_subject()
+        plan, plan_sha, finals, prefixes, phases, total = subject
+        for receipt in finals.values():
+            receipt["isolation"]["HOME"] = "PRIVATE_TIMING_CANARY"
+            receipt["errors"] = [["private synthetic diagnostic", "PRIVATE_TIMING_CANARY"]]
+        phases[0]["children"] = {"private": "PRIVATE_TIMING_CANARY"}
+        phases[0]["cleanup_errors"] = ["PRIVATE_TIMING_CANARY"]
+        encoded = source_tests.final_timing_projection(*subject, overlap=True)
+        projection = self.projected_timing(encoded)
+        self.assertNotIn("PRIVATE_TIMING_CANARY", encoded)
+        self.assertNotIn(str(self.root), encoded)
+        self.assertEqual(set(projection), {
+            "timing_diagnostic_only", "hosted_600_qualification", "plan_sha256", "source_inputs_sha256",
+            "complete_source_seconds", "final_receipts", "validated_independent_prefixes_not_final_receipts",
+            "parent_phases", "receipt_seconds_origin", "complete_seconds_origin",
+            "durations_are_not_additive_or_measured_waiting",
+        })
+        self.assertTrue(projection["timing_diagnostic_only"])
+        self.assertFalse(projection["hosted_600_qualification"])
+        self.assertEqual(projection["plan_sha256"], plan_sha)
+        self.assertEqual(projection["source_inputs_sha256"], hashlib.sha256(json.dumps(
+            plan["inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest())
+        self.assertEqual(projection["complete_source_seconds"], total)
+        self.assertEqual(Counter(row["test"] for lane in projection["final_receipts"] for row in lane["methods"]),
+                         Counter(plan["ids"]))
+        for row in projection["final_receipts"]:
+            self.assertEqual(row, {key: finals[row["lane"]][key]
+                                  for key in ("lane", "seconds", "methods", "class_phases")})
+        for row in projection["validated_independent_prefixes_not_final_receipts"]:
+            self.assertEqual(row, {key: prefixes[row["lane"]][key]
+                                  for key in ("lane", "seconds", "methods", "class_phases")})
+        self.assertEqual([row["seconds"] for row in projection["parent_phases"]],
+                         [row["seconds"] for row in phases])
+        self.assertTrue(all(row["origin"] == "shared_overlap_phase_start"
+                            for row in projection["parent_phases"]))
+        self.assertTrue(projection["durations_are_not_additive_or_measured_waiting"])
+        plan, plan_sha, finals, prefixes, phases, _ = copy.deepcopy(subject)
+        for receipt in [*finals.values(), *prefixes.values()]:
+            receipt["seconds"] = 0
+            for row in receipt["methods"] + receipt["class_phases"]:
+                row["seconds"] = 0
+        for phase in phases:
+            phase["seconds"] = 0
+        zero = self.projected_timing(source_tests.final_timing_projection(
+            plan, plan_sha, finals, prefixes, phases, 0, overlap=True,
+        ))
+        self.assertEqual(zero["complete_source_seconds"], 0)
+        self.assertTrue(all(row["seconds"] == 0 for lane in zero["final_receipts"]
+                            for row in lane["methods"] + lane["class_phases"]))
+
+    def test_final_timing_projection_refuses_missing_malformed_and_private_identity_fields(self) -> None:
+        subject = self.timing_subject()
+        for defect in ("final", "prefix", "method-missing", "method-duplicate", "class-missing",
+                       "final-private", "method-private", "class-private", "parent-private", "parent-missing",
+                       "parent-origin", "plan-private-ID", "plan-oversized-ID", "source-digest",
+                       "plan-hash", "prefix-agreement"):
+            with self.subTest(defect=defect):
+                plan, plan_sha, finals, prefixes, phases, total = copy.deepcopy(subject)
+                if defect == "final":
+                    finals.pop("serial")
+                elif defect == "prefix":
+                    prefixes.pop("cli-1")
+                elif defect == "method-missing":
+                    finals["serial"]["methods"] = []
+                elif defect == "method-duplicate":
+                    finals["serial"]["methods"] *= 2
+                elif defect == "class-missing":
+                    finals["serial"]["class_phases"] = []
+                elif defect == "final-private":
+                    finals["serial"]["stdout"] = "PRIVATE_TIMING_CANARY"
+                elif defect == "method-private":
+                    finals["serial"]["methods"][0]["private"] = "PRIVATE_TIMING_CANARY"
+                elif defect == "class-private":
+                    finals["serial"]["class_phases"][0]["class"] = "C:\\PRIVATE_TIMING_CANARY"
+                elif defect == "parent-private":
+                    phases[0]["private"] = "PRIVATE_TIMING_CANARY"
+                elif defect == "parent-missing":
+                    phases.pop()
+                elif defect == "parent-origin":
+                    phases[0]["independent_cli_started_with_serial"] = "PRIVATE_TIMING_CANARY"
+                elif defect == "plan-private-ID":
+                    plan["ids"][0] = "C:\\PRIVATE_TIMING_CANARY"
+                elif defect == "plan-oversized-ID":
+                    plan["ids"][0] = "test_source.Fixture." + "x" * 512
+                elif defect == "source-digest":
+                    plan["inputs"]["private"] = "PRIVATE_TIMING_CANARY"
+                elif defect == "plan-hash":
+                    plan_sha = "0" * 64
+                elif defect == "prefix-agreement":
+                    prefixes["cli-1"]["methods"][0]["seconds"] += 0.000001
+                with self.assertRaises(source_tests.PipelineError) as caught:
+                    source_tests.final_timing_projection(
+                        plan, plan_sha, finals, prefixes, phases, total, overlap=True,
+                    )
+                self.assertNotIn("PRIVATE_TIMING_CANARY", str(caught.exception))
+
+    def test_final_timing_projection_refuses_nonfinite_negative_bool_and_inconsistent_intervals(self) -> None:
+        subject = self.timing_subject()
+        for scope in ("method", "class", "final", "prefix", "parent", "complete"):
+            for invalid in (-1, True, None, "private duration", float("nan"), float("inf"), float("-inf"), 1 << 10000):
+                with self.subTest(scope=scope, type=type(invalid).__name__):
+                    plan, plan_sha, finals, prefixes, phases, total = copy.deepcopy(subject)
+                    if scope == "method":
+                        finals["serial"]["methods"][0]["seconds"] = invalid
+                    elif scope == "class":
+                        finals["serial"]["class_phases"][0]["seconds"] = invalid
+                    elif scope == "final":
+                        finals["serial"]["seconds"] = invalid
+                    elif scope == "prefix":
+                        prefixes["cli-1"]["seconds"] = invalid
+                    elif scope == "parent":
+                        phases[0]["seconds"] = invalid
+                    else:
+                        total = invalid
+                    with self.assertRaises(source_tests.PipelineError):
+                        source_tests.final_timing_projection(
+                            plan, plan_sha, finals, prefixes, phases, total, overlap=True,
+                        )
+        for scope in ("method", "class", "final", "prefix", "parent"):
+            with self.subTest(inconsistent=scope):
+                plan, plan_sha, finals, prefixes, phases, total = copy.deepcopy(subject)
+                if scope == "method":
+                    finals["serial"]["methods"][0]["seconds"] = total + 1
+                elif scope == "class":
+                    finals["serial"]["class_phases"][0]["seconds"] = total + 1
+                elif scope == "final":
+                    finals["serial"]["seconds"] = total + 1
+                elif scope == "prefix":
+                    prefixes["cli-1"]["seconds"] = total - 0.5
+                else:
+                    phases[0]["seconds"] = total + 1
+                with self.assertRaises(source_tests.PipelineError):
+                    source_tests.final_timing_projection(
+                        plan, plan_sha, finals, prefixes, phases, total, overlap=True,
+                    )
+
+    def test_final_timing_projection_enforces_exact_encoded_byte_bound_without_truncation(self) -> None:
+        subject = self.timing_subject()
+        encoded = source_tests.final_timing_projection(*subject, overlap=True)
+        size = len((encoded + "\n").encode("utf-8"))
+        with mock.patch.object(source_tests, "TIMING_PROJECTION_MAX_BYTES", size):
+            self.assertEqual(source_tests.final_timing_projection(*subject, overlap=True), encoded)
+        with mock.patch.object(source_tests, "TIMING_PROJECTION_MAX_BYTES", size - 1), \
+                self.assertRaisesRegex(source_tests.PipelineError, "exceeds.*nothing truncated"):
+            source_tests.final_timing_projection(*subject, overlap=True)
+        plan, plan_sha, finals, prefixes, phases, total = copy.deepcopy(subject)
+        finals["serial"]["class_phases"] *= 16384
+        with self.assertRaisesRegex(source_tests.PipelineError, "exceeds.*nothing truncated"):
+            source_tests.final_timing_projection(plan, plan_sha, finals, prefixes, phases, total, overlap=True)
+
+    def test_final_timing_projection_overlap_output_joins_validated_prefix_and_final_intervals(self) -> None:
+        self.cached_overlap_tools()
+        self.fixture({name + ".py": module("self.assertTrue(True)") for name in (
+            "test_generate", "test_allocation_refusal", "test_category_seed", "test_lint",
+        )})
+        result = self.execute(guarded=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        _, complete = self.receipt()
+        projection = self.projected_timing(result.stdout)
+        self.assertTrue(complete["complete_graph"])
+        self.assertTrue(complete["overlap_resource_profile"]["enabled"])
+        self.assertEqual(Counter(row["test"] for lane in projection["final_receipts"] for row in lane["methods"]),
+                         Counter(complete["discovered_ids"]))
+        for key, receipts in (
+            ("final_receipts", complete["receipts"]),
+            ("validated_independent_prefixes_not_final_receipts",
+             complete["independent_checkpoints_not_full_lane_results"]),
+        ):
+            for row in projection[key]:
+                self.assertEqual(row, {field: receipts[row["lane"]][field]
+                                       for field in ("lane", "seconds", "methods", "class_phases")})
+        self.assertEqual(projection["complete_source_seconds"], complete["seconds"])
+        self.assertEqual([row["seconds"] for row in projection["parent_phases"]],
+                         [row["seconds"] for row in complete["phases"]])
+        self.assertNotIn(str(self.root), json.dumps(projection))
+        self.assertFalse(projection["hosted_600_qualification"])
+
+    def test_final_timing_projection_reports_validated_failed_methods_without_upgrading_the_graph(self) -> None:
+        self.fixture({"test_unknown_timing.py": module("self.fail('PRIVATE_TIMING_FAILURE_DETAIL')")})
+        result = self.execute(guarded=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        _, complete = self.receipt()
+        projection = self.projected_timing(result.stdout)
+        self.assertFalse(complete["complete_graph"])
+        self.assertIn("PRIVATE_TIMING_FAILURE_DETAIL", result.stderr)
+        self.assertNotIn("PRIVATE_TIMING_FAILURE_DETAIL", json.dumps(projection))
+        self.assertNotIn("Complete source-test graph PASS", result.stdout)
+        self.assertEqual(projection["validated_independent_prefixes_not_final_receipts"], [])
+        self.assertEqual(projection["final_receipts"][0]["methods"], complete["receipts"]["serial"]["methods"])
+        self.assertEqual(projection["parent_phases"][0]["origin"], "parent_phase_start")
+        self.assertEqual(set(complete["receipts"]["serial"]), source_tests.RECEIPT_KEYS)
+
+    def test_final_timing_projection_omission_invalid_bound_and_stdout_errors_fail_closed(self) -> None:
+        self.fixture({"test_unknown_timing.py": module("self.assertTrue(True)")})
+        for defect in ("missing", "invalid", "bound", "stdout"):
+            with self.subTest(defect=defect):
+                driver = self.root / "scripts" / ("timing_" + defect + ".py")
+                driver.write_text(
+                    "import builtins,copy\nimport run_source_tests as runner\n"
+                    "original=runner.final_timing_projection\n"
+                    f"defect={defect!r}\n"
+                    "def project(plan,sha,finals,prefixes,phases,seconds,**options):\n"
+                    "    finals=copy.deepcopy(finals)\n"
+                    "    if defect=='missing': finals.clear()\n"
+                    "    elif defect=='invalid': finals['serial']['methods'][0]['seconds']=float('nan')\n"
+                    "    elif defect=='bound': runner.TIMING_PROJECTION_MAX_BYTES=1\n"
+                    "    return original(plan,sha,finals,prefixes,phases,seconds,**options)\n"
+                    "runner.final_timing_projection=project\n"
+                    "def output(*args,**kwargs):\n"
+                    "    if defect=='stdout' and args[0].startswith(runner.TIMING_PROJECTION_BEGIN):\n"
+                    "        raise OSError('synthetic final timing output denied')\n"
+                    "    return builtins.print(*args,**kwargs)\n"
+                    "runner.print=output\nraise SystemExit(runner.main())\n",
+                    encoding="utf-8",
+                )
+                result = self.execute(driver, guarded=True)
+                _, complete = self.receipt()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertFalse(complete["complete_graph"])
+                self.assertTrue(complete["receipts"]["serial"]["successful"])
+                self.assertNotIn(source_tests.TIMING_PROJECTION_BEGIN, result.stdout)
+                self.assertNotIn("Complete source-test graph PASS", result.stdout)
+                self.assertIn("final timing projection", result.stderr)
+                self.assertTrue(any(row["stage"] == "final timing projection"
+                                    for row in complete["orchestration_errors"]))
+                source_tests.remove_tree(self.root / "build" / "source-tests")
+
     def test_provisional_progress_keeps_bound_incremental_timings_without_receipt_acceptance(self) -> None:
         events = []
         journal = self.root / "cli-1.progress.jsonl"
