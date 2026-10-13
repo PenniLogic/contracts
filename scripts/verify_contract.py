@@ -1,6 +1,7 @@
 """Contract verification runner command line (PenniLogic/contracts#3, T-QA-02).
 
-  python scripts/verify_contract.py artifact --tag vX.Y.Z --release-dir DIR [--repo DIR] [--remote NAME] [--json]
+  python scripts/verify_contract.py artifact --tag vX.Y.Z --release-dir DIR [--repo DIR] [--remote NAME]
+                                             [--expect-tag-object OBJECT_ID] [--json]
   python scripts/verify_contract.py gate [--gate-state FILE] [--json]
   python scripts/verify_contract.py compat --baseline vX.Y.Z --base-document FILE --revision-document FILE
                                            --oasdiff-breaking FILE --oasdiff-diff FILE
@@ -74,7 +75,10 @@ def _parser() -> argparse.ArgumentParser:
     artifact.add_argument("--release-dir", required=True, type=Path,
                           help="directory outside the checkout holding exactly the downloaded Release assets")
     artifact.add_argument("--repo", type=Path, default=ROOT, help="top level of a checkout that has the tag (default: this one)")
-    artifact.add_argument("--remote", default="origin", help="configured remote the tag must be published on (default: origin)")
+    artifact.add_argument("--remote", default="origin",
+                          help="configured remote that fetches from the canonical PenniLogic/contracts repository (default: origin)")
+    artifact.add_argument("--expect-tag-object", metavar="OBJECT_ID",
+                          help="refuse unless the tag is this annotated tag object, the one verified before (trust on first use otherwise)")
     gate = commands.add_parser("gate", help="validate the warn/block gate state and print the effective gate now")
     gate.add_argument("--gate-state", type=Path, default=GATE_STATE, help="gate state file (default: the committed one)")
     compat = commands.add_parser("compat", help="classify a revision against its published baseline")
@@ -113,7 +117,8 @@ def _read_json(path: Path, label: str) -> object:
 
 def _artifact(args: argparse.Namespace, clock: Callable[[], datetime]) -> int:
     try:
-        artifact = load_published_artifact(args.tag, args.release_dir, repo=args.repo, remote=args.remote)
+        artifact = load_published_artifact(args.tag, args.release_dir, repo=args.repo, remote=args.remote,
+                                           expect_tag_object=args.expect_tag_object)
     except ArtifactRefused as refusal:
         if refusal.rule in ARTIFACT_USAGE_RULES:
             raise UsageProblem(refusal.rule, refusal.detail) from None
@@ -121,6 +126,7 @@ def _artifact(args: argparse.Namespace, clock: Callable[[], datetime]) -> int:
               [f"artifact: REFUSED [{refusal.rule}] {refusal.detail}"])
         return EXIT_FAIL
     lines = [f"artifact: VERIFIED {artifact.tag} (tag object {artifact.tag_object}, commit {artifact.commit})",
+             f"  published on {artifact.remote} ({artifact.remote_url})",
              f"  specification {artifact.spec_asset} sha256 {artifact.spec_sha256}",
              f"  release-manifest.json sha256 {artifact.manifest_sha256}"]
     lines += [f"  check {check}: {status}" for check, status in artifact.checks]

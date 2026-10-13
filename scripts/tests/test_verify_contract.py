@@ -27,7 +27,8 @@ from verification_support import (
     temporary_root, version_diff,
 )
 
-import contract_report  # noqa: E402 - verification_support puts scripts/ on sys.path
+import contract_artifact  # noqa: E402 - verification_support puts scripts/ on sys.path
+import contract_report  # noqa: E402
 import contract_schema  # noqa: E402
 import verify_contract  # noqa: E402
 from contract_artifact import load_published_artifact  # noqa: E402
@@ -37,7 +38,7 @@ from verify_contract import main  # noqa: E402
 NOW = parse_instant("2026-10-12T00:00:00.000Z")
 UNTIL = "2026-11-01T00:00:00.000Z"
 REASON = "Synthetic expand-and-contract fixture: every consumer migrated first (verification tests only)."
-READ_ONLY_GIT = ("rev-parse", "config", "cat-file", "ls-remote", "ls-tree")
+READ_ONLY_GIT = ("rev-parse", "cat-file", "ls-remote", "ls-tree", "merge-base", ("remote", "get-url"))
 
 
 class AuditRecorder:
@@ -140,6 +141,8 @@ class CommandTestCase(unittest.TestCase):
             '{"baseline": "v1.2.3", "acknowledged": ' + "[" * 100_000 + "]" * 100_000 + "}\n", encoding="ascii", newline="\n")
         cls.contracts = SyntheticContracts(cls.root / "contracts")
         cls.release_dir = cls.contracts.publish()
+        # The synthetic bare origin stands in for the canonical PenniLogic/contracts repository.
+        cls.enterClassContext(mock.patch.object(contract_artifact, "CANONICAL_REMOTE_URLS", (str(cls.contracts.origin),)))
 
     def path(self, name: str) -> str:
         return str(self.inputs / name)
@@ -193,14 +196,19 @@ class ArtifactCommandTest(CommandTestCase):
         code, out, _ = self.run_command(*self.artifact_argv())
         self.assertEqual(code, 0)
         self.assertIn(f"artifact: VERIFIED {self.contracts.tag}", out)
+        self.assertIn(f"  published on origin ({self.contracts.origin})\n", out)
         self.assertIn("a verified artifact alone is not acceptance evidence", out)
+        code, payload = self.run_json(*self.artifact_argv(), "--expect-tag-object", self.contracts.tag_object)
+        self.assertEqual((code, {check["id"]: check["status"] for check in payload["artifact"]["checks"]}["tag.pinned_identity"]),
+                         (0, "pass"))
         work = temporary_root()
         self.addCleanup(shutil.rmtree, work, True)
         tampered = copy_release(self.release_dir, work, "tampered")
         (tampered / FIXTURE_NAMES[0]).write_bytes((tampered / FIXTURE_NAMES[0]).read_bytes() + b" ")
         for label, argv, expected in (
                 ("an asset changed after publication", self.artifact_argv(tampered), (1, "sums.digest_mismatch")),
-                ("a branch name instead of a tag", self.artifact_argv(tag="main"), (1, "tag.grammar"))):
+                ("a branch name instead of a tag", self.artifact_argv(tag="main"), (1, "tag.grammar")),
+                ("another pinned tag object", self.artifact_argv() + ["--expect-tag-object", "0" * 40], (1, "tag.pin_mismatch"))):
             with self.subTest(label):
                 code, payload = self.run_json(*argv)
                 self.assertEqual((code, payload["refusal"]["rule"], payload["verified"]), (*expected, False))
@@ -385,7 +393,7 @@ class WriteBoundaryTest(CommandTestCase):
         self.assertTrue(recorder.processes)
         for argv in recorder.processes:
             self.assertEqual((Path(argv[0]).name, argv[1:3]), ("git", ["-C", str(self.contracts.repo)]), argv)
-            self.assertIn(argv[3], READ_ONLY_GIT, argv)
+            self.assertIn(tuple(argv[3:5]) if argv[3] == "remote" else argv[3], READ_ONLY_GIT, argv)
 
 
 class TemporaryRootTest(unittest.TestCase):

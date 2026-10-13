@@ -64,10 +64,13 @@ class LoaderTestCase(unittest.TestCase):
         self.controls: set[str] = set()
 
     def load(self, release_dir: Path, *, contracts: SyntheticContracts | None = None, tag: str | None = None,
-             repo: Path | None = None, remote: str = "origin") -> contract_artifact.PublishedArtifact:
+             repo: Path | None = None, remote: str = "origin", accepted: tuple[str, ...] | None = None,
+             expect_tag_object: str | None = None) -> contract_artifact.PublishedArtifact:
+        """Load with the synthetic origin standing in for the canonical repository (unless `accepted` is given)."""
         contracts = contracts or self.base
         return load_published_artifact(tag if tag is not None else contracts.tag, release_dir, repo=repo or contracts.repo,
-                                       remote=remote, scratch_dir=self.scratch)
+                                       remote=remote, scratch_dir=self.scratch, expect_tag_object=expect_tag_object,
+                                       accepted_remote_urls=(str(contracts.origin),) if accepted is None else accepted)
 
     def control_once(self, kind: str, release_dir: Path, contracts: SyntheticContracts | None = None) -> None:
         if kind not in self.controls:
@@ -109,8 +112,8 @@ class PublishedArtifactTest(LoaderTestCase):
     def test_valid_published_artifact_loads(self) -> None:
         artifact = self.load(self.release_dir)
         base = self.base
-        self.assertEqual((artifact.tag, artifact.version, artifact.commit, artifact.tag_object, artifact.remote),
-                         (base.tag, base.version, base.commit, base.tag_object, "origin"))
+        self.assertEqual((artifact.tag, artifact.version, artifact.commit, artifact.tag_object, artifact.remote, artifact.remote_url),
+                         (base.tag, base.version, base.commit, base.tag_object, "origin", str(base.origin)))
         self.assertEqual(artifact.assets, read_sums(self.release_dir))
         self.assertEqual(set(artifact.assets) | {"SHA256SUMS"}, {path.name for path in self.release_dir.iterdir()})
         spec = (base.repo / support.SPEC_RELATIVE).read_bytes()
@@ -125,8 +128,8 @@ class PublishedArtifactTest(LoaderTestCase):
                 "tree_sha256": golden[language]["tree_sha256"], "file_count": golden[language]["file_count"],
             })
         checks = dict(artifact.checks)
-        self.assertEqual(checks.pop("github_release.presence"), "not_run")
-        self.assertEqual(set(checks.values()), {"pass"})
+        self.assertEqual([checks.pop("tag.pinned_identity"), checks.pop("github_release.presence")], ["not_run", "not_run"])
+        self.assertEqual((checks["tag.on_remote_main"], set(checks.values())), ("pass", {"pass"}))
         self.assertEqual(artifact.read_verified_asset(artifact.spec_asset), spec)
         self.assertEqual(artifact.as_dict()["checks"][-1], {"id": "github_release.presence", "status": "not_run"})
         self.assertEqual(list(self.scratch.iterdir()), [])
@@ -241,8 +244,9 @@ class TagProvenanceTest(LoaderTestCase):
 
     def test_remote_unreachable_refused(self) -> None:
         contracts = self.fresh_contracts()
-        git(contracts.repo, "remote", "set-url", "origin", str(self.work / "no-such-origin.git"))
-        self.assertRefused("tag.remote_unreachable", self.release_dir, contracts=contracts)
+        absent = str(self.work / "no-such-origin.git")
+        git(contracts.repo, "remote", "set-url", "origin", absent)
+        self.assertRefused("tag.remote_unreachable", self.release_dir, contracts=contracts, accepted=(absent,))
 
     def test_unknown_or_malformed_remote_refused(self) -> None:
         self.load(self.release_dir)
@@ -262,6 +266,100 @@ class TagProvenanceTest(LoaderTestCase):
         self.load(self.release_dir)
         with mock.patch.object(contract_artifact.shutil, "which", return_value=None):
             self.assertRefused("git.unavailable", self.release_dir)
+
+
+class PublicationIdentityTest(LoaderTestCase):
+    """Where and what "published" means (review round 1, PSEC-2 and PSEC-3): the canonical repository, an optional
+    pin of the tag object verified before, and the tag commit on the remote's main."""
+
+    def test_remote_must_be_the_canonical_repository(self) -> None:
+        cases = {
+            "a configured remote that is the checkout itself": (
+                "mirror", lambda contracts: git(contracts.repo, "remote", "add", "mirror", str(contracts.repo))),
+            "origin set to the checkout ('.')": ("origin", lambda contracts: git(contracts.repo, "remote", "set-url", "origin", ".")),
+            "origin rewritten to the checkout by insteadOf": (
+                "origin", lambda contracts: git(contracts.repo, "config", f"url.{contracts.repo}.insteadOf", str(contracts.origin))),
+        }
+        for label, (remote, mutate) in cases.items():
+            with self.subTest(label):
+                contracts = self.fresh_contracts(label.replace(" ", "-").replace("'", "").replace("(", "").replace(")", ""))
+                mutate(contracts)
+                self.assertRefused("remote.not_canonical", self.release_dir, contracts=contracts, remote=remote)
+
+    def test_canonical_repository_urls(self) -> None:
+        keys = {contract_artifact._url_key(url) for url in contract_artifact.CANONICAL_REMOTE_URLS}
+        for url in ("https://github.com/PenniLogic/contracts.git", "https://github.com/pennilogic/contracts/",
+                    "https://x-access-token:synthetic-credential@github.com/PenniLogic/contracts",
+                    "git@github.com:PenniLogic/contracts.git", "ssh://git@github.com/PenniLogic/contracts"):
+            with self.subTest(accepted=url):
+                self.assertIn(contract_artifact._url_key(url), keys)
+        for url in ("http://github.com/PenniLogic/contracts", "file:///srv/contracts.git", "/srv/contracts", ".",
+                    "https://github.com/PenniLogic/contracts-fork", "https://github.com.example/PenniLogic/contracts",
+                    "https://github.com/OtherOrganization/contracts", "ssh://git:synthetic-credential@github.com/PenniLogic/contracts"):
+            with self.subTest(refused=url):
+                self.assertNotIn(contract_artifact._url_key(url), keys)
+        self.assertEqual(contract_artifact.without_credentials(
+            "https://x-access-token:synthetic-credential@github.com/PenniLogic/contracts.git?query#fragment"),
+            "https://github.com/PenniLogic/contracts.git")
+
+    def test_pinned_tag_object_refuses_a_recreated_tag(self) -> None:
+        pinned = self.load(self.release_dir, expect_tag_object=self.base.tag_object)  # control: the pin of first use
+        self.assertEqual(dict(pinned.checks)["tag.pinned_identity"], "pass")
+        moved = self.base.copy_to(self.work / "moved")
+        moved.write("README.md", "# Synthetic contracts repository (re-created tag)\n")
+        moved.commit_all("Synthetic later commit on main")
+        moved.push_main()
+        moved.tag_annotated(force=True, message="Re-created on a later commit")
+        moved.push_tag(force=True)
+        release_dir = moved.download(moved.build(), "moved")
+        clone = self.work / "fresh-clone"
+        git(self.work, "clone", "--quiet", str(moved.origin), str(clone))
+        self.assertEqual(self.load(release_dir, contracts=moved, repo=clone).commit, moved.commit)  # trust on first use
+        for label, pin in (("the pin of first use", self.base.tag_object), ("a tag name instead of an object", moved.tag)):
+            with self.subTest(label):
+                self.assertRefused("tag.pin_mismatch", release_dir, contracts=moved, repo=clone, expect_tag_object=pin)
+
+    def test_tag_commit_must_be_on_the_remote_main(self) -> None:
+        """The reviewer's reproduction: an annotated tag on a commit that never reached main."""
+        self.control_once("pristine", self.release_dir)
+        contracts = SyntheticContracts(self.work / "unmerged")
+        contracts.init_repository()
+        contracts.write_source()
+        contracts.write_generated()
+        contracts.write_golden()
+        contracts.commit_all("Synthetic reviewed main commit")
+        contracts.push_main()
+        contracts.write(support.SPEC_RELATIVE, support.SPEC_TEMPLATE.format(version=contracts.version).replace(
+            "Synthetic document; not a product contract.", "Synthetic change that never reached main."))
+        contracts.write_generated()
+        contracts.write_golden()
+        contracts.commit_all("Synthetic unreviewed branch commit")
+        contracts.tag_annotated()
+        contracts.push_tag()
+        self.assertRefused("tag.not_on_main", contracts.download(contracts.build()), contracts=contracts)
+
+    def test_main_ancestry_not_run_when_this_checkout_cannot_decide(self) -> None:
+        self.assertEqual(dict(self.load(self.release_dir).checks)["tag.on_remote_main"], "pass")  # control
+
+        def on_main(**kwargs: object) -> str:
+            return dict(self.load(self.release_dir, **kwargs).checks)["tag.on_remote_main"]  # type: ignore[arg-type]
+
+        with self.subTest("the remote has no main"):
+            contracts = self.fresh_contracts("no-main")
+            git(contracts.origin, "update-ref", "-d", "refs/heads/main")
+            self.assertEqual(on_main(contracts=contracts), "not_run")
+        with self.subTest("a shallow clone of the tag"):
+            clone, url = self.work / "shallow", self.base.origin.as_uri()
+            git(self.work, "clone", "--quiet", "--depth", "1", "--branch", self.base.tag, url, str(clone))
+            self.assertEqual(on_main(repo=clone, accepted=(url,)), "not_run")
+        with self.subTest("main moved on after this clone was made"):
+            contracts = self.fresh_contracts("stale")
+            clone = self.work / "stale-clone"
+            git(self.work, "clone", "--quiet", str(contracts.origin), str(clone))
+            contracts.write("README.md", "# Synthetic contracts repository (later main)\n")
+            contracts.commit_all("Synthetic later commit on main")
+            contracts.push_main()
+            self.assertEqual(on_main(contracts=contracts, repo=clone), "not_run")
 
 
 class ReleaseSetTest(LoaderTestCase):
@@ -462,6 +560,7 @@ class ReleaseManifestTest(LoaderTestCase):
                 path = contracts.repo / support.SPEC_RELATIVE
                 path.write_text(change(path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
                 contracts.commit_all("Synthetic specification edited, then tagged by hand")
+                contracts.push_main()
                 contracts.tag_annotated(force=True)
                 contracts.push_tag(force=True)
             return hook

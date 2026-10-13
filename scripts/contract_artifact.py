@@ -9,7 +9,11 @@ docs/contract-verification.md lists them.
 
 1. Tag. The name matches check_breaking_changes.TAG in full, refs/tags/<tag> is an annotated tag
    object that names itself <tag> and targets a commit, and the remote's refs/tags/<tag>
-   (git ls-remote) is that same tag object. That is what "published" means here.
+   (git ls-remote) is that same tag object. The remote must fetch from the canonical
+   PenniLogic/contracts repository (its URL after insteadOf rewriting). That is what "published"
+   means here. Publication is trust on first use: a caller may pin the tag object it verified
+   before. When this checkout has the remote main's commit and full history, the tag commit must be
+   on that main; otherwise that check is reported not_run.
 2. Release set. The directory holds exactly the assets release.build_release_set produces for the
    tag, plus SHA256SUMS: the provider-source names and client languages come from the tag's own
    scripts/pl_contracts.py (read without running it), the fixture names from the tag's tree.
@@ -72,7 +76,8 @@ RULES = (
     "archive.unsafe_path", "archive.outside_prefix", "archive.link_member", "archive.special_member",
     "archive.duplicate_member", "archive.case_collision", "archive.manifest_missing", "archive.manifest_invalid",
     "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch", "archive.ambiguous",
-    "archive.noncanonical", "release.format_unsupported",
+    "archive.noncanonical", "release.format_unsupported", "remote.not_canonical", "tag.pin_mismatch",
+    "tag.not_on_main",
 )
 
 RELEASE_MANIFEST = "release-manifest.json"
@@ -121,6 +126,14 @@ GIT_TIMEOUT_SECONDS = 120
 HEX64 = re.compile(r"[0-9a-f]{64}")
 OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 REMOTE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+# The only repository a contract version is published from (docs/publication.md). Compared without
+# credentials, case, a trailing slash or `.git`.
+CANONICAL_REMOTE_URLS = (
+    "https://github.com/PenniLogic/contracts.git",
+    "git@github.com:PenniLogic/contracts.git",
+    "ssh://git@github.com/PenniLogic/contracts.git",
+)
+MAIN_REF = "refs/heads/main"
 SUMS_LINE = re.compile(r"([0-9a-f]{64})  ([^\x00-\x1f\x7f/\\]{1,255})")
 REGULAR_BLOB_MODES = ("100644", "100755")
 LINK_TYPES = (tarfile.SYMTYPE, tarfile.LNKTYPE)
@@ -130,10 +143,12 @@ REPOSITORY_ENVIRONMENT = (
     "GIT_NAMESPACE", "GIT_COMMON_DIR", "GIT_REPLACE_REF_BASE",
 )
 PASSED_CHECKS = (
-    "tag.grammar", "tag.annotated", "tag.published_remote_ref", "release.sha256sums_exact", "release.manifest_agreement",
-    "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.golden", "archive.canonical_form", "archive.safe_extraction",
-    "archive.tree_digest",
+    "tag.grammar", "tag.annotated", "remote.canonical_repository", "tag.published_remote_ref", "release.sha256sums_exact",
+    "release.manifest_agreement", "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.golden", "archive.canonical_form",
+    "archive.safe_extraction", "archive.tree_digest",
 )
+# pass or not_run: tag.pinned_identity runs only with a pin; tag.on_remote_main only with the remote main's history.
+CONDITIONAL_CHECKS = ("tag.pinned_identity", "tag.on_remote_main")
 HELD_CHECKS = ("github_release.presence",)
 
 
@@ -150,13 +165,15 @@ class ArtifactRefused(Exception):
 
 @dataclass(frozen=True)
 class PublishedArtifact:
-    """A verified published artifact. Every check passed except the held GitHub Release presence check."""
+    """A verified published artifact. Every check passed, except the held GitHub Release presence check and
+    the conditional checks reported not_run."""
 
     tag: str
     version: str
     tag_object: str
     commit: str
     remote: str
+    remote_url: str
     release_dir: Path
     spec_asset: str
     spec_sha256: str
@@ -177,7 +194,7 @@ class PublishedArtifact:
     def as_dict(self) -> dict:
         return {
             "tag": self.tag, "version": self.version, "tag_object": self.tag_object, "commit": self.commit,
-            "remote": self.remote, "spec_asset": self.spec_asset, "spec_sha256": self.spec_sha256,
+            "remote": self.remote, "remote_url": self.remote_url, "spec_asset": self.spec_asset, "spec_sha256": self.spec_sha256,
             "manifest_sha256": self.manifest_sha256, "assets": dict(sorted(self.assets.items())),
             "clients": {language: dict(client) for language, client in self.clients.items()},
             "checks": [{"id": check, "status": status} for check, status in self.checks],
@@ -229,22 +246,27 @@ def expected_asset_sources(tag: str, fixture_names: list[str], provider_names: t
 
 
 def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_contracts.ROOT, remote: str = "origin",
-                            scratch_dir: Path | None = None) -> PublishedArtifact:
+                            scratch_dir: Path | None = None, expect_tag_object: str | None = None,
+                            accepted_remote_urls: tuple[str, ...] | None = None) -> PublishedArtifact:
     """Verify the downloaded Release assets in `release_dir` against `tag` in `repo`; raise ArtifactRefused.
 
-    Archives are unpacked into a temporary directory (under `scratch_dir` when given) that is removed
-    before this function returns; nothing is written anywhere else.
+    `expect_tag_object` pins the tag object a consumer verified before (trust on first use otherwise).
+    `accepted_remote_urls` replaces CANONICAL_REMOTE_URLS for tests with a temporary origin. Archives
+    are unpacked into a temporary directory (under `scratch_dir` when given) that is removed before
+    this function returns; nothing is written anywhere else.
     """
     if not isinstance(tag, str) or TAG.fullmatch(tag) is None:
         raise ArtifactRefused("tag.grammar", f"{ascii(tag)} is not a published version tag vMAJOR.MINOR.PATCH")
     version = tag[1:]
     repo, release_dir = Path(repo), Path(release_dir)
     git = _Git(repo)
-    top_level = _check_repository(git, repo)
+    top_level, shallow = _check_repository(git, repo)
     _check_release_dir(release_dir, top_level)
-    _check_remote(git, remote)
+    remote_url = _check_remote(git, remote, CANONICAL_REMOTE_URLS if accepted_remote_urls is None else accepted_remote_urls)
     tag_object, commit = _resolve_annotated_tag(git, tag)
-    _check_published(git, remote, tag, tag_object, commit)
+    pinned = _check_pin(tag, tag_object, expect_tag_object)
+    main = _check_published(git, remote, tag, tag_object, commit)
+    on_main = _check_on_main(git, commit, main, shallow)
     tree = _TagTree(git, commit)
     provider_names = tree.release_format()
     sources = expected_asset_sources(tag, tree.fixture_names(), provider_names)
@@ -265,10 +287,11 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
         for language in pl_contracts.LANGUAGES:
             clients[language] = _check_archive(language, tag, version, data, sums, manifest, golden[language], Path(work))
     return PublishedArtifact(
-        tag=tag, version=version, tag_object=tag_object, commit=commit, remote=remote, release_dir=release_dir,
-        spec_asset=spec_name, spec_sha256=sums[spec_name], manifest_sha256=sums[RELEASE_MANIFEST],
+        tag=tag, version=version, tag_object=tag_object, commit=commit, remote=remote, remote_url=remote_url,
+        release_dir=release_dir, spec_asset=spec_name, spec_sha256=sums[spec_name], manifest_sha256=sums[RELEASE_MANIFEST],
         assets=dict(sorted(sums.items())), clients=clients,
-        checks=tuple((check, "pass") for check in PASSED_CHECKS) + tuple((check, "not_run") for check in HELD_CHECKS),
+        checks=(tuple((check, "pass") for check in PASSED_CHECKS) + (("tag.pinned_identity", pinned), ("tag.on_remote_main", on_main))
+                + tuple((check, "not_run") for check in HELD_CHECKS)),
     )
 
 
@@ -329,14 +352,16 @@ def _read_objects(git: _Git, names: list[str], rule: str, what: str) -> list[tup
     return objects
 
 
-def _check_repository(git: _Git, repo: Path) -> Path:
-    completed = git.run("rev-parse", "--show-toplevel")
-    if completed is None or completed.returncode != 0:
+def _check_repository(git: _Git, repo: Path) -> tuple[Path, bool]:
+    """The checkout's top level, and whether its history may be incomplete (shallow, or not known to be complete)."""
+    completed = git.run("rev-parse", "--show-toplevel", "--is-shallow-repository")
+    lines = [] if completed is None else completed.stdout.decode("utf-8", "surrogateescape").splitlines()
+    if completed is None or completed.returncode != 0 or len(lines) != 2:
         raise ArtifactRefused("repository.invalid", "the repository path is not a git checkout")
-    top_level = Path(completed.stdout.decode("utf-8", "surrogateescape").strip()).resolve()
+    top_level = Path(lines[0].strip()).resolve()
     if top_level != repo.resolve():
         raise ArtifactRefused("repository.invalid", "the repository path must be the top level of a git checkout")
-    return top_level
+    return top_level, lines[1].strip() != "false"
 
 
 def _check_release_dir(release_dir: Path, top_level: Path) -> None:
@@ -349,12 +374,69 @@ def _check_release_dir(release_dir: Path, top_level: Path) -> None:
                               "assets, never a working-tree build such as build/dist")
 
 
-def _check_remote(git: _Git, remote: str) -> None:
+def without_credentials(url: str) -> str:
+    """The URL without a query, a fragment or credentials: HTTP(S) user information, or any user:password.
+
+    An ssh user without a password (`ssh://git@host/...`, scp-like `git@host:path`) is not a credential.
+    """
+    url = url.strip().split("?", 1)[0].split("#", 1)[0]
+    scheme, separator, rest = url.partition("://")
+    if not separator:
+        return url
+    authority, slash, path = rest.partition("/")
+    user, at, host = authority.rpartition("@")
+    if at and (scheme.lower() in ("http", "https") or ":" in user):
+        authority = host
+    return f"{scheme}://{authority}{slash}{path}"
+
+
+def _url_key(url: str) -> str:
+    key = without_credentials(url).rstrip("/").lower()
+    return key[:-4] if key.endswith(".git") else key
+
+
+def _check_remote(git: _Git, remote: str, accepted: tuple[str, ...]) -> str:
+    """Return the remote's fetch URL without credentials; refuse a remote that is not the canonical repository.
+
+    The URL is the one `git ls-remote` uses (`git remote get-url`, after url.<base>.insteadOf rewriting),
+    so neither the checkout itself, a local mirror nor a rewrite stands in for the canonical repository.
+    """
     if not isinstance(remote, str) or REMOTE_NAME.fullmatch(remote) is None:
         raise ArtifactRefused("remote.invalid", f"{ascii(remote)} is not a remote name")
-    completed = git.run("config", "--get", f"remote.{remote}.url")
+    completed = git.run("remote", "get-url", remote)
     if completed is None or completed.returncode != 0 or not completed.stdout.strip():
         raise ArtifactRefused("remote.invalid", f"remote {remote} is not configured in the repository")
+    url = completed.stdout.decode("utf-8", "replace").strip().splitlines()[0]
+    if _url_key(url) not in {_url_key(candidate) for candidate in accepted}:
+        raise ArtifactRefused("remote.not_canonical",
+                              f"remote {remote} fetches from {ascii(without_credentials(url))}, not from the canonical "
+                              "PenniLogic/contracts repository; a contract version is published only there")
+    return without_credentials(url)
+
+
+def _check_pin(tag: str, tag_object: str, expected: str | None) -> str:
+    if expected is None:
+        return "not_run"
+    if not isinstance(expected, str) or OBJECT_ID.fullmatch(expected) is None or expected != tag_object:
+        raise ArtifactRefused("tag.pin_mismatch", f"refs/tags/{tag} is the tag object {tag_object}, not the pinned "
+                                                  f"{ascii(expected)}; the tag was re-created or the pin is wrong")
+    return "pass"
+
+
+def _check_on_main(git: _Git, commit: str, main: str | None, shallow: bool) -> str:
+    """pass when the tag commit is on the remote's main; not_run when this checkout cannot decide it.
+
+    Undecidable without fetching: the remote has no main, the checkout is shallow, or it lacks the
+    remote main's commit (merge-base then exits 128). Refused when the full history shows the tag
+    commit is not on main.
+    """
+    if main is None or shallow:
+        return "not_run"
+    ancestry = git.run("merge-base", "--is-ancestor", commit, main)
+    if ancestry is not None and ancestry.returncode == 1:
+        raise ArtifactRefused("tag.not_on_main", f"the tag commit {commit} is not on the remote's main ({main}); a "
+                                                 "contract version is cut from the reviewed main (docs/publication.md)")
+    return "pass" if ancestry is not None and ancestry.returncode == 0 else "not_run"
 
 
 def _resolve_annotated_tag(git: _Git, tag: str) -> tuple[str, str]:
@@ -382,16 +464,17 @@ def _resolve_annotated_tag(git: _Git, tag: str) -> tuple[str, str]:
     return tag_object, commit
 
 
-def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: str) -> None:
+def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: str) -> str | None:
+    """Refuse a tag the remote does not carry as this tag object; return the remote main's commit, if any."""
     ref = f"refs/tags/{tag}"
-    completed = git.run("ls-remote", remote, ref)
+    completed = git.run("ls-remote", remote, ref, MAIN_REF)
     if completed is None or completed.returncode != 0:
         outcome = "no exit status (start failure or timeout)" if completed is None else f"exit {completed.returncode}"
         raise ArtifactRefused("tag.remote_unreachable", f"git ls-remote {remote} failed ({outcome}); publication is unknown")
     advertised: dict[str, str] = {}
     for line in completed.stdout.decode("utf-8", "replace").splitlines():
         object_id, _, name = line.partition("\t")
-        if name in (ref, f"{ref}^{{}}"):
+        if name in (ref, f"{ref}^{{}}", MAIN_REF):
             advertised[name] = object_id
     if ref not in advertised:
         raise ArtifactRefused("tag.unpublished", f"{remote} does not carry {ref}; the tag was never pushed")
@@ -401,6 +484,8 @@ def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: 
     peeled = advertised.get(f"{ref}^{{}}")
     if peeled is not None and peeled != commit:
         raise ArtifactRefused("tag.remote_mismatch", f"{remote} {ref} peels to {ascii(peeled)}, not {commit}")
+    main = advertised.get(MAIN_REF)
+    return main if main is not None and OBJECT_ID.fullmatch(main) else None
 
 
 class _TagTree:

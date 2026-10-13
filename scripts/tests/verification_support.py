@@ -6,7 +6,7 @@ A SyntheticContracts instance owns one temporary directory, never a path inside 
   toolchain pins, generator/golden.json and a synthetic scripts/pl_contracts.py that declares the
   release format (PROVIDER_SOURCE_NAMES, LANGUAGES) at the same relative paths as this repository,
   committed and tagged with hermetic git;
-- origin.git/: a temporary bare origin that the annotated tag is pushed to;
+- origin.git/: a temporary bare origin that main and the annotated tag are pushed to;
 - generated/<language>/: synthetic generated client trees. Each carries a contracts-manifest.json
   with the keys generate_clients.py writes, computed with the real pl_contracts.tree_hash;
 - dist/: release sets built by the real release.build_release_set, with its module-level paths
@@ -290,6 +290,10 @@ class SyntheticContracts:
         reference = f"refs/tags/{name or self.tag}"
         git(self.repo, "push", "--quiet", *(["--force"] if force else []), "origin", f"{reference}:{reference}")
 
+    def push_main(self) -> None:
+        """Publish the current commit as the origin's main, as the merge of the reviewed pull request would."""
+        git(self.repo, "push", "--quiet", "origin", f"{self.commit}:refs/heads/main")
+
     # --- release builds -------------------------------------------------------------------------
 
     def build(self, head: str | None = None) -> Path:
@@ -314,7 +318,8 @@ class SyntheticContracts:
     def publish(self, *, after_source: Callable[["SyntheticContracts"], None] | None = None,
                 golden_edit: Callable[[dict], None] | None = None, uncommitted: tuple[str, ...] = (),
                 before_build: Callable[["SyntheticContracts"], None] | None = None) -> Path:
-        """The standard sequence: source, generated trees, golden, commit, annotated tag, push, build, download.
+        """The standard sequence: source, generated trees, golden, commit pushed as main, annotated tag pushed,
+        build, download.
 
         Each hook applies one mutation at its step; with no hook the result is the valid published release.
         """
@@ -325,6 +330,7 @@ class SyntheticContracts:
         self.write_generated()
         self.write_golden(golden_edit)
         self.commit_all(uncommitted=uncommitted)
+        self.push_main()
         self.tag_annotated()
         self.push_tag()
         if before_build is not None:

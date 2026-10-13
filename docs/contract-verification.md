@@ -11,7 +11,8 @@ acceptance-eligible.
 ## Command line
 
 ```text
-python scripts/verify_contract.py artifact --tag vX.Y.Z --release-dir DIR [--repo DIR] [--remote NAME] [--json]
+python scripts/verify_contract.py artifact --tag vX.Y.Z --release-dir DIR [--repo DIR] [--remote NAME]
+                                           [--expect-tag-object OBJECT_ID] [--json]
 python scripts/verify_contract.py gate [--gate-state FILE] [--json]
 python scripts/verify_contract.py compat --baseline vX.Y.Z --base-document FILE --revision-document FILE
                                          --oasdiff-breaking FILE --oasdiff-diff FILE
@@ -53,17 +54,36 @@ commit, or a build in the working tree.
 ```python
 from contract_artifact import ArtifactRefused, load_published_artifact
 
-artifact = load_published_artifact("v1.2.3", release_dir, repo=checkout, remote="origin")
+artifact = load_published_artifact("v1.2.3", release_dir, repo=checkout, remote="origin",
+                                   expect_tag_object=None)
 ```
 
 - `release_dir` holds exactly the Release assets of the tag, for example from
   `gh release download v1.2.3 --dir <directory outside the checkout>`. `RELEASE_NOTES.md` is the
   Release body, not an asset, so it must not be there.
 - `repo` is the top level of a checkout that has the tag.
-- `remote` is a configured remote name, usually `origin`.
+- `remote` is a configured remote name, usually `origin`. Its fetch URL, after `url.<base>.insteadOf`
+  rewriting (`git remote get-url`), must be the canonical repository: `https://github.com/PenniLogic/contracts`,
+  `git@github.com:PenniLogic/contracts` or `ssh://git@github.com/PenniLogic/contracts`, compared without
+  credentials, case, a trailing slash or `.git`. The checkout itself, a local mirror or a rewrite to
+  one cannot stand in for publication. Tests pass their temporary bare origin as `accepted_remote_urls`.
+- `expect_tag_object` (`--expect-tag-object`) pins the annotated tag object a consumer verified before.
 
 From the command line: `python scripts/verify_contract.py artifact --tag v1.2.3 --release-dir <directory>
-[--repo <checkout>] [--remote origin] [--json]`.
+[--repo <checkout>] [--remote origin] [--expect-tag-object <object ID>] [--json]`. The text and JSON
+output name the remote and its URL without credentials.
+
+Publication is trust on first use. A tag is meant never to move, but until a `refs/tags/v*` ruleset
+blocks updates that is procedural ([publication.md](publication.md)). A tag re-created on the remote
+is refused only in a checkout that still has the old tag object (`tag.remote_mismatch`); a fresh clone
+verifies the new one. A consumer that pins the tag object it first verified (`--expect-tag-object`) is
+protected; without a pin, `tag.pinned_identity` is reported `not_run`. The tag commit must also be on
+the remote's `main` (`tag.not_on_main`), because versions are cut from the reviewed main. That needs
+the remote main's commit and the full history in this checkout; in a shallow clone (for example
+`git clone --branch vX.Y.Z --depth 1`) or a clone older than the remote main, `tag.on_remote_main` is
+reported `not_run`, so a verified artifact never implies it. Run the verifier from a reviewed checkout
+of this repository's `main`, not from the tag's own checkout: the tag's tree carries the verifier code
+that its tagger controlled.
 
 The loader downloads nothing. It unpacks the archives into a temporary directory and removes it
 before it returns. It refuses with `ArtifactRefused`, whose `rule` is one of the static IDs below.
@@ -71,7 +91,8 @@ It stops at the first failing rule.
 
 A loaded artifact reports `github_release.presence` as `not_run`. Checking that the GitHub Release
 exists needs the network and is held. A loaded artifact therefore never shows by itself that the
-Release was published.
+Release was published. Every other check it reports passed, except `tag.pinned_identity` and
+`tag.on_remote_main` when they are `not_run` as described above.
 
 ## Artifact checks and rule IDs
 
@@ -85,12 +106,15 @@ Release was published.
 | `release_dir.missing` | The release directory does not exist. |
 | `release_dir.inside_repository` | The release directory is inside the checkout, for example `build/dist/<tag>`. That is a working-tree build, not the downloaded assets. |
 | `remote.invalid` | The remote is not a plain name configured in the checkout. An unconfigured name could resolve to a local path. |
+| `remote.not_canonical` | The remote's fetch URL, after `insteadOf` rewriting, is not the canonical PenniLogic/contracts repository: the checkout itself (`.`), a local path or mirror, a fork, plain `http`, or a rewrite to one of them. |
 | `tag.missing` | `refs/tags/<tag>` does not exist locally. |
 | `tag.not_annotated` | The tag is lightweight. |
 | `tag.object_invalid` | The tag object names another tag, targets something other than a commit, or targets a missing commit. |
-| `tag.remote_unreachable` | `git ls-remote <remote> refs/tags/<tag>` fails or times out, so publication is unknown. |
+| `tag.remote_unreachable` | `git ls-remote <remote> refs/tags/<tag> refs/heads/main` fails or times out, so publication is unknown. |
 | `tag.unpublished` | The remote does not carry `refs/tags/<tag>`. |
-| `tag.remote_mismatch` | The remote's `refs/tags/<tag>` is not the local annotated tag object, for example a re-created tag or a lightweight tag on the remote. |
+| `tag.remote_mismatch` | The remote's `refs/tags/<tag>` is not the local annotated tag object, for example a tag re-created after this checkout fetched it, or a lightweight tag on the remote. |
+| `tag.pin_mismatch` | A pinned tag object (`--expect-tag-object`) is given and the tag is another object, for example a tag re-created on the remote that a fresh clone fetched. |
+| `tag.not_on_main` | This checkout has the remote main's commit and full history, and the tag commit is not on that main: a tag on a commit that never reached the reviewed main. |
 
 ### Release set and SHA256SUMS
 
