@@ -120,6 +120,130 @@ class ImportLintNegativeTest(unittest.TestCase):
                 alias = "    LocalShape: " + json.dumps(document["components"]["schemas"][name]) + "\n"
                 self.assertIn("inline/local", self.reject(replace_once(spec_text(), "    ImportGroupVersion:\n", alias + "    ImportGroupVersion:\n")))
 
+    def test_inlined_nonmatching_shapes_are_allowed(self) -> None:
+        aliases = {
+            "UnrelatedInteger": {"type": "integer", "minimum": 0},
+            "NarrowConfidence": {"type": "string", "enum": ["high"]},
+        }
+        declarations = "".join(f"    {name}: {json.dumps(schema)}\n" for name, schema in aliases.items())
+        text = replace_once(spec_text(), "    ImportGroupVersion:\n", declarations + "    ImportGroupVersion:\n")
+        completed = run_script("lint_spec.py", "--spec", str(self.spec.write(text)))
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_inlined_discriminator_nonmatches_still_check_provider_references(self) -> None:
+        alias = {"properties": {"confidence_band": {"$ref": "#/components/schemas/ProblemCode"}}}
+        text = replace_once(spec_text(), "    ImportGroupVersion:\n",
+                            "    ConsumerProbe: " + json.dumps(alias) + "\n    ImportGroupVersion:\n")
+        self.assertIn("Locally declared confidence/dedup values must reference the shared component", self.reject(text))
+
+    def test_inlined_equivalent_aliases_ignore_annotations_and_property_order(self) -> None:
+        document = schema_document()
+        declarations = []
+        for name in ("ConfidenceBand", "ImportPreview"):
+            alias = dict(reversed(list(copy.deepcopy(document["components"]["schemas"][name]).items())))
+            alias["title"] = "Synthetic alias"
+            alias["description"] = "Annotations do not create a separate shared provider."
+            alias["x-pennilogic-strict-provider"] = False
+            alias.pop("x-pennilogic-provider-validator", None)
+            if "properties" in alias:
+                alias["properties"] = dict(reversed(list(alias["properties"].items())))
+            for keyword in ("required", "enum"):
+                if keyword in alias:
+                    alias[keyword].reverse()
+            declarations.append(f"    Equivalent{name}: {json.dumps(alias)}\n")
+        text = replace_once(spec_text(), "    ImportGroupVersion:\n", "".join(declarations) + "    ImportGroupVersion:\n")
+        diagnostics = self.reject(text)
+        for name in ("ConfidenceBand", "ImportPreview"):
+            self.assertIn(f"Reference {name}; an equivalent inline/local provider shape is forbidden", diagnostics)
+
+    def test_inlined_missing_or_non_string_target_type_uses_original_comparison(self) -> None:
+        original = schema_document()["components"]["schemas"]["ConfidenceBand"]
+        for kind in ("missing", "array"):
+            with self.subTest(type=kind):
+                alias = copy.deepcopy(original)
+                if kind == "missing":
+                    alias.pop("type")
+                    replacement = "    ConfidenceBand:\n"
+                else:
+                    alias["type"] = ["string", "null"]
+                    replacement = '    ConfidenceBand:\n      type: ["string", "null"]\n'
+                text = replace_once(spec_text(), "    ConfidenceBand:\n      type: string\n", replacement)
+                text = replace_once(text, "    ImportGroupVersion:\n",
+                                    "    FallbackConfidence: " + json.dumps(alias) + "\n    ImportGroupVersion:\n")
+                self.assertIn("Reference ConfidenceBand; an equivalent inline/local provider shape is forbidden", self.reject(text))
+
+    def test_inlined_type_fallback_covers_every_target_and_property_form(self) -> None:
+        code = r"""
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const providerImports = require(path.join(process.cwd(), "spec", "spectral-functions", "providerImports.js"));
+const base = JSON.parse(fs.readFileSync(0, "utf8"));
+const names = ["ImportPreview", "ImportCommitRequest", "ImportCommitResult",
+  "ImportColumnMapping", "ImportRowError", "ConfidenceBand", "DedupOutcome"];
+const kinds = ["missing", "array", "inherited", "non_enumerable", "accessor"];
+const checked = [];
+function check(document, name, kind) {
+  document.components.schemas.InlineGuardProbe = JSON.parse(JSON.stringify(document.components.schemas[name]));
+  const before = JSON.stringify(document);
+  const findings = providerImports(document, null, {document: {source: process.argv[1], data: document}});
+  assert.ok(findings.some((finding) =>
+    finding.message === `Reference ${name}; an equivalent inline/local provider shape is forbidden` &&
+    JSON.stringify(finding.path) === '["components","schemas","InlineGuardProbe"]'), `${name}/${kind}`);
+  assert.equal(JSON.stringify(document), before, `${name}/${kind} mutated the input`);
+  checked.push([name, kind]);
+}
+for (const name of names) {
+  for (const kind of kinds) {
+    const document = structuredClone(base);
+    const target = document.components.schemas[name];
+    const type = target.type;
+    if (kind === "missing") delete target.type;
+    else if (kind === "array") target.type = [type];
+    else if (kind === "inherited") {
+      delete target.type;
+      Object.setPrototypeOf(target, {type});
+    } else if (kind === "non_enumerable") {
+      Object.defineProperty(target, "type", {value: type, enumerable: false});
+    } else {
+      Object.defineProperty(target, "type", {get: () => type, enumerable: true});
+    }
+    check(document, name, kind);
+  }
+}
+const arrayDocument = structuredClone(base);
+arrayDocument.components.schemas.ConfidenceBand = Object.assign(["synthetic-confidence"], {type: "string"});
+check(arrayDocument, "ConfidenceBand", "array_schema");
+for (const name of ["ConfidenceBand", "ImportPreview"]) {
+  const document = structuredClone(base);
+  const candidate = structuredClone(document.components.schemas[name]);
+  const type = candidate.type;
+  let reads = 0;
+  Object.defineProperty(candidate, "type", {enumerable: true, get: () => { reads++; return type; }});
+  document.components.schemas.InlineGuardProbe = candidate;
+  const findings = providerImports(document, null, {document: {source: process.argv[1], data: document}});
+  assert.ok(findings.some((finding) =>
+    finding.message === `Reference ${name}; an equivalent inline/local provider shape is forbidden` &&
+    JSON.stringify(finding.path) === '["components","schemas","InlineGuardProbe"]'), `${name}/candidate_accessor`);
+  // One canonical read and one ordinary traversal read; no discriminator read.
+  assert.equal(reads, 2, `${name}/candidate_accessor was read before canonicalization`);
+  checked.push([name, "candidate_accessor"]);
+}
+process.stdout.write(JSON.stringify(checked));
+"""
+        completed = subprocess.run(
+            [node_executable(), "-e", code, str(ROOT / "spec" / "openapi.yaml")],
+            cwd=ROOT, input=json.dumps(schema_document()), capture_output=True, text=True,
+            encoding="utf-8", check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        names = ("ImportPreview", "ImportCommitRequest", "ImportCommitResult",
+                 "ImportColumnMapping", "ImportRowError", "ConfidenceBand", "DedupOutcome")
+        kinds = ("missing", "array", "inherited", "non_enumerable", "accessor")
+        self.assertEqual(json.loads(completed.stdout),
+                         [[name, kind] for name in names for kind in kinds] + [["ConfidenceBand", "array_schema"]]
+                         + [[name, "candidate_accessor"] for name in ("ConfidenceBand", "ImportPreview")])
+
     def test_local_confidence_member_must_reference_provider(self) -> None:
         text = replace_once(spec_text(), "    ImportGroupVersion:\n",
                             "    ConsumerProbe:\n      type: object\n      properties:\n        confidence_band:\n          type: string\n          enum: [high, low, medium]\n    ImportGroupVersion:\n")

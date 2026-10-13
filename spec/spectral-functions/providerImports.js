@@ -106,11 +106,22 @@ module.exports = function providerImports(document, _options, context) {
       add("Import root serializers retain their published semantic verification, not only wire-kind checks", ["components", "schemas", name]);
     }
   }
+  // canonical retains own enumerable string types, so a different type cannot match.
+  const targetTypes = SHARED.map((name) => {
+    const schema = schemas[name];
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+    const type = Object.getOwnPropertyDescriptor(schema, "type");
+    return type?.enumerable && typeof type.value === "string" ? type.value : undefined;
+  });
+  const fingerprintTypes = targetTypes.every((type) => type !== undefined) ? new Set(targetTypes) : null;
   const fingerprints = new Map(SHARED.filter((name) => schemas[name]).map((name) => [JSON.stringify(canonical(schemas[name])), name]));
   walk(document, [], (value, location) => {
     if (location[0] === "components" && location[1] === "schemas" && owned.has(location[2])) return;
     if (value.$ref) return;
-    const duplicate = fingerprints.get(JSON.stringify(canonical(value)));
+    const type = fingerprintTypes === null ? undefined : Object.getOwnPropertyDescriptor(value, "type");
+    const possibleDuplicate = fingerprintTypes === null || (type && (
+      !Object.hasOwn(type, "value") || (type.enumerable && fingerprintTypes.has(type.value))));
+    const duplicate = possibleDuplicate ? fingerprints.get(JSON.stringify(canonical(value))) : undefined;
     if (duplicate) add(`Reference ${duplicate}; an equivalent inline/local provider shape is forbidden`, location);
     if (!value.properties) return;
     for (const [member, target] of Object.entries({ confidence_band: "ConfidenceBand", dedup_outcome: "DedupOutcome" })) {
