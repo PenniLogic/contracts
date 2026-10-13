@@ -294,9 +294,12 @@ class TagProvenanceTest(LoaderTestCase):
         trusted = contract_artifact.trusted_git()
         self.assertIsNotNone(trusted)
         release_dir = self.fresh_release()
-        planted = release_dir / contract_artifact.GIT_EXECUTABLE
-        planted.write_bytes(b"#!/bin/sh\nexit 1\n")
-        planted.chmod(0o755)
+        elsewhere = self.work / "downloads"
+        elsewhere.mkdir()
+        for directory in (release_dir, elsewhere):
+            planted = directory / contract_artifact.GIT_EXECUTABLE
+            planted.write_bytes(b"#!/bin/sh\nexit 1\n")
+            planted.chmod(0o755)
         started: list[str] = []
         run = subprocess.run
 
@@ -304,15 +307,22 @@ class TagProvenanceTest(LoaderTestCase):
             started.append(argv[0])
             return run(argv, *args, **kwargs)
 
-        entries = {"an empty entry": "", "the entry '.'": os.curdir, "a relative entry": os.path.join(os.pardir, release_dir.name),
-                   "the release directory": str(release_dir)}
-        for label, entry in entries.items():
-            with self.subTest(label), contextlib.chdir(release_dir), \
+        relative = {"an empty entry": "", "the entry '.'": os.curdir}
+        cases = [(f"{label}, the release directory as the current directory", release_dir, entry, "asset.unexpected")
+                 for label, entry in {**relative, "a relative entry": os.path.join(os.pardir, release_dir.name),
+                                      "the release directory as an absolute entry": str(release_dir)}.items()]
+        cases += [(f"{label}, another current directory", elsewhere, entry, None)
+                  for label, entry in {**relative, "a relative entry": os.path.join(os.pardir, elsewhere.name)}.items()]
+        for label, current, entry, rule in cases:
+            with self.subTest(label), contextlib.chdir(current), \
                     mock.patch.dict(os.environ, {"PATH": os.pathsep.join([entry, os.environ["PATH"]])}), \
                     mock.patch.object(contract_artifact.subprocess, "run", recording_run):
                 started.clear()
-                self.assertEqual(contract_artifact.trusted_git(Path(os.curdir)), trusted)
-                self.assertRefused("asset.unexpected", Path(os.curdir))  # the planted file is no Release asset
+                self.assertEqual(contract_artifact.trusted_git(release_dir), trusted)
+                if rule is None:
+                    self.load(self.release_dir)  # verified: the git in the current directory never ran
+                else:
+                    self.assertRefused(rule, Path(os.curdir))  # the planted file is no Release asset
                 self.assertEqual(set(started), {trusted})
         with self.subTest("no git outside the release directory"), mock.patch.dict(os.environ, {"PATH": str(release_dir)}):
             self.assertRefused("git.unavailable", release_dir)
