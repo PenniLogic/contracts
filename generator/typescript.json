@@ -18,7 +18,7 @@
   },
   "importMappings": {
     "Money": "./Money",
-    "Instant": "./Instant",
-    "LocalDate": "./LocalDate"
+    "Instant": "Instant",
+    "LocalDate": "LocalDate"
   }
 }

@@ -7,7 +7,11 @@ const addFormats = require("ajv-formats");
 const { HTTP_METHODS, resolveLocalRef } = require("./_shared");
 
 const FAMILIES = new Set(["ServiceProblemDetail", "EgressDeniedProblemDetail",
-  "AuthenticationProblemDetail", "AuthenticationRequiredProblemDetail", "OperationProblemDetail"]);
+  "AuthenticationProblemDetail", "AuthenticationContextProblemDetail", "AuthenticationRequiredProblemDetail", "SessionRevokedProblemDetail",
+  "AuthenticationChallengeProblemDetail", "ApplicationProblemDetail", "OperationProblemDetail"]);
+const AUTH_STATUS = {authentication_required: 401, step_up_required: 403, session_revoked: 401,
+  step_up_credential_too_new: 403, restricted_after_recovery: 403, recovery_notification_pending: 409,
+  recovery_locked: 403, recovery_pending_elsewhere: 409};
 
 function resolve(value, document, visited = new Set()) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -58,8 +62,8 @@ module.exports = function providerErrors(document, _options, context) {
     add("error-catalogue.v1.json must publish service and separately classified authentication rows");
     return problems;
   }
-  if (catalogue.group_version !== "1.1.0" || document["x-pennilogic-contract-metadata"]?.error_group_version !== catalogue.group_version) {
-    add("The shared error source group must bind catalogue version 1.1.0");
+  if (catalogue.group_version !== "1.2.0" || document["x-pennilogic-contract-metadata"]?.error_group_version !== catalogue.group_version) {
+    add("The shared error source group must bind catalogue version 1.2.0");
   }
   if (catalogue.taxonomy_version !== bindings.taxonomy_version || bindings.taxonomy_version !== "1.1.0") {
     add("error catalogue must bind the accepted taxonomy 1.1.0 projection");
@@ -188,8 +192,24 @@ module.exports = function providerErrors(document, _options, context) {
     if (entry.classification !== "authentication_owned" || entry.state !== null ||
         entry.flow !== "authentication_required" || !bindings.excluded_conditions.includes(entry.flow) ||
         entry.condition !== entry.code ||
-        entry.status !== { authentication_required: 401, step_up_required: 403 }[entry.code]) {
-      add("Authentication codes require their own 401/403 classification and excluded flow, with NONE/null service state");
+        entry.status !== AUTH_STATUS[entry.code]) {
+      add("Authentication codes require their exact owning status and excluded flow, with NONE/null service state");
+    }
+  }
+  if (JSON.stringify(authentication.map((entry) => entry.code).sort()) !== JSON.stringify(Object.keys(AUTH_STATUS).sort())) {
+    add("ADR-019 requires every named session, step-up and proven-recovery condition in the shared catalogue");
+  }
+  const authPolicies = catalogue.authentication_policies || {};
+  if (JSON.stringify(Object.keys(authPolicies).sort()) !== JSON.stringify(Object.keys(AUTH_STATUS).sort())) {
+    add("Every authentication code needs its separately typed retry/lifecycle/context policy");
+  }
+  for (const entry of authentication) {
+    const policy = authPolicies[entry.code];
+    if (!policy || typeof policy.retryable !== "boolean" || !retryClasses.has(policy.retry_class) ||
+        policy.idempotency !== "authentication_lifecycle" || !treatments.has(policy.idempotency) ||
+        !Array.isArray(policy.required_context) || !policy.precondition?.trim() ||
+        (policy.retryable && entry.code !== "recovery_notification_pending")) {
+      add("Auth retry is only same proven-flow delay; credential responses never use financial replay semantics");
     }
   }
   const union = schemas.OperationProblemDetail;
@@ -243,6 +263,17 @@ module.exports = function providerErrors(document, _options, context) {
     type: `urn:pennilogic:problem:${entry.code}`, title: entry.title, status: entry.status,
     detail: entry.detail, code: entry.code, correlation_id: "cor_00000000-0000-4000-8000-000000000001",
   });
+  function authExample(entry) {
+    const contexts = {
+      session_revoked: {revocation_reason: "signout"},
+      step_up_credential_too_new: {matures_at: "2026-10-01T00:00:00.000Z"},
+      restricted_after_recovery: {restricted_until: "2026-10-01T00:00:00.000Z", not_me_until: "2026-10-01T00:00:00.000Z"},
+      recovery_notification_pending: {window_ends_at: null, retry_after_seconds: 30},
+      recovery_locked: {locked_until: "2026-10-01T00:00:00.000Z"},
+      recovery_pending_elsewhere: {pending_route: "recovery_code", window_ends_at: "2026-10-01T00:00:00.000Z", action: "cancel_and_restart"},
+    };
+    return {...example(entry), ...(contexts[entry.code] || {})};
+  }
   if (egress) {
     const wire = example(egress);
     if (!validators.ServiceProblemDetail(wire) || validators.OperationProblemDetail(wire) ||
@@ -253,15 +284,25 @@ module.exports = function providerErrors(document, _options, context) {
     }
   }
   for (const entry of authentication) {
-    const wire = example(entry);
-    if (!validators.AuthenticationProblemDetail(wire) ||
-        validators.OperationProblemDetail(wire) !== (entry.status === 401) ||
+    const wire = authExample(entry);
+    const old = ["authentication_required", "step_up_required"].includes(entry.code);
+    const family = old ? "AuthenticationProblemDetail" : "AuthenticationContextProblemDetail";
+    if (!validators[family](wire) || !validators.ApplicationProblemDetail(wire) ||
+        validators[old ? "AuthenticationContextProblemDetail" : "AuthenticationProblemDetail"](wire) ||
+        (!old && validators.OperationProblemDetail(wire)) ||
+        (old && validators.OperationProblemDetail(wire) !== (entry.code === "authentication_required")) ||
         validators.ServiceProblemDetail(wire) || validators.EgressDeniedProblemDetail(wire) ||
-        validators.AuthenticationRequiredProblemDetail(wire) !== (entry.status === 401) ||
-        validators.AuthenticationProblemDetail({ ...wire, status: entry.status === 401 ? 403 : 401 }) ||
-        validators.AuthenticationProblemDetail({ ...wire, detail: "PRIVATE_SYNTHETIC_CANARY" }) ||
-        validators.AuthenticationProblemDetail({ ...wire, provider: "PRIVATE_SYNTHETIC_CANARY" })) {
+        validators.AuthenticationRequiredProblemDetail(wire) !== (entry.code === "authentication_required") ||
+        validators.SessionRevokedProblemDetail(wire) !== (entry.code === "session_revoked") ||
+        validators[family]({ ...wire, status: entry.status === 401 ? 403 : 401 }) ||
+        validators[family]({ ...wire, detail: "PRIVATE_SYNTHETIC_CANARY" }) ||
+        validators[family]({ ...wire, provider: "PRIVATE_SYNTHETIC_CANARY" })) {
       add("Authentication family must enforce exact catalogue constants, safe closure and 401-versus-step-up discrimination");
+    }
+    for (const name of authPolicies[entry.code]?.required_context || []) {
+      const missing = {...wire};
+      delete missing[name];
+      if (validators[family](missing)) add("Authentication context members are required by the owning code, never silently omitted");
     }
   }
   for (const reason of reasons) {
@@ -301,9 +342,18 @@ module.exports = function providerErrors(document, _options, context) {
           add("Service error responses must reference a resolved strict shared error family, not inline or permissive problems", location);
         }
         if (status === "401") {
-          const schema = resolve(body?.schema, document);
+          function onlyAuthentication401(value) {
+            const schema = resolve(value, document);
+            if (schema?.oneOf) return schema.oneOf.length > 0 && schema.oneOf.every(onlyAuthentication401);
+            if (schema?.properties?.status?.const === 401 &&
+                schema?.allOf?.length === 1 && schema.allOf[0].oneOf) {
+              return schema.allOf[0].oneOf.every(onlyAuthentication401);
+            }
+            return ["authentication_required", "session_revoked"].includes(schema?.properties?.code?.const) &&
+              schema?.properties?.status?.const === 401;
+          }
           const authenticate = resolve(resolved?.headers?.["WWW-Authenticate"], document);
-          if (schema?.properties?.code?.const !== "authentication_required" || schema?.properties?.status?.const !== 401 ||
+          if (!onlyAuthentication401(body?.schema) ||
               resolved?.["x-response-status"] !== 401 || authenticate?.required !== true ||
               resolved?.headers?.["WWW-Authenticate"]?.$ref !== "#/components/headers/DPoPAuthenticate" ||
               resolved?.headers?.["DPoP-Nonce"]?.$ref !== "#/components/headers/DPoPNonce" ||

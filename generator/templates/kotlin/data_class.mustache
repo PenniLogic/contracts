@@ -431,6 +431,12 @@ object {{classname}}ProviderSerializer : com.pennilogic.contracts.serialization.
             ?: throw com.pennilogic.contracts.serialization.ProviderWireException()
         {{#allVars}}
         wire["{{{baseName}}}"]?.let { member ->
+            {{#isNullable}}
+            if (member == kotlinx.serialization.json.JsonNull) return@let
+            {{/isNullable}}
+            {{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}}
+            if (member == kotlinx.serialization.json.JsonNull) return@let
+            {{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}}
             {{#isEnumRef}}
             if (member !is kotlinx.serialization.json.JsonPrimitive || !member.isString ||
                 !{{{dataType}}}.entries.any { it.value == member.content }) throw com.pennilogic.contracts.serialization.ProviderWireException()

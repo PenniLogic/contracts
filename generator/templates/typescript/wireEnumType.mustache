@@ -1,0 +1,1 @@
+{{#isArray}}Array<{{#items}}{{>wireEnumType}}{{/items}}>{{#isNullable}} | null{{/isNullable}}{{/isArray}}{{^isArray}}NonNullable<ReturnType<typeof {{datatype}}ToJSON>> | null{{/isArray}}

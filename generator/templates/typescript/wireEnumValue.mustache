@@ -1,0 +1,1 @@
+member === null ? null : {{#isArray}}{{#uniqueItems}}Array.from(member){{/uniqueItems}}{{^uniqueItems}}member{{/uniqueItems}}.map(member => {{#items}}{{>wireEnumValue}}{{/items}}){{/isArray}}{{^isArray}}requiredWireValue({{datatype}}ToJSON(member)){{/isArray}}

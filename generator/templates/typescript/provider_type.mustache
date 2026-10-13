@@ -1,0 +1,1 @@
+{{#isArray}}{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}Array{{/uniqueItems}}<{{#items}}{{>provider_type}}{{/items}}>{{#isNullable}} | null{{/isNullable}}{{/isArray}}{{^isArray}}{{{datatypeWithEnum}}} | null{{/isArray}}

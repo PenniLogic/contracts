@@ -98,10 +98,9 @@ def _matches(value: Any, schema: Mapping[str, Any]) -> bool:
         if not _matches(value, SCHEMAS[reference]):
             return False
     kind = schema.get("type")
-    kinds = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool}
-    if kind is not None and (kind not in kinds or type(value) is not kinds[kind]):
-        return False
-    if value is None:
+    kinds = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool, "null": type(None)}
+    declared = kind if isinstance(kind, list) else [kind]
+    if kind is not None and not any(candidate in kinds and type(value) is kinds[candidate] for candidate in declared):
         return False
     if "const" in schema and not _equal(value, schema["const"]):
         return False

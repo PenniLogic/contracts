@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pl_contracts import PipelineError, ROOT, SEMVER, SPEC, fail, node_executable, run, spec_version  # noqa: E402
-from schema_compatibility import SourceProof  # noqa: E402
+from schema_compatibility import SourceProof, Unproved  # noqa: E402
 from toolchain import ensure_installed  # noqa: E402
 
 ACKNOWLEDGEMENT = ROOT / "spec" / "breaking-change-acknowledgement.json"
@@ -264,6 +264,40 @@ def component_findings(diff: object, base: dict | None = None, revision: dict | 
             for section in components.values()):
         return [Finding("component-diff-unproved", "components", "malformed or unknown component diff envelope", "component-guard")]
     proof = SourceProof(base, revision) if base is not None and revision is not None else None
+    produced_responses: set[str] = set()
+    inline_responses: list[tuple[str, str, dict, dict]] = []
+    if proof is not None:
+        try:
+            proof.documents()
+        except Unproved:
+            return [Finding("component-source-unproved", "paths", "complete supported response call sites are required", "component-guard")]
+        def produced(value: object, visited: frozenset[str] = frozenset()) -> None:
+            if not isinstance(value, dict):
+                return
+            reference = value.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/components/responses/") and reference not in visited:
+                name = reference.rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~")
+                produced_responses.add(name)
+                produced(base.get("components", {}).get("responses", {}).get(name), visited | {reference})
+        def path_item(value: dict, document: dict, visited: frozenset[str] = frozenset()) -> dict:
+            if "$ref" not in value:
+                return value
+            reference = value["$ref"]
+            if reference in visited or set(value) - {"$ref", "summary", "description"}:
+                raise Unproved("ambiguous path item")
+            return path_item(proof.reference(document, reference), document, visited | {reference})
+        try:
+            for route, value in base.get("paths", {}).items():
+                item = path_item(value, base)
+                other_item = path_item(revision.get("paths", {}).get(route, {}), revision)
+                for method in ("get", "put", "post", "delete", "options", "head", "patch", "trace"):
+                    for status, response in item.get(method, {}).get("responses", {}).items():
+                        produced(response)
+                        other = other_item.get(method, {}).get("responses", {}).get(status)
+                        if "$ref" not in response and isinstance(other, dict):
+                            inline_responses.append((f"{method.upper()} {route}", status, response, other))
+        except (Unproved, TypeError):
+            return [Finding("component-source-unproved", "paths", "complete supported response call sites are required", "component-guard")]
     candidates: dict[tuple[str, str], tuple[dict, dict]] = {}
     if proof is not None:
         if any(not isinstance(document, dict) or not isinstance(document.get("components"), dict) or
@@ -277,8 +311,12 @@ def component_findings(diff: object, base: dict | None = None, revision: dict | 
                 if isinstance(before[name], dict) and isinstance(after[name], dict) and proof.candidate(before[name], after[name]):
                     candidates[kind, name] = before[name], after[name]
                     if name not in components.get(kind, {}).get("modified", {}):
-                        findings.append(Finding(f"component-{kind}-unproved-change", f"components/{kind}/{name}",
-                                                "source conjunction addition is missing from the diff record", "component-guard"))
+                        changes = components.get("schemas", {}).get("modified", {})
+                        unchanged = (proof.schema(before[name], after[name], {}, changes) if kind == "schemas" else
+                                     proof.response(before[name], after[name], {}, changes))
+                        if not unchanged:
+                            findings.append(Finding(f"component-{kind}-unproved-change", f"components/{kind}/{name}",
+                                                    "source conjunction addition is missing from the diff record", "component-guard"))
     for kind in COMPONENT_KINDS:
         section = components.get(kind)
         if not isinstance(section, dict):
@@ -294,12 +332,14 @@ def component_findings(diff: object, base: dict | None = None, revision: dict | 
             if kind == "schemas":
                 local: list[Finding] = []
                 _schema_findings(pointer, change, local)
-                if (kind, name) in candidates:
-                    before, after = candidates[kind, name]
+                source_pair = ((base["components"][kind].get(name), revision["components"][kind].get(name))
+                               if proof is not None else (None, None))
+                if all(isinstance(source, dict) for source in source_pair):
+                    before, after = source_pair
                     if proof.schema(before, after, change, components.get("schemas", {}).get("modified", {})):
                         local = [finding for finding in local if finding.id not in
                                  ("component-schema-allof-added", "component-schema-allof-changed")]
-                    elif not local:
+                    elif (kind, name) in candidates and not local:
                         local.append(Finding("component-schema-unproved-change", pointer,
                                              "source conjunction addition has no complete supported proof", "component-guard"))
                 findings.extend(local)
@@ -316,15 +356,38 @@ def component_findings(diff: object, base: dict | None = None, revision: dict | 
                 if isinstance(change.get("schema"), dict):
                     _schema_findings(f"{pointer}/schema", change["schema"], findings)
             elif kind == "responses":
-                if (kind, name) in candidates:
-                    before, after = candidates[kind, name]
-                    if proof.response(before, after, change, components.get("schemas", {}).get("modified", {})):
+                if proof is not None and isinstance(base["components"].get(kind, {}).get(name), dict) and \
+                        isinstance(revision["components"].get(kind, {}).get(name), dict):
+                    before = base["components"][kind][name]
+                    after = revision["components"][kind][name]
+                    if proof.response(before, after, change, components.get("schemas", {}).get("modified", {}),
+                                      producer=name in produced_responses):
                         continue
-                elif _only_additive_response_schema(change):
+                elif proof is None and _only_additive_response_schema(change):
                     continue
                 findings.append(Finding("component-responses-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
             else:
                 findings.append(Finding(f"component-{kind}-changed", pointer, f"{pointer} changed; review manually", "component-guard"))
+    for operation, status, before, after in inline_responses:
+        try:
+            proof.work = 0
+            proof.clear()
+            proof.documents()
+            left = before.get("content", {})
+            right = after.get("content", {})
+            for media, entry in left.items():
+                other = right.get(media)
+                if not isinstance(entry.get("schema"), dict) or not isinstance(other, dict) or \
+                        not isinstance(other.get("schema"), dict):
+                    continue
+                proof.audit(entry["schema"], base)
+                proof.audit(other["schema"], revision)
+                if not proof.preserves(entry["schema"], other["schema"], response=True):
+                    findings.append(Finding("operation-response-domain-unproved", f"{operation}/responses/{status}/{media}",
+                                            "legacy response domain is widened or outside the bounded source proof", "component-guard"))
+        except Unproved:
+            findings.append(Finding("operation-response-domain-unproved", f"{operation}/responses/{status}",
+                                    "legacy response variance could not be established", "component-guard"))
     return findings
 
 

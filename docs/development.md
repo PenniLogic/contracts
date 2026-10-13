@@ -26,6 +26,12 @@ Their source authority, safe diagnostics, group version, replay/override rules, 
 entry points and remaining rollout obligations are in [provider-contracts.md](provider-contracts.md).
 The accepted scaffold components themselves are unchanged.
 
+The local `0.4.0` [core contract](core-contract.md) adds original contracts#1's four endpoint
+groups after the accepted provider/performance source. All three client targets are mandatory.
+The original #16 catalogue is `1.2.0`; contextual authentication errors are isolated from
+unchanged legacy/custom-destination response shapes. It remains source preparation, not
+server adoption, a released client or Infra #22 qualification.
+
 ## Layout
 
 | Path | Owner / purpose |
@@ -33,6 +39,7 @@ The accepted scaffold components themselves are unchanged.
 | `spec/openapi.yaml` | The OpenAPI 3.1 document. `info.version` is a source candidate until the owner publishes the matching `vX.Y.Z` tag. |
 | `spec/currency-registry.v1.json` | ISO 4217 codes and minor-unit exponents accepted by the codecs (ADR-015 §1.4); rendered into every client. |
 | `spec/error-catalogue.v1.json`, `spec/client-state-bindings.v1.json`, `spec/import-group.v1.json` | Proposed provider diagnostics/retry/key policy, accepted taxonomy 1.1.0 identifier projection and new T-CON-10 import/dedup group policy. Copied/hash-bound into each client and prepared as standalone release assets. |
+| `spec/category-seed.v1.json` | Exact accepted API `fd58da67` category bytes; SYSTEM key, icon/colour and localized defaults derive from this one companion, copied/hash-bound into all three clients and release assets. |
 | `spec/fixtures/*.json` | Money and instant wire vectors (hand-written) and `money-roundtrip-generated.v1.json` (10 000 seeded values + boundaries, regenerated deterministically by `scripts/generate_money_fixtures.py`), consumed unchanged by all three smoke consumers (ADR-015 §7). Synthetic values only. |
 | `spec/.spectral.yaml`, `spec/spectral-functions/` | Committed lint ruleset and its custom functions. |
 | `spec/adr022/` | Byte-identical accepted consequence and closed-schema inputs; provenance and immutable digests are documented in custom-destinations.md. |
@@ -153,6 +160,30 @@ registry as source, and writes `contracts-manifest.json` (specification version 
 generator name/version/jar SHA-256, config/runtime/template hashes, per-file and tree SHA-256).
 Outputs live in `build/generated/<language>/`.
 
+### Core null, temporal query and success adapters
+
+Declared null is supported on scalar/null pairs, scalar reference aliases, arrays/items and
+literal-null assertions. The full compiled declaration remains authoritative; generator-only
+projections never relax the wire guard. Required null cannot be omitted, while optional absent/
+null/value remain distinct. Kotlin optional-null fields use `ProviderPresence`; Python retains
+explicit `model_fields_set` nulls and TypeScript omits undefined without dropping null.
+Ambiguous unions, nullable object references and unsupported alias refinements fail before output
+promotion. No global JSON/legacy DTO or Money configuration is relaxed.
+
+Distinct declared 2xx body/empty cases use generated status-discriminated HTTP carriers and
+exact branch validators. This fixes the actual 201/202 decoder, not the wire envelope; malformed
+body/media, unexpected success status and nonempty declared empty bodies refuse. TypeScript's
+Fetch platform itself forbids constructing a nonempty 204 response. Native synthetic consumers
+exercise the real generator, compilers and normal transport paths, not a replacement runtime.
+Temporal query templates call the existing Instant/LocalDate seams. Bootstrap proof auth settings
+cannot replace the required per-call DPoP argument with configured static proof.
+
+API overrides are pinned-stock plus exact anchored edits in the template drift tests; unchanged
+single-success APIs and Kotlin field fallback remain covered. Never modify generated files.
+The versioned component history is `x-contract-changelog` in the source document, and the exact
+ADR-019 mirror is `AuthenticationParameters.x-adr-019-auth-parameters`; neither is a runtime issuer
+configuration or a published version.
+
 | Language | Money | Instant / dates | Client wiring |
 | --- | --- | --- | --- |
 | Kotlin (`jvm-ktor`, kotlinx.serialization) | `com.pennilogic.contracts.money.Money` (`Long` minor units + currency, `@Serializable(with = MoneySerializer)`), mapped for every `$ref: Money`; the raw `Money.kt` model is not generated and the internal `MoneyWire` shape is not serializable — the only serializable money type is `Money`. | Generated models type instants as `@Contextual java.time.OffsetDateTime` and dates as `@Contextual java.time.LocalDate` (the Kotlin generator's `dateLibrary` overrides CLI type mappings); `InstantSerializer`/`LocalDateSerializer` enforce the grammar, calendar validity and offset Z; `InstantCodec` converts to and from `java.time.Instant`. | The generated `ApiClient` installs `json(PennilogicJson.json)` as its `ContentNegotiation` converter (template override) and the generated `build.gradle` carries `ktor-serialization-kotlinx-json`; `PennilogicJson.json` registers `PennilogicSerializers.module` and `ignoreUnknownKeys` (additive evolution). A consumer that builds its own `Json` must use `PennilogicJson.json` or its module; `smoke/kotlin/.../GeneratedClientWiringTest.kt` round-trips `Money` + instant + date through the generated client with a `MockEngine`. |
@@ -179,7 +210,8 @@ wire format nor ledger admission: registry acceptance of JPY/KWD does not admit 
 
 ### Generator templates
 
-Twelve templates/partials are overridden; stock portions remain bound to the pinned generator:
+The model/API/transport templates and finite partials are overridden; stock portions remain
+bound to the pinned generator:
 
 - `generator/templates/python/api.mustache`, `api_client.mustache`, `rest.mustache`: precise
   parameter/body/return types, actual typed Pydantic `ApiResponse` validation and urllib3's real
@@ -221,9 +253,211 @@ Twelve templates/partials are overridden; stock portions remain bound to the pin
   before invoking a required child writer; required references and explicit null remain guarded.
   Declared undefined optional output members are omitted after native-field validation and before
   validating the emitted object, so closed union branches see actual JSON rather than phantom keys.
+  Public writers now declare `ModelWire` output and domain input, not the stock's false domain
+  return/`any` implementation. Exact field-metadata partials recursively type and convert the
+  wire keys, Money/time seams and arrays/sets/references. The finite `wireSerialization.ts`
+  helpers narrow actual codec output and omit only statically optional undefined members;
+  no output assertion equates domain wrappers with plain wire data.
 - `generator/templates/typescript/providerField.mustache`: shared recursive field/item metadata
   for marked models, including model-valued array items. Array indices must be present and their
-  values non-null/non-undefined before conversion; property omission is not array-item omission.
+  values non-undefined and non-null unless the source declares null; property omission is not
+  array-item omission.
+- The Kotlin required/optional property partials, TypeScript interface partial and each target's
+  `provider_type.mustache` preserve source-declared nullable enum references without forking
+  their shared enum. Source-derived metadata selects only homogeneous array chains ending in a
+  declared nullable enum; TypeScript's finite enum read/write partials preserve nested arrays/sets.
+  Python uses a required union or optional default with explicit-null presence retained.
+- The three API templates and Python success-return partial bind distinct declared success statuses
+  without changing their wire bodies; TypeScript's query partial uses the canonical time seams.
+
+`scripts/tests/test_typescript_wire.py` compiles real generated public consumers with strict
+settings and no casts/suppressions, executes actual Money-wire counterexamples/roundtrips,
+and checks every paired negative diagnostic. It covers normal/typed/nested/collection/null/
+optional writers, generic read-only response members and refusal of unbound/request-owned
+read-only models. `ModelToJSON` no longer permits a false domain assignment; reconstruct with
+`ModelFromJSON` when domain behavior is needed. This is an explicit TypeScript source-compatibility
+correction, not a blanket unchanged-ABI or migrated-consumer claim.
+
+Marked response models with locally declared `readOnly` fields require a bounded complete-source
+usage proof that they are response-only. Their serializers retain the received projection,
+including required null, while write DTOs remain separate closed schemas. Unsupported annotation
+placements and unbound/mixed request usage fail before output promotion. Transaction projection
+omission remains supported; explicit null is not normalized into absence.
+
+`spec/spectral-functions/_schemaUsage.js` is shared by that compiler proof and the core lint
+guard. Its physical schema-edge inventory is extracted from the accepted custom-destination
+guard, which reuses it without changing its enum-copy findings. Evaluated object/map/dependent
+schemas, applicators, proper local references, callbacks/webhooks, Path Items, parameters/media
+and encoding headers remain separate from `example`/`default`/`enum`/extension data. Unknown or
+unproved layouts cannot receive a response-only exemption. The existing 16,384-node/64-depth
+bounds and explicit cycle/refusal behavior remain, including cached-reference height checks.
+Unreferenced `$defs` declarations are not applications; referenced schema definitions are inspected.
+Webhook, operation-callback, media, encoding, header and schema-map keys are natural names,
+including names beginning with `x-`. Only the extensible Paths, Responses and Callback Objects
+skip their actual specification-extension members; root/container/schema extension payloads
+remain data. Renaming a webhook cannot hide a request use or erase a genuine response use.
+
+The helper proves schema use, not every structural rule of an OpenAPI container. Standalone
+compilation is not whole-source admission: malformed media/encoding objects or unknown Media
+Type fields can still fail later in stock Spectral or the pinned generator's OpenAPI validation.
+Keep those downstream failures/no-promotion outcomes distinct from valid-source usage-proof
+failures. No malformed standalone observation is a successful full-source bypass.
+
+`scripts/tests/test_schema_usage.py` covers real full-YAML source lint and all-target refusal
+before promotion, same-model direct/map/callback/webhook controls, genuine annotations and
+response-only positives, and cast-free generated mock transports. Its paired Node matrix also
+checks context/ref/budget adversaries and exact prior physical-container traversal. These controls
+do not authorize an arbitrary request model, a backend write, or new callback product scope.
+
+### Complete source-test runner candidate
+
+The manual entry point `python scripts/run_source_tests.py` discovers the same entire
+`scripts/tests/test_*.py` graph automatically. Canonical command/profile activation is pending
+separately accepted Infra generation; the generated workflow, policy and command documents
+are not changed by this implementation.
+
+Unproved modules, global-patched tests and canonical-generation work retain one exclusive
+serial worker. With a reviewed serial resource profile and verified cached generator/diff
+tools, the two existing isolated CLI workers may start source-only work alongside it.
+`test_typescript_wire`, `test_category_seed` and `test_provider_transport` read canonical
+clients and wait for the serial leader, its owned descendants and result/input checks to
+finish. The parent then releases their exact plan over owned stdin pipes. An EOF, malformed
+control, cancellation or failed readiness becomes a failed result, never SDK readiness.
+An unproved serial module or absent managed resource profile conservatively retains the
+original serial-first barrier; invalid cached tools fail explicitly without installation.
+No extra serial or CLI worker, thread pool, warmup or changed runtime budget is introduced.
+Canonical SDK/shared-mutable work has one exclusive serial owner; independent scratch SDK
+generation and compilation in the reviewed CLI modules may overlap under their existing
+per-invocation caps. This is not blanket serialization of every generator or compiler call.
+
+The twelve other reviewed CLI modules use immutable source/dependencies, verified read-only
+tool binaries and unique SpecDir/build scratch, not canonical client outputs. Their Node
+compile caches and JVM home/temp remain lane-owned. Python-global patches/environment changes
+in the serial process cannot alter those separate worker processes. Serial Gradle cache and
+canonical generation remain exclusively owned; cached jar/binary/marker hashes are fenced
+through overlap. Source, toolchain and every canonical generated byte are still rehashed
+across the post-serial SDK-reader interval.
+The reviewed module profiles are:
+
+| Lane | Modules and actual mutation boundary |
+| --- | --- |
+| CLI 1 | `test_custom_destinations`, `test_provider_constraints`, `test_core_cli_guards`, `test_typescript_wire`, `test_category_seed`, `test_breaking`, `test_import_provider`, `test_allocation_refusal`: real CLI/schema/consumer checks write only separate SpecDir or unique build scratch; canonical sources/clients are read-only. |
+| CLI 2 | `test_lint`, `test_schema_usage`, `test_provider_transport`, `test_schema_compatibility`, `test_error_provider`, `test_authentication_provider`, `test_egress_errors`: fixtures/companion mutations and per-class proof pairs use owned scratch; provider checks read the already-generated clients. |
+
+The custom-destination helper still has its original concurrency-two and combined one-MiB
+raw-output limits; none of its assertions or cases are changed. Only the whole modules are
+scheduled, not a fixed list of methods. A newly discovered module defaults to serial.
+Module/dependency changes require reassessing that mutation boundary.
+
+Each lane has separate process memory, temp/cache/config roots and, for parallel lanes,
+effective checked JVM home/temp settings. Discovered/assigned/executed identities, child
+PIDs/exits, standard failure/error/skip records, method/class/phase timings and raw logs remain
+under `build/source-tests/`. Missing, duplicate or substituted methods, import or zero-test
+surprises, bad receipts/nonzero children and shared-input mutations fail explicitly.
+Workers join before scratch cleanup; failed tests remain failed even when every method ran.
+Custom `load_tests` hooks refuse explicitly rather than replacing complete discovery with a
+partial suite. No blanket threaded unittest or cached generated outcome replaces a test.
+Every assigned method has an index into the complete discovered order and actual start/stop
+and outcome records from the standard `TestResult`. Failed subtests retain their parent method
+index and exact failure identity/traceback. Class/module fixture errors and unstarted methods
+remain in failed receipts; missing execution never becomes a pass or loses the original error.
+These local receipts are not an independently qualified Infra Conformance witness or CI result.
+After final receipt validation, stdout includes one bounded JSON timing block between
+`SOURCE_TEST_FINAL_TIMING_BEGIN` and `SOURCE_TEST_FINAL_TIMING_END`. It projects only exact
+method IDs/durations, class setup/teardown durations, final worker intervals, validated
+independent-prefix intervals and parent phase intervals. The plan's exact SHA256 and the
+SHA256 of its sorted compact JSON input snapshot bind the diagnostic to its source; source
+paths, environments, raw streams and failure details are not projected. Existing receipt
+schemas and worker scheduling are unchanged.
+
+Final and prefix seconds share each worker's existing start; prefix intervals are not final
+lane results. Overlapped serial/CLI parent phases share the overlap start, while conservative
+parent phases have separate starts. Complete-source seconds retain the origin before the
+input snapshot and end at summary construction, excluding final serialization/output and
+host exit. Durations are not additive, and lane-minus-method time is not measured waiting.
+The entire ASCII JSON block including markers/newline must fit one MiB; IDs must be ASCII
+dotted identifiers of at most 512 characters and timing values finite/nonnegative. Missing
+validated finals or required prefixes, invalid timing/identity/class coverage, oversized output or an output
+error explicitly fails the aggregate rather than truncating or reporting graph success.
+This public-safe projection is timing-diagnostic-only, not native cleanup, parity/IPC/
+collector, host-tail, hosted-under600, Conformance or integration qualification.
+
+During overlap each CLI worker retains an indexed independent-prefix checkpoint before
+waiting for readiness. Checkpoints are not full lane results, carry no child-exit acceptance
+and never enter the complete discovered/executed union. Final full lane receipts keep their
+original schema and remain required, including every gated method. Class/module cleanup
+finishes exactly once before the readiness wait; only unittest's completed fixture pointer
+is reset before delayed execution, not outcomes or diagnostics. Each promised independent
+checkpoint must be present on the gated route and agree with the final completed method,
+index, outcome, fixture and timing records. A failed or contradictory prefix fails the
+aggregate even when a final receipt reports success. The conservative non-gated route does
+not promise a checkpoint.
+SDK readiness requires structurally valid stop/exit custody, not just a complete start-ID
+list. Only a fully accounted unsuccessful standard TestResult permits later diagnostics; malformed
+or incomplete receipts and nonzero exits paired with success cannot release SDK readers.
+Non-object managed tool markers fail explicitly at the manual verification boundary, so
+preflight and later fence failures still finalize available results into a failed aggregate.
+Partial launch, pipe and cancellation failures still
+attempt bounded cleanup for every owned worker and finalize a failed aggregate with available
+prefix/final evidence; missing SDK methods cannot qualify the graph.
+Parent success, expected-failure and unexpected-success terminal events are exclusive and
+cannot repeat or coexist with a parent skip. Legitimate repeated subtest or cleanup errors
+remain separately recorded. Once a run plan exists, launch, snapshot, log-read and cleanup
+errors produce a failed aggregate retaining available completed/partial lane identities and
+actual results. Failure to write that aggregate is itself an explicit error with raw evidence
+retained.
+Expected failures identify only the parent method, even when the failure originated in a
+subtest; subtest-shaped or duplicated expected-failure terminals cannot qualify a receipt.
+
+Process ownership survives worker-leader exit: Windows workers are attached while suspended
+to a retained, non-breakaway, kill-on-close Job Object before executing; Linux leaders are
+waited without reaping so their process-group identity remains reserved through drain checks.
+Lingering owned descendants fail the phase and are terminated/drained before another phase.
+Every launched lane gets a cleanup attempt even when another fails. Five-second cleanup bounds
+are not test-runtime extensions; unconfirmed process cleanup fails and retains lane state.
+Process-tree completion and directory removal have distinct receipt fields. These mechanisms
+do not claim a hostile-code sandbox or ownership of deliberately escaped external processes.
+Ownership records are retained before acquisition/resume. Pre-attachment failure uses the
+original process-creation handle for bounded termination/join, including the focused fixture
+guard. Catchable cancellation remains failed evidence while every retained owner is cleaned;
+any unconfirmed cleanup retains state. An interruption during state removal still attempts a
+failed aggregate with the original results. Linux cleanup fences the reserved group regardless
+of an empty procfs observation before accepting drain and reaping the leader; repeated scans
+alone are not a completion guarantee. Linux execution remains a separate qualification gate.
+If owner construction fails, pending POSIX cleanup uses the retained process and record with
+the same wait/fence/drain/join primitives, never the failed owner factory. Its cancellation
+recovery shares the original five-second cleanup deadline; a fence, scan, drain or join error
+still retains explicit uncertainty and the primary launch failure.
+Linux reaping begins only after confirmed reserved-group fencing/drain and is recorded as an
+irreversible transition before `Popen.wait`, which can reap and then re-raise cancellation.
+Recovery after that boundary is bounded joining/bookkeeping only: numeric group signaling
+cannot be reacquired, including pending-owner recovery. A preliminary observation error still
+attempts reserved-group containment and retains its original diagnostic; an unconfirmed drain
+is not reaped or reported clean. Pre-fence lingering-work evidence survives later scan errors.
+
+Only the two staging/promotion rollback tests in `GenerationTransactionTest` reuse copied
+class-fixture targets. Those bytes are freshly generated once for the exact source, companions,
+configuration/templates/runtime/scripts, tool binaries and JVM/options context; every reuse
+rehashes the full inputs and target including manifest, copies into a new empty stage and
+rehashes the copy. Each test retains independent writable output. Fixture/body/manifest/input/
+option/tool mutations refuse. Actual generator failures, successful fresh publication,
+companion failures and determinism assertions still execute their original real generation.
+When constructing that fixture, the already verified per-file body hashes are folded with
+the exact manifest hash instead of reading every body a second time. The manifest is read
+back to reject changes during binding. Every later staging use still rehashes the full live
+inputs, source target and independent copy; there is no stat-based or persistent result cache.
+Global `gc` and `Path` patches remain serialized.
+
+This is not an under-600 claim. Exact 6e's actual functional-success/timing-failure observation
+is 941-second job/945-second whole workflow, source 209 tests in 788.925 seconds. All previous
+failure/pass records remain at their real subjects; both final hosted gates still require
+fresh Root-owned measurement without a threshold or test-floor waiver.
+
+`scripts/tests/test_core_cli_guards.py` uses full valid YAML and the real lint/generation CLIs,
+not a partial JSON/version failure or function-only stand-in. It checks distinct shared 202
+financial decisions and legitimate object-key reorderings alongside semantic/array/type/extra-field/
+pin negatives. The strict structural comparator is existing accepted custom-destination prior art;
+exact category seed bytes and ordered vocabularies are not reformatted or weakened.
 
 `scripts/tests/test_generate.py::TemplateOverrideDriftTest` extracts each stock template from the
 pinned jar and asserts the override equals stock plus exactly those edits (and that no other
@@ -233,6 +467,15 @@ on the new stock template and update the test.
 The TypeScript target also uses its committed template directory. Manual source edits use LF
 as required by `.gitattributes`; in particular templates must not acquire CRLF fragments that
 would change generated bytes between Windows and Linux. The runtime copy already normalizes LF.
+The template drift suite checks actual raw LF bytes before native generation, not only
+newline-normalized text comparisons. Goldens must be generated from those committed LF inputs.
+
+Source-test performance preserves the complete method/assertion graph. The two Python seam
+checks share one freshly generated, immutable class fixture; both source and native assertions
+still run. The 29 legacy missing-binding CLI cases use at most two subprocesses, each with its
+own source directory, exact companions and separate output/receipt logs. No global unittest
+parallelism is used, and the accepted Node helper's concurrency-two/combined-one-MiB behavior
+is unchanged. Local profiling and reductions do not qualify the actual hosted under-600 gates.
 
 ### Provider conformance
 
@@ -293,7 +536,7 @@ flattens into extra required fields or scalar enums. The full original constrain
 first and remain the runtime authority. `generation_model_projection` binds the effective input,
 selected models and retained constraint digest; no source field or runtime guard is dropped.
 
-The supported subset is explicit: objects/arrays/strings/integers/booleans; local acyclic schema
+The supported subset is explicit: objects/arrays/strings/integers/booleans/null; local acyclic schema
 references; string enums and scalar constants; anchored portable ASCII regular expressions;
 code-point string lengths; inclusive/exclusive safe-integer bounds; nested min/max/unique item
 rules (including zero upper bounds); required/closed members and allOf/anyOf/oneOf/not/conditional
@@ -303,7 +546,11 @@ references receive ASCII/escape/parser checks, not an arbitrary format or IRI ce
 Enum/constant predicates may constrain integer/boolean fields without introducing a new scalar
 enum serializer. Referencing an unmarked legacy DTO does not make that DTO globally strict.
 
-Generation fails explicitly for unknown keywords, untyped value/items, floating-number or nullable
+Explicit null, scalar-plus-null pairs, nullable scalar references and array/item nullability are
+declaration-driven. Required null cannot be omitted; optional null is not absence. Nullable
+object unions and unions with multiple non-null types remain unsupported.
+
+Generation fails explicitly for unknown keywords, untyped value/items, floating-number or unsupported
 union schemas, tuple/contains/map-schema features, external/unresolved/cyclic references,
 nonportable patterns, unsupported formats/defaults/scalar-enum representations, malformed
 metadata or contradictory/unrepresentable bounds. No unsupported declaration is silently treated
@@ -372,7 +619,16 @@ mismatch is unintended.
 Every generation builds in a fresh owned sibling staging directory, including runtime,
 companions and the complete manifest. One requested target set is promoted only after every
 target succeeds; downstream generator/companion failures leave previous caller output intact
-and discard staging. Verification double-generates and compares before promoting any client;
+and discard staging after joining every worker. Independent target staging uses at most two workers.
+Checked provider declarations may be shared only inside one generation batch after rehashing
+the exact source, companions, compiler dependencies and pins; each target gets an independent
+copy. Changed inputs recompile, failures are never cached, and no generated outcome is reused.
+The two determinism batches have separate declaration scopes and fresh native generations.
+The provider-composition fixture shares one declaration scope across its existing ordered
+Kotlin, TypeScript and Python generation calls; each target is still generated separately.
+This removes repeated source compilation, not native work, and establishes no elapsed-time
+or under-600 qualification for the retained F6 timeout.
+Verification double-generates and compares before promoting any client;
 golden updates are committed together with that verified client set, never on a failed run.
 Promotion errors restore prior directories/files. If filesystem restoration itself fails or
 receives a catchable `KeyboardInterrupt`, including during rollback cleanup,
@@ -381,6 +637,16 @@ directory; it does not delete recoverable prior bytes or advertise partial succe
 Already-restored destinations and still-unresolved backups remain byte-verifiable against that
 mapping. A promotion interrupt with a successful rollback is re-raised after prior output is
 restored; an interrupted rollback follows the recovery-required path before staging cleanup.
+Windows directory names can remain unavailable while a renamed or deleted directory handle
+is still open. Only native access-denied/sharing-violation rename errors are retried on the
+same paths within a 250 ms monotonic retry window, with an explicit diagnostic. That window
+does not preempt a native filesystem call or guarantee its total wall time. Persistent errors
+still fail and retain recovery data, and non-native errors or cancellation are never retried. Transaction
+tests keep their shared freshly generated prerequisites but own separate staging roots, so
+a retained recovery stage from one test cannot contaminate another test's success assertion.
+The native sharing controls open non-inheritable `FILE_LIST_DIRECTORY` read handles with
+`OPEN_EXISTING` and backup semantics. Attribute-only access does not establish a share-mode
+denial. Held-handle denials and any later post-close transients are recorded separately.
 These are recoverable process-level filesystem transactions, not a single multi-path atomic
 rename, crash durability or protection against external concurrent writers. Consumers must not
 read outputs while a generation command runs. Source/root directories and linked output
@@ -482,3 +748,87 @@ carry a reason and a field name, never the value; generated Pydantic models hide
 diagnostics, and structured error logging uses `errors(include_input=False)`. The generated clients
 are outputs, never committed; consumers generate from a tag. `scripts/release.py` tags only the
 commit `origin/main` carries.
+
+### Generation-safety scratch-lane increment
+
+The complete `test_generation_safety` module now uses CLI 1's early source-only prefix:
+its class baselines, per-test outputs, verification build and copied golden file are private.
+This is a resource-profile exception to the earlier global-patch serial grouping: its `gc`, `Path`
+and environment patches remain sequential within one CLI PID, isolated from the serial owner.
+All four child generator commands retain the lane's checked JVM home/temp options and append
+the same `-Xmx256m` limit. Discovery and prefix selection share the whole-module resource decision;
+no class or method is split between workers, and no native call or assertion is replaced.
+`test_generate` canonical generation/readers and nullable/status's shared offline Gradle work
+remain behind the existing serial/canonical gates. Verified cached tools stay read-only;
+there is no additional worker, target capacity, installation, warmup or budget change.
+The focused controls use synthetic owned fixtures and stub native generation/source compilation;
+they do not run the real generation-safety module or establish elapsed savings or under-600 acceptance.
+
+### Independent provider-lint class and private verify observations
+
+Within CLI 2's unchanged `test_provider_transport` assignment, only the complete
+`ProviderWiringNegativeTest` class joins the early prefix. Its four methods use independent
+SpecDir sources and retain all 29 separate legacy-provider lint commands, their concurrency-two
+bound, ordered results, assertions and evidence. `ProviderTransportSchemaTest` and every
+canonical SDK reader remain gated. The shared resource classifier selects whole classes for
+the existing GatedSuite; no method list, extra lane, scheduler or batched lint replaces coverage.
+
+The private transaction verify-failure method retains four fixed phase records under its
+existing `build/generation-transaction-controls/verify-phases-*` evidence pattern:
+before verify, first real generation entry/return, and the deliberate second-call refusal.
+Each create-only record is flushed and fsynced, contains only its fixed phase and local
+monotonic elapsed seconds, and survives ordinary fixture cleanup. Copies/hashes, fresh
+declarations/native generation, private BUILD/GOLDEN, promotion/cleanup and the intentional
+error remain unchanged; checkpoint write failures propagate. These observations begin after
+the original preparation/hash work, not at the enclosing clock. They do not diagnose the
+spent F7 timeout or establish saved time, a real workload pass or under-600 sufficiency.
+
+### Provisional incremental source-test observations
+
+Each source worker retains a private, create-only `<lane>.progress.jsonl` alongside the
+existing plan, logs and receipts. Complete rows are flushed as worker, method start/stop
+and class setup/teardown observations occur; they bind the plan hash, lane, PID, sequence
+and worker-local elapsed clock. Method rows carry the original global index, recorded
+duration and outcome kinds, not traceback, skip-reason or input contents. An interrupted
+method or fixture can leave only a start; a partial final JSON line is not a completed row.
+Flush is not a power-loss or directory-durability guarantee. Synchronous observation I/O
+is charged to the same workload budget; its overhead is not separately measured here.
+
+Every row is explicitly provisional and whole-graph unqualified. These observations are
+not a prefix/final receipt, worker exit, IPC/readiness or cleanup witness, and do not enter
+the aggregate's complete ID union. All existing receipt schemas, source/output fences,
+whole-class routing, real assertions, native calls, per-invocation caps and deadlines remain.
+Observation write errors become explicit standard TestResult errors without preventing
+test/class cleanup; final results remain failed. Journal open failures propagate, and a
+close failure after tests finish is retained in the failed lane receipt.
+
+The origin follows worker discovery, input verification and isolation; it is not the
+enclosing clock and does not explain unmeasured admission or subprocess phases. F8's
+remaining CLI1 methods have no retained durations/PID, so no causal lint/compiler/network
+fix or under-600 sufficiency is inferred. This instrumentation preserves evidence for a
+separately authorized invocation; it does not replay F8 or authorize another workload.
+
+### Named-model validation identity
+
+The custom-destination source-control file keeps one Spectral document inventory and schema
+wrapper per named model of its unchanged parsed base, for that Node invocation only. Spectral
+already keys AJV instances by inventory and compiled schemas by object identity; recreating
+both for every wire vector discarded those existing caches. Every wire value is still passed
+to the real validator and receives independent diagnostics. Mutable derivative schemas retain
+fresh inventories, and all original real lint inputs, SDK calls, assertions, concurrency and
+output limits remain unchanged. F9 measured the enclosing source-control method at171.280369s,
+not this internal compile cost; saved time and full-graph sufficiency remain unmeasured.
+
+The fixed byte-pinned ADR consequence schema also uses one invocation-local artifact
+inventory in the source controls, separate from named models and mutable derivatives.
+Every rule call still re-reads and verifies both artifact digests, walks the current
+document and validates the current consequence. Only compiled schema identity is shared;
+changed values and independent diagnostics are never cached.
+
+Private pristine staging rejects unknown languages first and, for known languages,
+occupied outputs before input/baseline scans. This deliberately makes nonempty output the
+first refusal even when inputs or baseline bytes are also invalid. Empty-output staging
+still verifies live inputs and the full baseline, repeats the output check before copy
+to reject races, rehashes every independent copied output and deep-copies the manifest.
+All real generation/CLI matrices and custody cases remain unchanged. These remove
+demonstrable repeated work; saved time and full-graph/600-second sufficiency are unmeasured.

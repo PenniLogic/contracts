@@ -191,8 +191,9 @@ class ProviderCompositionTest(unittest.TestCase):
         cls.evidence.mkdir(parents=True)
         shutil.copyfile(cls.spec_path, cls.output / "openapi.yaml")
         tools = toolchain.ensure_installed()
-        for language in gc.LANGUAGES:
-            gc.generate(language, cls.output / language, tools, cls.spec_path)
+        with gc._declaration_scope():
+            for language in gc.LANGUAGES:
+                gc.generate(language, cls.output / language, tools, cls.spec_path)
 
     def run_probe(self, command: list[str], *, label: str, cwd: Path = ROOT,
                   env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

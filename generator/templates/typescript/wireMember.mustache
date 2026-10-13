@@ -1,0 +1,4 @@
+        '{{baseName}}': (() => {
+            const member = value['{{name}}'];
+            return {{^required}}member === undefined ? undefined : {{/required}}{{>wireValue}};
+        })(),

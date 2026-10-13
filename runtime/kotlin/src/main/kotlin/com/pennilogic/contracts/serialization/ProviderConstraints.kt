@@ -65,19 +65,22 @@ internal object ProviderConstraints {
             val target = ProviderConstraintData.schemas[name] ?: throw ProviderWireException()
             if (!matches(value, target)) return false
         }
-        if (value == JsonNull) return false
-        val kind = schema["type"]?.jsonPrimitive?.content
+        val kinds = when (val type = schema["type"]) {
+            null -> emptyList()
+            is JsonArray -> type.map { it.jsonPrimitive.content }
+            else -> listOf(type.jsonPrimitive.content)
+        }
         val primitive = value as? JsonPrimitive
         val integer = primitive?.takeUnless { it.isString }?.longOrNull
-        val rightKind = when (kind) {
-            null -> true
+        val rightKind = kinds.isEmpty() || kinds.any { kind -> when (kind) {
+            "null" -> value == JsonNull
             "object" -> value is JsonObject
             "array" -> value is JsonArray
             "string" -> primitive?.isString == true
             "integer" -> integer != null
             "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
             else -> throw ProviderWireException()
-        }
+        } }
         if (!rightKind) return false
         if ("const" in schema && value != schema["const"]) return false
         if ("enum" in schema && value !in schema.getValue("enum").jsonArray) return false

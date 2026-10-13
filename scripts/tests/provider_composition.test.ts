@@ -73,7 +73,7 @@ test('optional strict child refs compile and omit undefined without permitting n
     const included = { ...source, problem };
     assert.deepEqual(wire(SyntheticProviderRecordToJSON(SyntheticProviderRecordFromJSON(included))), included);
     assert.throws(() => SyntheticProviderRecordFromJSON({ ...source, problem: null }), safe);
-    assert.throws(() => SyntheticProviderRecordToJSON({ ...value, problem: null }), safe);
+    assert.throws(() => Reflect.apply(SyntheticProviderRecordToJSON, undefined, [{ ...value, problem: null }]), safe);
     assert.throws(() => Reflect.apply(ServiceProblemDetailToJSON, undefined, [undefined]), safe);
     const legacy = SyntheticLegacyEnvelopeFromJSON({ future_member: true });
     const legacyWire = wire(SyntheticLegacyEnvelopeToJSON({ ...legacy, problem: undefined }));
@@ -109,7 +109,7 @@ test('actual generated BaseAPI and generic response preserve ordinary and nested
         { ...value, record: { ...record, preview: { ...record.preview, rows: new Array(1) } } },
     ];
     for (const invalid of invalids) {
-        await assert.rejects(async () => api.send(SyntheticProviderEnvelopeToJSON(invalid)), safe);
+        await assert.rejects(async () => api.send(Reflect.apply(SyntheticProviderEnvelopeToJSON, undefined, [invalid])), safe);
         assert.equal(sent.length, 0);
     }
     const inherited = new Array(1);
@@ -132,7 +132,7 @@ test('array item kinds enums and nested private content are rejected before proj
         { ...value, values: ['0'] }, { ...value, flags: ['false'] }, { ...value, codes: ['PRIVATE_SYNTHETIC_CANARY'] },
         { ...value, provider_detail: 'PRIVATE_SYNTHETIC_CANARY' },
         { ...value, refusal: { ...value.refusal, message: 'PRIVATE_SYNTHETIC_CANARY' } },
-    ]) assert.throws(() => SyntheticProviderRecordToJSON(invalid), safe);
+    ]) assert.throws(() => Reflect.apply(SyntheticProviderRecordToJSON, undefined, [invalid]), safe);
 });
 
 test('accepted money and time invalid inputs remain refused without any numeric fallback', () => {

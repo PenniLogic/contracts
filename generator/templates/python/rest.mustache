@@ -100,11 +100,11 @@ class RESTResponse(io.IOBase):
         """Returns a dictionary of response headers."""
         return self.response.headers
 
-    def getheaders(self):
+    def getheaders(self) -> urllib3._collections.HTTPHeaderDict:
         """Returns a dictionary of the response headers; use ``headers`` instead."""
         return self.response.headers
 
-    def getheader(self, name, default=None):
+    def getheader(self, name: str, default: Optional[str] = None) -> Optional[str]:
         """Returns a given response header; use ``headers.get()`` instead."""
         return self.response.headers.get(name, default)
 

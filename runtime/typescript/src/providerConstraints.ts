@@ -2,10 +2,11 @@ import { PROVIDER_SCHEMAS } from './providerConstraintData.js';
 import { Instant, InstantWireError } from './models/Instant.js';
 import { LocalDate, LocalDateWireError } from './models/LocalDate.js';
 
-type Scalar = string | number | boolean;
+type Scalar = string | number | boolean | null;
+type ProviderKind = 'object' | 'array' | 'string' | 'integer' | 'boolean' | 'null';
 export interface ProviderSchema {
     readonly ref?: string;
-    readonly type?: 'object' | 'array' | 'string' | 'integer' | 'boolean';
+    readonly type?: ProviderKind | readonly ProviderKind[];
     readonly format?: string;
     readonly const?: Scalar;
     readonly enum?: readonly Scalar[];
@@ -113,12 +114,15 @@ function matches(value: unknown, schema: ProviderSchema, omitUndefined: boolean)
         if (target === undefined) throw new ProviderConstraintError();
         if (!matches(value, target, omitUndefined)) return false;
     }
-    if (value === null || value === undefined) return false;
-    if ((schema.type === 'string' && typeof value !== 'string') ||
-        (schema.type === 'integer' && (typeof value !== 'number' || !Number.isSafeInteger(value))) ||
-        (schema.type === 'boolean' && typeof value !== 'boolean') ||
-        (schema.type === 'array' && !Array.isArray(value)) ||
-        (schema.type === 'object' && (typeof value !== 'object' || Array.isArray(value)))) return false;
+    if (value === undefined) return false;
+    const kinds = schema.type === undefined ? undefined : Array.isArray(schema.type) ? schema.type : [schema.type];
+    if (kinds !== undefined && !kinds.some((kind) =>
+        kind === 'null' ? value === null :
+        kind === 'string' ? typeof value === 'string' :
+        kind === 'integer' ? typeof value === 'number' && Number.isSafeInteger(value) :
+        kind === 'boolean' ? typeof value === 'boolean' :
+        kind === 'array' ? Array.isArray(value) :
+        kind === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value) : false)) return false;
     if (schema.const !== undefined && !equal(value, schema.const)) return false;
     if (schema.enum !== undefined && !schema.enum.some((item) => equal(value, item))) return false;
     if (typeof value === 'number') {
@@ -141,11 +145,11 @@ function matches(value: unknown, schema: ProviderSchema, omitUndefined: boolean)
         if ((schema.minItems !== undefined && value.length < schema.minItems) ||
             (schema.maxItems !== undefined && value.length > schema.maxItems)) return false;
         for (let index = 0; index < value.length; index += 1) {
-            if (!Object.hasOwn(value, index) || value[index] === null || value[index] === undefined ||
+            if (!Object.hasOwn(value, index) || value[index] === undefined ||
                 (schema.items !== undefined && !matches(value[index], schema.items, omitUndefined))) return false;
             if (schema.uniqueItems && value.slice(0, index).some((other) => equal(value[index], other))) return false;
         }
-    } else if (typeof value === 'object') {
+    } else if (value !== null && typeof value === 'object') {
         const members: Record<string, unknown> = Object.fromEntries(Object.entries(value));
         const present = (key: string): boolean => Object.hasOwn(members, key) && !(omitUndefined && members[key] === undefined);
         if (schema.required?.some((key) => !present(key))) return false;
