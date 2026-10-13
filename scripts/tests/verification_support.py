@@ -3,9 +3,10 @@
 A SyntheticContracts instance owns one temporary directory, never a path inside this repository:
 
 - repo/: a contracts-like repository with the specification, registry, provider sources, fixtures,
-  toolchain pins, generator/golden.json and a synthetic scripts/pl_contracts.py that declares the
-  release format (PROVIDER_SOURCE_NAMES, LANGUAGES) at the same relative paths as this repository,
-  committed and tagged with hermetic git;
+  toolchain pins, generator/golden.json, synthetic generator configurations, ignore override,
+  templates and runtime files, a synthetic scripts/pl_contracts.py that declares the release format
+  (PROVIDER_SOURCE_NAMES, LANGUAGES) and this repository's own scripts/release.py, at the same relative
+  paths as this repository, committed and tagged with hermetic git;
 - origin.git/: a temporary bare origin that main and the annotated tag are pushed to;
 - generated/<language>/: synthetic generated client trees. Each carries a contracts-manifest.json
   with the keys generate_clients.py writes, computed with the real pl_contracts.tree_hash;
@@ -65,6 +66,8 @@ FIXTURES_RELATIVE = pl_contracts.FIXTURES.relative_to(pl_contracts.ROOT).as_posi
 VERSIONS_RELATIVE = pl_contracts.VERSIONS.relative_to(pl_contracts.ROOT).as_posix()
 GOLDEN_RELATIVE = generate_clients.GOLDEN.relative_to(pl_contracts.ROOT).as_posix()
 FORMAT_RELATIVE = Path(pl_contracts.__file__).resolve().relative_to(pl_contracts.ROOT).as_posix()
+RELEASE_RELATIVE = Path(release.__file__).resolve().relative_to(pl_contracts.ROOT).as_posix()
+IGNORE_RELATIVE = generate_clients.IGNORE_OVERRIDE.relative_to(pl_contracts.ROOT).as_posix()
 SPEC_DIRECTORY = pl_contracts.SPEC.parent.relative_to(pl_contracts.ROOT).as_posix()
 FIXTURE_NAMES = ("synthetic-money-wire.v1.json", "synthetic-probe.v1.json")
 SPEC_TEMPLATE = (
@@ -105,6 +108,13 @@ def release_format_source(provider_source_names: tuple[str, ...], languages: tup
     languages = pl_contracts.LANGUAGES if languages is None else languages
     return ('"""Synthetic release-format constants (verification tests only)."""\n\n'
             f"PROVIDER_SOURCE_NAMES = {tuple(provider_source_names)!r}\nLANGUAGES = {tuple(languages)!r}\n")
+
+
+def generator_relative(language: str, kind: str) -> str:
+    """Where generate_clients.py reads a language's generator configuration, template overrides or runtime seams."""
+    path = {"config": generate_clients.config_path(language), "templates": generate_clients.TEMPLATE_DIRS[language],
+            "runtime": pl_contracts.RUNTIME_DIR / language}[kind]
+    return path.relative_to(pl_contracts.ROOT).as_posix()
 
 
 def synthetic_digest(label: str) -> str:
@@ -198,6 +208,13 @@ class SyntheticContracts:
         for name in self.provider_source_names:
             self.write(f"{SPEC_DIRECTORY}/{name}", json_text({"schema_version": 1, "synthetic": f"provider source {name}"}))
         self.write(FORMAT_RELATIVE, release_format_source(self.provider_source_names))
+        self.write(RELEASE_RELATIVE, Path(release.__file__).read_bytes())
+        self.write(IGNORE_RELATIVE, "# Synthetic ignore override (verification tests only).\n")
+        for language in pl_contracts.LANGUAGES:
+            self.write(generator_relative(language, "config"), json_text({
+                "generatorName": GENERATOR_NAMES[language], "additionalProperties": {"synthetic": True}}))
+            self.write(f"{generator_relative(language, 'templates')}/synthetic.mustache", "{{! Synthetic template override }}\n")
+            self.write(f"{generator_relative(language, 'runtime')}/synthetic_seam.txt", f"Synthetic {language} runtime seam.\n")
         for name in FIXTURE_NAMES:
             self.write(f"{FIXTURES_RELATIVE}/{name}", json_text({"schema_version": 1, "synthetic": f"fixture {name}"}))
         self.write(VERSIONS_RELATIVE, json_text({
@@ -224,6 +241,7 @@ class SyntheticContracts:
         output = self.generated / language
         spec = (self.repo / SPEC_RELATIVE).read_bytes().replace(b"\r\n", b"\n")
         pins = json.loads((self.repo / VERSIONS_RELATIVE).read_text(encoding="utf-8"))
+        config = (self.repo / generator_relative(language, "config")).read_bytes()
         digest, entries = tree_hash(output, exclude=(MANIFEST_NAME,))
         manifest = {
             "schema_version": 1,
@@ -239,13 +257,13 @@ class SyntheticContracts:
                 "name": "openapi-generator-cli",
                 "version": pins["openapi_generator"]["version"],
                 "jar_sha256": pins["openapi_generator"]["sha256"],
-                "generator_name": GENERATOR_NAMES[language],
-                "config": f"generator/{language}.json",
-                "config_sha256": synthetic_digest(f"{language} generator config"),
-                "ignore_override_sha256": synthetic_digest("generator ignore override"),
-                "template_override_sha256": None,
+                "generator_name": json.loads(config)["generatorName"],
+                "config": generator_relative(language, "config"),
+                "config_sha256": sha256_bytes(config.replace(b"\r\n", b"\n")),
+                "ignore_override_sha256": sha256_bytes((self.repo / IGNORE_RELATIVE).read_bytes().replace(b"\r\n", b"\n")),
+                "template_override_sha256": tree_hash(self.repo / generator_relative(language, "templates"))[0],
             },
-            "runtime_sha256": synthetic_digest(f"{language} runtime"),
+            "runtime_sha256": tree_hash(self.repo / generator_relative(language, "runtime"))[0],
             "file_count": len(entries),
             "tree_sha256": digest,
             "files": [{"path": path, "sha256": file_digest} for path, file_digest in entries],
@@ -578,6 +596,23 @@ def generator_manifest_keys() -> set[str]:
     if not keys:
         raise AssertionError("generate_clients._generate_target no longer builds a `manifest` dict literal; "
                              "re-check contract_artifact.EMBEDDED_MANIFEST_KEYS against the generator")
+    return keys
+
+
+def generator_record_keys() -> set[str]:
+    """The keys of the `generator` record generate_clients._generate_target writes (read from its source)."""
+    tree = ast.parse(Path(generate_clients.__file__).read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_generate_target":
+            for statement in ast.walk(node):
+                if isinstance(statement, ast.Dict):
+                    for key, value in zip(statement.keys, statement.values):
+                        if isinstance(key, ast.Constant) and key.value == "generator" and isinstance(value, ast.Dict):
+                            keys |= {item.value for item in value.keys if isinstance(item, ast.Constant)}
+    if not keys:
+        raise AssertionError("generate_clients._generate_target no longer writes a literal `generator` record; "
+                             "re-check contract_artifact.GENERATOR_KEYS against the generator")
     return keys
 
 

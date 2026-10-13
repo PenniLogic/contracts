@@ -145,7 +145,7 @@ literal must name the same three) and the key sets of `release-manifest.json`, i
 
 | Rule | Refused when |
 | --- | --- |
-| `manifest.malformed` | `release-manifest.json` is not strict JSON (UTF-8, no byte order mark, no duplicate keys, no `NaN`), or its keys or value types differ from what `release.build_release_set` writes. |
+| `manifest.malformed` | `release-manifest.json` is not strict JSON (UTF-8, no byte order mark, no duplicate keys, no `NaN`), or its keys or value types differ from what `release.build_release_set` writes, including the closed key set of each client's generator record. |
 | `manifest.files_mismatch` | `files` differs from `SHA256SUMS`. |
 | `manifest.tag_mismatch` / `manifest.version_mismatch` / `manifest.commit_mismatch` | `tag`, `spec_version` or `commit` differs from the tag, its version or the tag commit. A build from another commit is refused here. |
 | `manifest.spec_digest_mismatch` | `spec_sha256` is not the digest of the specification asset. |
@@ -163,6 +163,7 @@ tag commit instead:
 | --- | --- |
 | `anchor.asset_blob_mismatch` | The specification, registry, a provider source or a fixture differs from its blob at the tag commit. The blob gets the same CRLF-to-LF normalization the builder applies. |
 | `anchor.toolchain_mismatch` | The manifest `toolchain`, or a client's generator version or jar digest, differs from `toolchain/versions.json` at the tag commit. |
+| `anchor.manifest_metadata_mismatch` | A client's `runtime_sha256` (the tree digest of `runtime/<language>`), generator `generator_name`, `config` or `config_sha256` (`generator/<language>.json`) or `ignore_override_sha256` (`generator/openapi-generator-ignore`), or the release's `publication` text (the literal in the tag's `scripts/release.py`), differs from what those files at the tag commit give. `release.format_unsupported` refuses a tag whose configuration has no `generatorName` or whose `release.py` writes no single literal publication text. |
 | `anchor.golden_invalid` | `generator/golden.json` at the tag commit lacks a language, has a malformed record or is internally inconsistent (`generate_clients.golden_inconsistency`). |
 | `anchor.golden_spec_mismatch` | A golden record pins another specification digest or version than the release ships. |
 | `anchor.golden_tree_mismatch` | An archive's recomputed tree digest is not `golden.json[language].tree_sha256` at the tag commit. |
@@ -207,9 +208,17 @@ zeros, and both forms are accepted), and `release.py` runs on the owner's machin
 | `archive.outside_prefix` | A member is not inside `pennilogic-contracts-<language>-<tag>/`. |
 | `archive.link_member` / `archive.special_member` | A member is a symlink or hard link, or anything other than a regular file or directory (a device, a FIFO, a contiguous file). |
 | `archive.duplicate_member` / `archive.case_collision` | Two members share a name, or differ only in case and would collide on Windows or macOS. |
-| `archive.manifest_missing` / `archive.manifest_invalid` | `contracts-manifest.json` is absent or malformed. |
+| `archive.manifest_missing` / `archive.manifest_invalid` | `contracts-manifest.json` is absent or malformed, including a key or generator-record key that `generate_clients.py` never writes. |
 | `archive.tree_mismatch` | The unpacked files differ from the archive's own `contracts-manifest.json` (tree digest, file count or per-file list). |
-| `archive.manifest_mismatch` | `contracts-manifest.json` disagrees with the release on target, version, specification, registry, provider sources, generator, runtime, tree digest or file count. |
+| `archive.manifest_mismatch` | `contracts-manifest.json` disagrees with the release on target, version, specification, registry, provider sources, generator, runtime, tree digest or file count. The release side of that agreement is anchored by the rules above; the agreement alone only compares two files that a consistent swap can edit together. |
+
+Some manifest values are only shape-checked, because recomputing them here needs Node or the builder's
+environment: the embedded `provider_constraints_sha256`, `generation_examples` and
+`generation_model_projection` (computed by `scripts/provider_constraints.cjs`), the generator `name`, and
+`template_override_sha256`. `generate_clients.py` hashes `generator/templates/<language>` as it is on
+disk, so an ignored file there (for example `.DS_Store`) changes the digest without changing any
+generated file. The code these values describe is anchored by `golden.json`; the values themselves
+are not verification evidence.
 
 ## Compatibility
 

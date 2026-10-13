@@ -22,8 +22,10 @@ docs/contract-verification.md lists them.
    version, commit), with SHA256SUMS and with the info.version of the specification it ships.
 4. Tag-tree anchors. The specification, registry, provider-source and fixture assets equal their
    blobs at the tag commit, before any of them is parsed. The toolchain pins equal
-   toolchain/versions.json there. The tag's generator/golden.json is self-consistent and records the
-   shipped specification for every language.
+   toolchain/versions.json there. Each client's generator name, configuration path and digest,
+   ignore-override digest and runtime digest are the values the tag's own generator/ and runtime/
+   files give, and the publication text is the literal of the tag's scripts/release.py. The tag's
+   generator/golden.json is self-consistent and records the shipped specification for every language.
 5. Archives. Each client archive is one gzip member, decompressed with a size bound. A strict reader
    accepts only the tar subset release.deterministic_tar_gz writes, so that GNU tar, npm's node-tar
    and Python's tarfile read the same members: POSIX ustar headers with plain octal numbers, regular
@@ -44,6 +46,7 @@ so a loaded artifact alone never claims that the Release exists.
 from __future__ import annotations
 
 import ast
+import functools
 import io
 import os
 import re
@@ -60,8 +63,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pl_contracts  # noqa: E402
 from check_breaking_changes import TAG  # noqa: E402
 from contract_schema import StrictJsonError, parse_strict_json  # noqa: E402
-from generate_clients import GOLDEN, MANIFEST_NAME, golden_inconsistency  # noqa: E402
-from pl_contracts import PipelineError, sha256_bytes, spec_version, tree_hash  # noqa: E402
+from generate_clients import GOLDEN, IGNORE_OVERRIDE, MANIFEST_NAME, config_path, golden_inconsistency  # noqa: E402
+from pl_contracts import PipelineError, combined_digest, sha256_bytes, spec_version, tree_hash  # noqa: E402
 
 RULES = (
     "tag.grammar", "git.unavailable", "repository.invalid", "release_dir.missing", "release_dir.inside_repository",
@@ -77,7 +80,7 @@ RULES = (
     "archive.duplicate_member", "archive.case_collision", "archive.manifest_missing", "archive.manifest_invalid",
     "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch", "archive.ambiguous",
     "archive.noncanonical", "release.format_unsupported", "remote.not_canonical", "tag.pin_mismatch",
-    "tag.not_on_main",
+    "tag.not_on_main", "anchor.manifest_metadata_mismatch",
 )
 
 RELEASE_MANIFEST = "release-manifest.json"
@@ -98,6 +101,14 @@ EMBEDDED_MANIFEST_KEYS = frozenset({
     "schema_version", "target", "spec_version", "spec_sha256", "currency_registry_sha256", "provider_sources_sha256",
     "generator", "runtime_sha256", "file_count", "tree_sha256", "files",
 })
+# The other keys generate_clients.py writes. They need Node to recompute, so they are shape-checked only
+# (docs/contract-verification.md lists them as not anchored).
+EMBEDDED_OPTIONAL_KEYS = frozenset({"provider_constraints_sha256", "generation_examples", "generation_model_projection"})
+# The generator record of contracts-manifest.json, copied into each release-manifest.json client.
+GENERATOR_KEYS = frozenset({
+    "name", "version", "jar_sha256", "generator_name", "config", "config_sha256", "ignore_override_sha256",
+    "template_override_sha256",
+})
 GOLDEN_KEYS = frozenset({"tree_sha256", "spec_version", "spec_sha256", "file_count", "files"})
 
 # Paths inside the tag's tree, from the same constants the release builder and the generator use.
@@ -109,6 +120,12 @@ GOLDEN_PATH = GOLDEN.relative_to(pl_contracts.ROOT).as_posix()
 VERSIONS_PATH = pl_contracts.VERSIONS.relative_to(pl_contracts.ROOT).as_posix()
 # The module whose PROVIDER_SOURCE_NAMES and LANGUAGES literals release.build_release_set uses at the tag.
 FORMAT_PATH = Path(pl_contracts.__file__).resolve().relative_to(pl_contracts.ROOT).as_posix()
+# The builder at the tag (its publication literal) and the generator inputs the manifests describe.
+RELEASE_SOURCE_PATH = (Path(__file__).resolve().parent / "release.py").relative_to(pl_contracts.ROOT).as_posix()
+IGNORE_PATH = IGNORE_OVERRIDE.relative_to(pl_contracts.ROOT).as_posix()
+CONFIG_PATHS = {language: config_path(language).relative_to(pl_contracts.ROOT).as_posix() for language in pl_contracts.LANGUAGES}
+RUNTIME_PATHS = {language: (pl_contracts.RUNTIME_DIR / language).relative_to(pl_contracts.ROOT).as_posix()
+                 for language in pl_contracts.LANGUAGES}
 FORMAT_CONSTANTS = ("PROVIDER_SOURCE_NAMES", "LANGUAGES")
 FORMAT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 # Asset sources that are not files of the tag's tree.
@@ -144,8 +161,8 @@ REPOSITORY_ENVIRONMENT = (
 )
 PASSED_CHECKS = (
     "tag.grammar", "tag.annotated", "remote.canonical_repository", "tag.published_remote_ref", "release.sha256sums_exact",
-    "release.manifest_agreement", "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.golden", "archive.canonical_form",
-    "archive.safe_extraction", "archive.tree_digest",
+    "release.manifest_agreement", "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.manifest_metadata", "anchor.golden",
+    "archive.canonical_form", "archive.safe_extraction", "archive.tree_digest",
 )
 # pass or not_run: tag.pinned_identity runs only with a pin; tag.on_remote_main only with the remote main's history.
 CONDITIONAL_CHECKS = ("tag.pinned_identity", "tag.on_remote_main")
@@ -270,7 +287,8 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
     tree = _TagTree(git, commit)
     provider_names = tree.release_format()
     sources = expected_asset_sources(tag, tree.fixture_names(), provider_names)
-    tree.read(sorted({source for source in sources.values() if is_tag_path(source)} | {GOLDEN_PATH, VERSIONS_PATH}))
+    for path in sorted({source for source in sources.values() if is_tag_path(source)} | {GOLDEN_PATH, VERSIONS_PATH}):
+        tree.require_regular_file(path)
     sums, data = _read_release_set(release_dir, sources)
     manifest = _check_manifest(data[RELEASE_MANIFEST], sums, tag, version, commit, provider_names)
     spec_name = spec_asset_name(tag)
@@ -281,6 +299,7 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
             _check_blob(tree, source, name, data[name])
     _check_spec_version(data[spec_name], version)
     _check_toolchain(tree, manifest)
+    _check_manifest_metadata(tree, manifest)
     golden = _check_golden(tree, sums[spec_name], version)
     clients: dict[str, dict] = {}
     with tempfile.TemporaryDirectory(prefix="pl-artifact-", dir=None if scratch_dir is None else str(scratch_dir)) as work:
@@ -489,13 +508,16 @@ def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: 
 
 
 class _TagTree:
-    """The files of the tag commit that the release set is built from."""
+    """The files of the tag commit that the release set and its manifests are built from.
+
+    Every regular file under these paths is read with one git process when the tree is listed.
+    """
 
     def __init__(self, git: _Git, commit: str) -> None:
         self.git = git
         self.commit = commit
         pathspecs = sorted({SPEC_DIR, PurePosixPath(REGISTRY_PATH).parent.as_posix(), FIXTURES_PATH, GOLDEN_PATH, VERSIONS_PATH,
-                            FORMAT_PATH})
+                            FORMAT_PATH, RELEASE_SOURCE_PATH, IGNORE_PATH, *CONFIG_PATHS.values(), *RUNTIME_PATHS.values()})
         completed = git.run("ls-tree", "-r", "-z", "--full-tree", commit, "--", *pathspecs)
         if completed is None or completed.returncode != 0:
             raise ArtifactRefused("anchor.tag_file_missing", f"the tree of the tag commit {commit} cannot be listed")
@@ -506,6 +528,7 @@ class _TagTree:
                 mode, kind, object_id = meta.decode("ascii", "replace").split(" ", 2)
                 self.entries[path.decode("utf-8", "surrogateescape")] = (mode, kind, object_id)
         self.contents: dict[str, bytes] = {}
+        self.read(sorted(path for path, (mode, kind, _) in self.entries.items() if kind == "blob" and mode in REGULAR_BLOB_MODES))
 
     def fixture_names(self) -> list[str]:
         """Direct `*.json` children of the fixtures directory: the set the builder's glob selects."""
@@ -560,15 +583,29 @@ class _TagTree:
             self.read([path])
         return self.contents[path]
 
+    def digest_under(self, directory: str) -> str:
+        """pl_contracts.tree_hash of a directory of the tag commit, computed from its blobs."""
+        prefix = f"{directory}/"
+        return combined_digest({path[len(prefix):]: sha256_bytes(self.blob(path)) for path in sorted(self.entries)
+                                if path.startswith(prefix)})
+
+
+@functools.lru_cache(maxsize=16)
+def _parsed_module(source: bytes) -> ast.Module | None:
+    """Python source parsed (never run), cached by content; None when it does not parse."""
+    try:
+        return ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+
 
 def _literal_constants(source: bytes, names: tuple[str, ...]) -> dict[str, object]:
     """The module-level literal values of `names` in Python source, parsed and never run.
 
     A name assigned twice, or to something other than a literal, has no value here.
     """
-    try:
-        module = ast.parse(source)
-    except (SyntaxError, ValueError, RecursionError, MemoryError):
+    module = _parsed_module(source)
+    if module is None:
         return {}
     values: dict[str, object] = {}
     assigned: set[str] = set()
@@ -590,6 +627,24 @@ def _literal_constants(source: bytes, names: tuple[str, ...]) -> dict[str, objec
         except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError):
             pass
     return values
+
+
+@functools.lru_cache(maxsize=16)
+def _publication_literal(source: bytes) -> str | None:
+    """The literal `publication` value of the release manifest that a release.py writes, parsed and never run."""
+    module = _parsed_module(source)
+    if module is None:
+        return None
+    values: list[object] = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "publication":
+                    try:
+                        values.append(ast.literal_eval(value))
+                    except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError):
+                        return None
+    return values[0] if len(values) == 1 and isinstance(values[0], str) else None
 
 
 # --- release set -------------------------------------------------------------------------------------
@@ -692,9 +747,21 @@ def _client_shape_problem(language: str, client: object) -> str | None:
         return f"clients[{ascii(language)}] archive name or digests are malformed"
     if not _is_count(client["file_count"]) or not _is_digest_map(client["provider_sources_sha256"]):
         return f"clients[{ascii(language)}] file_count or provider_sources_sha256 is malformed"
-    pins = client["generator"]
-    if not isinstance(pins, dict) or not isinstance(pins.get("version"), str) or not _is_hex64(pins.get("jar_sha256")):
-        return f"clients[{ascii(language)}] generator lacks a version string and a jar SHA-256"
+    problem = _generator_record_problem(client["generator"])
+    if problem is not None:
+        return f"clients[{ascii(language)}] generator {problem}"
+    return None
+
+
+def _generator_record_problem(record: object) -> str | None:
+    """Why a contracts-manifest.json generator record (copied into release-manifest.json) is malformed, or None."""
+    if not isinstance(record, dict) or set(record) != GENERATOR_KEYS:
+        return "keys differ from the generator record generate_clients.py writes"
+    if not all(isinstance(record[key], str) for key in ("name", "version", "generator_name", "config")):
+        return "name, version, generator_name and config must be strings"
+    if not all(_is_hex64(record[key]) for key in ("jar_sha256", "config_sha256", "ignore_override_sha256")) or not (
+            record["template_override_sha256"] is None or _is_hex64(record["template_override_sha256"])):
+        return "digests are not lowercase SHA-256"
     return None
 
 
@@ -809,6 +876,41 @@ def _check_toolchain(tree: _TagTree, manifest: dict) -> None:
         if {"version": pins_used["version"], "jar_sha256": pins_used["jar_sha256"]} != generator:
             raise ArtifactRefused("anchor.toolchain_mismatch",
                                   f"clients[{language}] generator is not the openapi-generator pinned in {VERSIONS_PATH} at the tag commit")
+
+
+def _check_manifest_metadata(tree: _TagTree, manifest: dict) -> None:
+    """The publication text, generator configuration, ignore override and runtime the tag's own files give.
+
+    generator.name, template_override_sha256 and the embedded provider-constraint and generation records
+    are not anchored here (docs/contract-verification.md says why); the generated code they describe is
+    anchored by golden.json.
+    """
+    publication = _publication_literal(tree.blob(RELEASE_SOURCE_PATH))
+    if publication is None:
+        raise ArtifactRefused("release.format_unsupported",
+                              f"{RELEASE_SOURCE_PATH} at the tag commit does not write one literal publication text")
+    if manifest["publication"] != publication:
+        raise ArtifactRefused("anchor.manifest_metadata_mismatch",
+                              f"{RELEASE_MANIFEST} publication is not the text {RELEASE_SOURCE_PATH} writes at the tag commit")
+    ignore = sha256_bytes(tree.blob(IGNORE_PATH).replace(b"\r\n", b"\n"))
+    for language in pl_contracts.LANGUAGES:
+        configuration = tree.blob(CONFIG_PATHS[language])
+        parsed = strict_json(configuration, "release.format_unsupported", f"{CONFIG_PATHS[language]} at the tag commit")
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("generatorName"), str):
+            raise ArtifactRefused("release.format_unsupported",
+                                  f"{CONFIG_PATHS[language]} at the tag commit has no generatorName string")
+        expected = {
+            "generator_name": parsed["generatorName"], "config": CONFIG_PATHS[language],
+            "config_sha256": sha256_bytes(configuration.replace(b"\r\n", b"\n")), "ignore_override_sha256": ignore,
+        }
+        client = manifest["clients"][language]
+        differing = [key for key, value in expected.items() if client["generator"][key] != value]
+        if client["runtime_sha256"] != tree.digest_under(RUNTIME_PATHS[language]):
+            differing.append("runtime_sha256")
+        if differing:
+            raise ArtifactRefused("anchor.manifest_metadata_mismatch",
+                                  f"clients[{language}] {', '.join(differing)}: not the values {CONFIG_PATHS[language]}, "
+                                  f"{IGNORE_PATH} and {RUNTIME_PATHS[language]}/ at the tag commit give")
 
 
 def _golden_shape_problem(record: object) -> str | None:
@@ -1122,8 +1224,16 @@ def _embedded_manifest_problem(embedded: object) -> str | None:
         return "digests are not lowercase SHA-256"
     if not _is_count(embedded["file_count"]) or not _is_digest_map(embedded["provider_sources_sha256"]):
         return "file_count or provider_sources_sha256 is malformed"
-    if not isinstance(embedded["generator"], dict):
-        return "generator is not an object"
+    unknown = sorted(map(ascii, set(embedded) - EMBEDDED_MANIFEST_KEYS - EMBEDDED_OPTIONAL_KEYS))
+    if unknown:
+        return f"has keys generate_clients.py never writes ({', '.join(unknown[:5])})"
+    if "provider_constraints_sha256" in embedded and not _is_hex64(embedded["provider_constraints_sha256"]):
+        return "provider_constraints_sha256 is not a lowercase SHA-256"
+    if not all(isinstance(embedded[key], dict) for key in ("generation_examples", "generation_model_projection") if key in embedded):
+        return "generation_examples and generation_model_projection must be objects"
+    generator = _generator_record_problem(embedded["generator"])
+    if generator is not None:
+        return f"generator {generator}"
     files = embedded["files"]
     if not isinstance(files, list) or not all(
             isinstance(item, dict) and set(item) == {"path", "sha256"} and isinstance(item["path"], str) and _is_hex64(item["sha256"])

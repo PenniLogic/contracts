@@ -40,21 +40,31 @@ PROVIDER = pl_contracts.PROVIDER_SOURCE_NAMES[0]
 FIXTURE = FIXTURE_NAMES[0]
 
 
+_PRISTINE: list[tuple[SyntheticContracts, Path]] = []
+
+
+def pristine_release() -> tuple[SyntheticContracts, Path]:
+    """The module's one pristine published release (built once, removed by a module cleanup); tests only copy it."""
+    if not _PRISTINE:
+        root = temporary_root()
+        unittest.addModuleCleanup(shutil.rmtree, root, True)
+        base = SyntheticContracts(root / "base")
+        _PRISTINE.append((base, base.publish()))
+    return _PRISTINE[0]
+
+
 class LoaderTestCase(unittest.TestCase):
-    """One pristine published release per class; tests mutate copies of it, or build their own.
+    """One pristine published release for the module; tests mutate copies of it, or build their own.
 
     The passing control runs once per test method on the first unmutated copy. Later subTests start
     from byte-identical copies of that same input, so each subTest is still the control plus exactly
-    one mutation.
+    one mutation. test_loader_leaves_repository_and_release_dir_unchanged shows a load never changes it.
     """
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.enterClassContext(mock.patch.dict(os.environ, support.hermetic_environment(), clear=True))
-        cls.root = temporary_root()
-        cls.addClassCleanup(shutil.rmtree, cls.root, True)
-        cls.base = SyntheticContracts(cls.root / "base")
-        cls.release_dir = cls.base.publish()
+        cls.base, cls.release_dir = pristine_release()
 
     def setUp(self) -> None:
         self.work = temporary_root()
@@ -150,7 +160,15 @@ class PublishedArtifactTest(LoaderTestCase):
         # The builder copies these client values from contracts-manifest.json; the loader cross-checks every one,
         # and requires only keys that generate_clients.py writes.
         self.assertLessEqual(contract_artifact.CLIENT_KEYS - {"archive", "archive_sha256"}, contract_artifact.EMBEDDED_MANIFEST_KEYS)
-        self.assertLessEqual(contract_artifact.EMBEDDED_MANIFEST_KEYS, support.generator_manifest_keys())
+        # The embedded manifest and its generator record are closed: exactly the keys generate_clients.py can write.
+        self.assertEqual(contract_artifact.EMBEDDED_MANIFEST_KEYS | contract_artifact.EMBEDDED_OPTIONAL_KEYS,
+                         support.generator_manifest_keys())
+        self.assertEqual(contract_artifact.GENERATOR_KEYS, support.generator_record_keys())
+        for language, client in manifest["clients"].items():
+            self.assertEqual(set(client["generator"]), contract_artifact.GENERATOR_KEYS, language)
+        # The publication text the loader expects is the literal this repository's release.py writes.
+        self.assertEqual(contract_artifact._publication_literal((pl_contracts.ROOT / contract_artifact.RELEASE_SOURCE_PATH).read_bytes()),
+                         manifest["publication"])
         # The committed golden file of this repository has exactly the record shape the loader requires.
         golden = json.loads((pl_contracts.ROOT / GOLDEN_RELATIVE).read_text(encoding="utf-8"))
         for language in pl_contracts.LANGUAGES:
@@ -635,6 +653,78 @@ class ReleaseFormatTest(LoaderTestCase):
         source = (pl_contracts.ROOT / contract_artifact.FORMAT_PATH).read_bytes()
         self.assertEqual(contract_artifact._literal_constants(source, contract_artifact.FORMAT_CONSTANTS),
                          {"PROVIDER_SOURCE_NAMES": pl_contracts.PROVIDER_SOURCE_NAMES, "LANGUAGES": pl_contracts.LANGUAGES})
+
+
+class ManifestMetadataTest(LoaderTestCase):
+    """Manifest metadata anchored to the tag's own files (review round 1, PSEC-6). A consistent forgery edits the
+    embedded contracts-manifest.json (outside the tree digest) and release-manifest.json together."""
+
+    def forge(self, name: str, release_edit=None, embedded_edit=None, language: str = "python") -> Path:
+        release_dir = self.fresh_release(name)
+        if embedded_edit is not None:
+            embedded = f"{archive_prefix(language, self.base.tag)}/{MANIFEST_NAME}"
+            rewrite_archive(release_dir, self.base.tag, language, lambda members: replace_member_data(
+                members, embedded, lambda data: json_text(embedded_edit(json.loads(data))).encode("utf-8")))
+        reseal(release_dir, edit=release_edit)
+        return release_dir
+
+    def test_forged_manifest_metadata_refused(self) -> None:
+        forged = synthetic_digest("forged")
+
+        def both(update):
+            def embedded(manifest: dict) -> dict:
+                update(manifest)
+                return manifest
+            return {"release_edit": lambda manifest: update(manifest["clients"]["python"]), "embedded_edit": embedded}
+
+        cases = {
+            "runtime digest": both(lambda record: record.update(runtime_sha256=forged)),
+            "generator name": both(lambda record: record["generator"].update(generator_name="forged-generator")),
+            "generator configuration digest": both(lambda record: record["generator"].update(config_sha256=forged)),
+            "generator configuration path": both(lambda record: record["generator"].update(config="generator/forged.json")),
+            "ignore-override digest": both(lambda record: record["generator"].update(ignore_override_sha256=forged)),
+            "publication text": {"release_edit": lambda manifest: manifest.update(publication="forged publication note")},
+        }
+        for label, edits in cases.items():
+            with self.subTest(label):
+                self.assertRefused("anchor.manifest_metadata_mismatch", self.forge(label.replace(" ", "-"), **edits))
+
+    def test_manifest_key_sets_are_closed(self) -> None:
+        with self.subTest("boundary control: an optional key generate_clients.py writes"):
+            self.load(self.forge("optional", embedded_edit=lambda manifest: dict(manifest, generation_examples={"count": 0})))
+        cases = {
+            "an unknown key in contracts-manifest.json": (
+                {"embedded_edit": lambda manifest: dict(manifest, forged=True)}, "archive.manifest_invalid"),
+            "an unknown key in a generator record": ({
+                "embedded_edit": lambda manifest: dict(manifest, generator=dict(manifest["generator"], forged="x")),
+                "release_edit": lambda manifest: manifest["clients"]["python"]["generator"].update(forged="x")},
+                "manifest.malformed"),
+        }
+        for label, (edits, rule) in cases.items():
+            with self.subTest(label):
+                self.assertRefused(rule, self.forge(label.replace(" ", "-"), **edits))
+
+    def test_unreadable_metadata_sources_refused(self) -> None:
+        def retag(change):
+            def hook(contracts: SyntheticContracts) -> None:
+                change(contracts)
+                contracts.commit_all("Synthetic metadata source edited, then tagged by hand")
+                contracts.push_main()
+                contracts.tag_annotated(force=True)
+                contracts.push_tag(force=True)
+            return hook
+
+        release_source = (pl_contracts.ROOT / contract_artifact.RELEASE_SOURCE_PATH).read_text(encoding="utf-8")
+        cases = {
+            "a release.py with two publication texts": lambda contracts: contracts.write(
+                support.RELEASE_RELATIVE, release_source + '\nSYNTHETIC = {"publication": "another text"}\n'),
+            "a generator configuration without generatorName": lambda contracts: contracts.write(
+                support.generator_relative("python", "config"), json_text({"additionalProperties": {"synthetic": True}})),
+        }
+        for label, change in cases.items():
+            with self.subTest(label):
+                contracts, published = self.own_release(label.replace(" ", "-"), before_build=retag(change))
+                self.assertRefused("release.format_unsupported", published, contracts=contracts)
 
 
 class TagTreeAnchorTest(LoaderTestCase):
