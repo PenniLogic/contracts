@@ -100,7 +100,9 @@ log through it.
 A loaded artifact reports `github_release.presence` as `not_run`. Checking that the GitHub Release
 exists needs the network and is held. A loaded artifact therefore never shows by itself that the
 Release was published. Every other check it reports passed, except `tag.pinned_identity` and
-`tag.on_remote_main` when they are `not_run` as described above.
+`tag.on_remote_main` when they are `not_run` as described above. A compatibility report carries all
+of these statuses (`contract.checks`), and only a report whose checks all passed can be
+acceptance-eligible (see the report section).
 
 ## Artifact checks and rule IDs
 
@@ -345,7 +347,9 @@ records:
 
 - `generated_at` and `mode`: `published` for a loader-verified artifact, otherwise `synthetic-fixture`;
 - `contract`: version, tag, tag commit (`tag_commit`), annotated tag object (`tag_object`),
-  specification and release-manifest digests;
+  specification and release-manifest digests, and `checks`: every check of the artifact loader once,
+  with its status `pass` or `not_run` (`contract_report.contract_section` copies them from the loaded
+  artifact). A published report must list them all; a `synthetic-fixture` report may carry null;
 - `required_languages`: always `["kotlin", "typescript", "python"]`;
 - `compatibility` and `gate`: the result above and the gate decision;
 - `provider` and `consumers`: one row each, with name, language (consumers), the version verified, the
@@ -364,8 +368,12 @@ compatibility result is `warn`, and `pass` otherwise. A missing Python row is th
 never an omission. Rows are required per language: the validator does not know which consumer
 repositories exist, so with two TypeScript consumers a report that names only one of them still passes.
 Naming the required consumers belongs to the held consumer adapters. `acceptance_eligible` is true
-exactly when the mode is `published`, the provider row is `live` and every consumer row is `live`; a
-`synthetic-fixture` report is never acceptance-eligible.
+exactly when the mode is `published`, every required language has a row, the provider row is `live`,
+every consumer row is `live` and every check in `contract.checks` passed; a `synthetic-fixture` report
+is never acceptance-eligible. A `not_run` check is not a pass: without a pinned tag object
+(`--expect-tag-object`), in a shallow or stale clone, and while the GitHub Release presence check is
+held, a report is not acceptance-eligible. That check is `not_run` in every run of this pull request,
+so none of its reports is acceptance-eligible.
 The first published version has no baseline, so its compatibility result is `not_run` and its verdict
 is `fail` until the owner decides how a first baseline is reported.
 
@@ -382,6 +390,7 @@ rules.
 | `report.schema` | The report is outside the closed schema, or `generated_at` is not a real instant. The subject is a JSON pointer and the failing keyword; values are never echoed. |
 | `report.bounds` | The file exceeds 4 MiB, or a row count, finding or problem count, or text length exceeds its bound. |
 | `report.contract_identity` | A tag is not `v<version>`, or a published report lacks the tag, tag commit, tag object or release-manifest digest. |
+| `report.contract_checks_incomplete` | A published report has no `contract.checks`, or a check list does not name every check of the artifact loader exactly once. |
 | `report.duplicate_consumer` | Two consumer rows share a language and a name. |
 | `report.row_status_inconsistent` | `mode` and `result` disagree about `not_run`, or a `not_run` row names a version or a commit. |
 | `report.synthetic_row_name` | A `synthetic-fixture` row is not named `synthetic-<language>` (`synthetic-provider`), or a `live` row is named `synthetic-*`. A `not_run` row may carry either kind of name. |
@@ -404,7 +413,8 @@ rules.
 - Every report in the tests is built in memory. This repository's runs produce `synthetic-fixture`
   reports with `synthetic-<language>` rows. One published-mode report with live rows exists only to give
   the acceptance-eligibility rule a passing control; its rows carry fixture names, not real
-  repositories, and it is never written or published.
+  repositories, its artifact checks are fixture passes (the held `github_release.presence` included,
+  which this runner never reports as passed), and it is never written or published.
 - The committed gate state is configuration, not a result: it blocks.
 
 ## Tests

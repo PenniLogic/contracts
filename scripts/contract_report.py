@@ -8,8 +8,13 @@ adds the rules the schema subset cannot express:
 
 - required_languages is [kotlin, typescript, python]. A language without a consumer row, any not_run
   row and a not_run compatibility section make the verdict fail: missing is a failure, not an omission.
+- A published report lists every check of the artifact loader once in contract.checks, with its status
+  (pass, or not_run when the checkout or this runner could not decide it). A synthetic-fixture report
+  may carry null there.
 - A synthetic-fixture report is never acceptance_eligible. acceptance_eligible is true exactly when the
-  mode is published and the provider and every consumer row are live.
+  mode is published, every required language has a row, the provider and every consumer row are live
+  and every artifact check passed. The GitHub Release presence check is held and always not_run in this
+  runner, so none of its reports is acceptance-eligible yet (review round 2, PSEC-R2-3).
 - Synthetic-fixture rows are named synthetic-<language> (synthetic-provider) and live rows never are
   (a not_run row may carry either kind of name); live rows name the version and the repository commit
   they verified; every row that ran names the report's contract version.
@@ -40,6 +45,14 @@ from contract_schema import (  # noqa: E402
 REPORT_SCHEMA = VERIFICATION / "compat-report.schema.v1.json"
 SCHEMA_ID = "pennilogic-compat-report@1"
 REQUIRED_LANGUAGES = ("kotlin", "typescript", "python")
+# The checks contract_artifact.PublishedArtifact reports, in its order; the schema's check enum and the loader's
+# PASSED_CHECKS, CONDITIONAL_CHECKS and HELD_CHECKS must stay equal to it (drift tests).
+ARTIFACT_CHECKS = (
+    "tag.grammar", "tag.annotated", "remote.canonical_repository", "tag.published_remote_ref", "release.sha256sums_exact",
+    "release.manifest_agreement", "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.manifest_metadata", "anchor.golden",
+    "archive.canonical_form", "archive.safe_extraction", "archive.tree_digest", "tag.pinned_identity", "tag.on_remote_main",
+    "github_release.presence",
+)
 SYNTHETIC_PROVIDER = "synthetic-provider"
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_CONSUMERS = 64
@@ -54,6 +67,7 @@ PROBLEM_RULES = (
     "report.row_status_inconsistent", "report.synthetic_row_name", "report.live_row_unidentified",
     "report.contract_version_mismatch", "report.compat_inconsistent", "report.gate_inconsistent",
     "report.missing_languages_inconsistent", "report.verdict_inconsistent", "report.acceptance_eligible_inconsistent",
+    "report.contract_checks_incomplete",
 )
 REASON_RULES = (
     "report.required_language_missing", "report.row_not_run", "report.row_failed", "report.compat_not_run",
@@ -112,8 +126,10 @@ def _derive(report: dict) -> tuple[tuple[str, ...], tuple[Note, ...], str, bool]
         verdict = "fail"
     else:
         verdict = "warn" if reasons else "pass"
+    checks = report["contract"]["checks"]
     eligible = (report["mode"] == "published" and report["provider"]["mode"] == "live" and not missing
-                and all(row["mode"] == "live" for row in consumers))
+                and all(row["mode"] == "live" for row in consumers)
+                and checks is not None and all(check["status"] == "pass" for check in checks))
     return missing, tuple(reasons), verdict, eligible
 
 
@@ -153,6 +169,10 @@ def _consistency_problems(report: dict) -> list[Note]:
     if (contract["tag"] is not None and contract["tag"] != f"v{version}") or (report["mode"] == "published" and any(
             contract[key] is None for key in ("tag", "tag_commit", "tag_object", "release_manifest_sha256"))):
         problems.append(Note("report.contract_identity", "contract"))
+    checks = contract["checks"]
+    if (checks is None and report["mode"] == "published") or (
+            checks is not None and sorted(check["id"] for check in checks) != sorted(ARTIFACT_CHECKS)):
+        problems.append(Note("report.contract_checks_incomplete", "contract"))
     seen: set[tuple[str, str]] = set()
     for index, row in enumerate(report["consumers"]):
         if (row["language"], row["name"]) in seen:
@@ -248,11 +268,12 @@ def assess_report_file(path: Path) -> Assessment:
 # --- building -------------------------------------------------------------------------------------------
 
 def contract_section(artifact: object) -> dict:
-    """The `contract` section for a contract_artifact.PublishedArtifact."""
+    """The `contract` section for a contract_artifact.PublishedArtifact, its checks and their statuses included."""
     return {
         "version": getattr(artifact, "version"), "tag": getattr(artifact, "tag"), "tag_commit": getattr(artifact, "commit"),
         "tag_object": getattr(artifact, "tag_object"), "spec_sha256": getattr(artifact, "spec_sha256"),
         "release_manifest_sha256": getattr(artifact, "manifest_sha256"),
+        "checks": [{"id": check, "status": status} for check, status in getattr(artifact, "checks")],
     }
 
 

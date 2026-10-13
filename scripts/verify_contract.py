@@ -20,8 +20,9 @@ go to stdout (with --json, one JSON document, also for a usage error); without -
 stderr. Nothing is written to disk except the
 loader's temporary unpack directory, which is removed before the command returns. The only network
 access is the loader's `git ls-remote` against the configured remote. No run of this command is product
-verification unless its report says acceptance_eligible, which needs a published artifact, the live
-provider and every live consumer.
+verification unless its report says acceptance_eligible, which needs a published artifact whose every
+check passed (the held GitHub Release presence check included), the live provider and every live
+consumer.
 """
 
 from __future__ import annotations

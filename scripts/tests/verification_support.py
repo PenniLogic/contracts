@@ -50,6 +50,7 @@ import generate_clients  # noqa: E402
 import pl_contracts  # noqa: E402
 import release  # noqa: E402
 from contract_gate import parse_instant  # noqa: E402
+from contract_report import ARTIFACT_CHECKS  # noqa: E402
 from pl_contracts import combined_digest, sha256_bytes, tree_hash  # noqa: E402
 
 SYNTHETIC_EPOCH = 1767323045  # 2026-01-02T03:04:05Z: fixed commit, tag and archive time
@@ -663,6 +664,8 @@ def fixture_report_parts() -> dict:
 
     In-memory test fixture only: it exists to give the acceptance-eligibility rule a passing control. Every
     row name is a fixture name, not a real repository, and no such report is ever written or published.
+    Every artifact check is a fixture `pass`, github_release.presence included, which this runner never
+    reports (it is held and not_run); see test_report_from_a_loaded_artifact_needs_every_check_passed.
     """
     rows = [{"language": language, "name": f"fixture-{language}-consumer", "version": "0.0.0-fixture",
              "commit": fixture_row_commit(f"fixture-{language}-consumer"), "verified_contract_version": "1.2.3", "mode": "live",
@@ -670,7 +673,8 @@ def fixture_report_parts() -> dict:
     return {
         "mode": "published",
         "contract": {"version": "1.2.3", "tag": "v1.2.3", "tag_commit": FIXTURE_COMMIT, "tag_object": FIXTURE_TAG_OBJECT,
-                     "spec_sha256": synthetic_digest("spec"), "release_manifest_sha256": synthetic_digest("release manifest")},
+                     "spec_sha256": synthetic_digest("spec"), "release_manifest_sha256": synthetic_digest("release manifest"),
+                     "checks": [{"id": check, "status": "pass"} for check in ARTIFACT_CHECKS]},
         "compatibility": {"baseline": "v1.2.2", "revision_version": "1.2.3", "change_class": "additive", "findings": [],
                           "problems": [], "result": "pass"},
         "gate": {"mode": "block", "reason": "gate.block", "warn_until": None, "state_sha256": synthetic_digest("gate state")},

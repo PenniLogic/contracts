@@ -265,10 +265,49 @@ class ArtifactCommandTest(CommandTestCase):
             "tag_object": support.git(self.contracts.repo, "rev-parse", f"refs/tags/{self.contracts.tag}"),
             "spec_sha256": support.sha256_bytes((self.release_dir / artifact.spec_asset).read_bytes()),
             "release_manifest_sha256": support.sha256_bytes((self.release_dir / "release-manifest.json").read_bytes()),
+            "checks": [{"id": check, "status": status} for check, status in artifact.checks],
         })
+        # The report's closed check vocabulary is exactly the loader's, in the loader's order.
+        self.assertEqual(contract_report.ARTIFACT_CHECKS,
+                         contract_artifact.PASSED_CHECKS + contract_artifact.CONDITIONAL_CHECKS + contract_artifact.HELD_CHECKS)
+        self.assertEqual([item["id"] for item in section["checks"]], list(contract_report.ARTIFACT_CHECKS))
         report = contract_report.build_report(**dict(synthetic_report_parts(), contract=section))
         assessment = contract_report.assess_report(report)
         self.assertEqual((assessment.problems, assessment.verdict, assessment.acceptance_eligible), ((), "pass", False))
+
+    def test_report_from_a_loaded_artifact_needs_every_check_passed(self) -> None:
+        """Review round 2, PSEC-R2-3: a report from a consumer's shallow clone (`git clone --branch vX.Y.Z --depth 1`,
+        docs/publication.md) was acceptance-eligible while tag.on_remote_main and the other provenance checks were
+        not_run, and it did not name them. Control: the full-history checkout with the pinned tag object, where
+        the held github_release.presence (always not_run in this runner) stands in as pass, as in
+        fixture_report_parts. Mutation: the shallow clone."""
+        work = temporary_root()
+        self.addCleanup(shutil.rmtree, work, True)
+        url = self.contracts.origin.as_uri()
+        full, shallow = work / "full", work / "shallow"
+        support.git(work, "clone", "--quiet", url, str(full))
+        support.git(work, "clone", "--quiet", "--depth", "1", "--branch", self.contracts.tag, url, str(shallow))
+
+        def published_report(repo: Path, held_check_as_pass: bool = True) -> tuple[dict, dict[str, str]]:
+            artifact = load_published_artifact(self.contracts.tag, self.release_dir, repo=repo, accepted_remote_urls=(url,),
+                                               expect_tag_object=self.contracts.tag_object)
+            section = contract_report.contract_section(artifact)
+            if held_check_as_pass:
+                section["checks"] = [dict(item, status="pass") if item["id"] == "github_release.presence" else item
+                                     for item in section["checks"]]
+            report = contract_report.build_report(**dict(support.fixture_report_parts(), contract=section))
+            return report, {item["id"]: item["status"] for item in report["contract"]["checks"]}
+
+        control, statuses = published_report(full)
+        self.assertEqual((control["verdict"], control["acceptance_eligible"], set(statuses.values())), ("pass", True, {"pass"}))
+        report, statuses = published_report(shallow)
+        self.assertEqual((report["verdict"], report["acceptance_eligible"], statuses["tag.on_remote_main"]), ("pass", False, "not_run"))
+        claimed = contract_report.assess_report(dict(report, acceptance_eligible=True))
+        self.assertEqual([(note.rule, note.subject) for note in claimed.problems],
+                         [("report.acceptance_eligible_inconsistent", "acceptance_eligible")])
+        with self.subTest("as the loader reports it: github_release.presence is held"):
+            report, statuses = published_report(full, held_check_as_pass=False)
+            self.assertEqual((report["acceptance_eligible"], statuses["github_release.presence"]), (False, "not_run"))
 
 
 class GateCommandTest(CommandTestCase):

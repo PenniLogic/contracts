@@ -124,6 +124,18 @@ class ReportVerdictTest(ReportTestCase):
             with self.subTest(label):
                 self.assertDerived(mutate, "pass", [], False)
 
+    def test_acceptance_needs_every_artifact_check_passed(self) -> None:
+        """Review round 2, PSEC-R2-3: a report from an artifact whose provenance checks were not_run (no pin, a shallow
+        clone, the held Release presence check) was acceptance-eligible and did not even name those checks."""
+        for check in ("tag.pinned_identity", "tag.on_remote_main", "github_release.presence"):
+            def not_run(report: dict, check: str = check) -> None:
+                next(item for item in report["contract"]["checks"] if item["id"] == check).update(status="not_run")
+
+            with self.subTest(builder=check):
+                self.assertDerived(not_run, "pass", [], False)
+            with self.subTest(validator=check):
+                self.assertProblems([("report.acceptance_eligible_inconsistent", "acceptance_eligible")], not_run)
+
     def test_report_missing_language_row_fails(self) -> None:
         for index, language in enumerate(pl_contracts.LANGUAGES):
             with self.subTest(language):
@@ -270,6 +282,37 @@ class ReportRuleTest(ReportTestCase):
             with self.subTest(label):
                 self.assertProblems([("report.contract_identity", "contract")], mutate)
 
+    def test_contract_checks_incomplete_refused(self) -> None:
+        """A published report lists every check of the artifact loader exactly once (review round 2, PSEC-R2-3)."""
+        def checks(report: dict) -> list:
+            return report["contract"]["checks"]
+
+        def duplicated(report: dict) -> None:
+            checks(report)[0] = dict(checks(report)[-1], status="not_run")
+
+        mutations = {
+            "published without the loader's checks": lambda report: report["contract"].update(checks=None),
+            "a check left out": lambda report: checks(report).pop(),
+            "a check listed twice, in place of another": duplicated,
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label):
+                self.assertProblems([("report.contract_checks_incomplete", "contract")], mutate)
+        for label, (mutate, subject) in {
+                "an unknown check": (lambda report: checks(report)[0].update(id="tag.signed"), "/contract/checks/0/id fails enum"),
+                "a failed check (a loader refuses instead)": (lambda report: checks(report)[0].update(status="fail"),
+                                                              "/contract/checks/0/status fails enum"),
+                "more checks than the loader has": (lambda report: checks(report).extend(checks(report)),
+                                                    "/contract/checks fails maxItems")}.items():
+            with self.subTest(label):
+                self.assertProblems([("report.schema", subject)], mutate)
+
+    def test_contract_checks_are_the_loaders(self) -> None:
+        """The schema's closed check vocabulary is contract_report.ARTIFACT_CHECKS; test_verify_contract ties both to the loader."""
+        check = contract_schema.load_schema(contract_report.REPORT_SCHEMA)["definitions"]["check"]["properties"]
+        self.assertEqual((tuple(check["id"]["enum"]), check["status"]["enum"]), (contract_report.ARTIFACT_CHECKS, ["pass", "not_run"]))
+        self.assertEqual([item["id"] for item in self.control["contract"]["checks"]], list(contract_report.ARTIFACT_CHECKS))
+
     def test_duplicate_consumer_refused(self) -> None:
         self.assertProblems([("report.duplicate_consumer", "/consumers/3")],
                             lambda report: report["consumers"].append(dict(report["consumers"][2])))
@@ -362,6 +405,13 @@ class SyntheticReportRuleTest(ReportTestCase):
         for subject, mutate in mutations.items():
             with self.subTest(subject):
                 self.assertProblems([("report.synthetic_row_name", subject)], mutate)
+
+    def test_synthetic_report_may_have_no_loader_checks(self) -> None:
+        """No loader verified a fixture contract, so a synthetic-fixture report may carry null checks; a list it carries
+        must still be complete."""
+        self.assertDerived(lambda report: report["contract"].update(checks=None), "pass", [], False)
+        self.assertProblems([("report.contract_checks_incomplete", "contract")],
+                            lambda report: report["contract"]["checks"].pop())
 
     def test_not_run_synthetic_row_fails_without_a_naming_problem(self) -> None:
         """A synthetic run with a row that did not run is a valid report whose verdict fails."""
