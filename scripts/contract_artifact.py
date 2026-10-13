@@ -185,9 +185,11 @@ class ArtifactRefused(Exception):
 
 
 def shown(value: object, limit: int = MAX_SHOWN_TEXT) -> str:
-    """ascii(value) for a refusal detail, cut to `limit` characters: a value from the release is never echoed whole."""
-    text = ascii(value)
-    return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} characters)"
+    """ascii(value) for a refusal detail; a longer string is cut to `limit` characters before it is escaped, so a
+    value from the release is never echoed or copied whole."""
+    if isinstance(value, str) and len(value) > limit:
+        return f"{ascii(value[:limit])}... ({len(value)} characters)"
+    return ascii(value)
 
 
 def listed(names, limit: int = MAX_LISTED_NAMES) -> str:

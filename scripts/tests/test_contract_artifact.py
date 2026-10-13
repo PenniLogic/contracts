@@ -583,10 +583,10 @@ class ReleaseManifestTest(LoaderTestCase):
                 self.assertNotIn("synthetic-005", detail)
         with self.subTest("a long tag value"):
             release_dir = self.fresh_release("long-tag")
-            reseal(release_dir, edit=lambda manifest: manifest.update(tag="v" + "9" * 100_000))
+            reseal(release_dir, edit=lambda manifest: manifest.update(tag="v" + "\u00e9" * 100_000))
             detail = self.assertRefused("manifest.tag_mismatch", release_dir).detail
-            self.assertIn("... (100003 characters), not v1.2.3", detail)
-            self.assertLess(len(detail), 400)
+            self.assertIn("\\xe9'... (100001 characters), not v1.2.3", detail)  # cut to 200 characters, then escaped
+            self.assertLess(len(detail), 1000)
 
     def test_manifest_tag_mismatch_refused(self) -> None:
         self.assertSwapRefused("manifest.tag_mismatch", edit=lambda manifest: manifest.update(tag="v1.2.4"))
