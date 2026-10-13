@@ -32,8 +32,9 @@ docs/contract-verification.md lists them.
    files and directories only, at most one extended header before a member, exactly as tarfile writes
    it (its own fields included) and holding one `path` record, nothing after the end-of-archive marker.
    The members must be the builder's canonical form (its modes, owner 0, one modification time,
-   sorted names, directories exactly the parents of the files) with bounded printable ASCII names
-   inside one prefix: no absolute or parent paths, no links or devices, no duplicates or case
+   sorted names, directories exactly the parents of the files) with bounded names inside one prefix,
+   made of the POSIX portable file name characters: no absolute or parent paths, no component Windows
+   rewrites or reserves (a trailing dot, a device name), no links or devices, no duplicates or case
    collisions. tarfile must read the same members at the same offsets.
    The archive is then unpacked with the tarfile data filter. The tree digest is recomputed with
    pl_contracts.tree_hash, excluding contracts-manifest.json exactly as generate_clients.py does. It
@@ -975,6 +976,15 @@ SPECIAL_TYPES = (tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE, tarfile.CON
 MAX_MEMBER_NAME_LENGTH = 1024
 MAX_MEMBER_DEPTH = 64
 MAX_MEMBER_COMPONENT_LENGTH = 255
+# Member name components: the POSIX portable file name characters, which every real generated path uses.
+# Windows rewrites or reserves what lies outside them, and the loader unpacks onto the platform's file
+# system: it drops a trailing '.' or ' ' (`__init__.py.` is `__init__.py`), opens a device for CON, NUL,
+# COM1 and the like (also with an extension), and resolves an 8.3 short name such as PENNIL~1 to another
+# directory. So the unpacked tree a Windows verifier hashes could differ from what every other reader
+# unpacks (review round 2, PSEC-R2-2).
+PORTABLE_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
+WINDOWS_DEVICE_NAMES = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{digit}" for digit in "0123456789"),
+                                  *(f"LPT{digit}" for digit in "0123456789")})
 
 
 @dataclass(frozen=True)
@@ -1018,6 +1028,10 @@ def _member_path_problem(name: str, prefix: str) -> tuple[str, str] | None:
                                        f"than {MAX_MEMBER_COMPONENT_LENGTH} characters")
     if any(part in ("", ".", "..") or ":" in part for part in parts):
         return "archive.unsafe_path", f"member {ascii(name)} has an empty, '.', '..' or drive/stream component"
+    if any(PORTABLE_COMPONENT.fullmatch(part) is None or part.endswith(".")
+           or part.partition(".")[0].upper() in WINDOWS_DEVICE_NAMES for part in parts):
+        return "archive.unsafe_path", (f"member {ascii(name)} has a component outside the portable file name characters "
+                                       "[A-Za-z0-9._-], ending in '.', or naming a Windows device (CON, NUL, COM1, ...)")
     if parts[0] != prefix or len(parts) < 2:
         return "archive.outside_prefix", f"member {ascii(name)} is not inside {prefix}/"
     return None
@@ -1120,9 +1134,9 @@ def _strict_members(raw: bytes, prefix: str, name: str) -> list[_Member]:
     regular files and directories only; at most one extended header, directly before a member, whose
     own block is the one tarfile writes (name ././@PaxHeader, mode, owner and time 0, no link, owner or
     device fields) and whose data is exactly one `path` record; NUL padding; a two-block end-of-archive
-    marker with nothing after it. The members are in the builder's canonical form: printable ASCII names
-    inside one prefix, the builder's modes, owner 0 without names, sorted names, one shared modification
-    time, and directories that are exactly the parents of the files.
+    marker with nothing after it. The members are in the builder's canonical form: portable names inside
+    one prefix, the builder's modes, owner 0 without names, sorted names, one shared modification time,
+    and directories that are exactly the parents of the files.
     """
     members: list[_Member] = []
     folded: dict[str, str] = {}

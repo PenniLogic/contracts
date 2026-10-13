@@ -197,12 +197,18 @@ size bound, and a strict reader accepts only the tar subset `release.determinist
 The members must also be in the builder's canonical form: mode 0755 for directories, `gradlew` and
 `*.sh` files and 0644 for every other file; owner 0 without owner or link names; one modification
 time; sorted names; and directories that are exactly the parents of the files, so an empty or extra
-directory is refused. Member names are printable ASCII, at most 1024 characters and 64 components of
-at most 255 characters, inside one prefix. tarfile must then read the same members at the same data
-offsets. These rules are stricter than the tarfile `data` filter, which accepts `prefix/../x` while it
-stays inside the destination. The archive is then unpacked with `filter="data"`. The tree digest is
-recomputed with `pl_contracts.tree_hash`, excluding `contracts-manifest.json`, exactly as
-`generate_clients.py` computes it.
+directory is refused. Member names are at most 1024 characters and 64 components of at most 255
+characters, inside one prefix, and every component is made of the POSIX portable file name characters
+`[A-Za-z0-9._-]` (every real generated path is), does not end in `.` and is not a Windows device name
+(`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, also with an extension such as
+`nul.py`). The loader unpacks onto the platform's file system, and Windows drops a trailing dot or space
+(`__init__.py.` is `__init__.py`), opens a device for those names and resolves an 8.3 short name such as
+`PKG~1` to another directory, so a verifier on Windows would hash another tree than every other reader
+unpacks. tarfile must then read the same members at the same data offsets. These rules are stricter
+than the tarfile `data` filter, which accepts `prefix/../x` while it stays inside the destination. The
+archive is then unpacked with `filter="data"`. The tree digest is recomputed with
+`pl_contracts.tree_hash`, excluding `contracts-manifest.json`, exactly as `generate_clients.py`
+computes it.
 
 The tar bytes are not compared with a rebuild of the tree. The builder's exact bytes depend on its
 Python version (current tarfile versions leave the device fields of files empty, earlier ones wrote
@@ -214,7 +220,7 @@ zeros, and both forms are accepted), and `release.py` runs on the owner's machin
 | `archive.ambiguous` | Tar or gzip readers would read different members: a pax global header; a GNU long name or long link; a sparse, old-style or vendor type; an extended header record other than one `path` (for example `size`, `linkpath` or `hdrcharset`) or a malformed record; two extended headers for one member, or one that precedes no member; a GNU or V7 header; a numeric field that is not plain octal; a used prefix field; a directory that declares data; more than one gzip member or data after it; or tarfile reading other members than the strict reader. |
 | `archive.noncanonical` | The tar is readable and unambiguous but not what the builder writes: another mode, owner, owner name or link name; device numbers or header padding; bytes after the end of a name; a directory name without its trailing slash; an extended header for a short name, or one whose `path` does not start with the ustar name; an extended header block with another name, mode, owner, modification time, link or owner name, device numbers or header padding; data in padding; members out of order; an empty, extra or missing directory; or more than one modification time. |
 | `archive.too_large` / `archive.too_many_members` | The decompressed size, a member's size or the member count exceeds its bound. |
-| `archive.unsafe_path` | A member name is not printable ASCII (a control or non-ASCII character, or bytes that are not UTF-8), is absolute, uses a backslash, exceeds the length or depth bounds, or has an empty, `.`, `..`, drive or stream component. |
+| `archive.unsafe_path` | A member name is not printable ASCII (a control or non-ASCII character, or bytes that are not UTF-8), is absolute, uses a backslash, exceeds the length or depth bounds, has an empty, `.`, `..`, drive or stream component, or has a component with a character outside `[A-Za-z0-9._-]` (a space, `~`, `*` and the like), ending in `.`, or naming a Windows device. |
 | `archive.outside_prefix` | A member is not inside `pennilogic-contracts-<language>-<tag>/`. |
 | `archive.link_member` / `archive.special_member` | A member is a symlink or hard link, or anything other than a regular file or directory (a device, a FIFO, a contiguous file). |
 | `archive.duplicate_member` / `archive.case_collision` | Two members share a name, or differ only in case and would collide on Windows or macOS. |

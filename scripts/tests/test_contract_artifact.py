@@ -994,6 +994,24 @@ class ArchiveReaderDifferentialTest(LoaderTestCase):
         self.swap_raw(release_dir, "kotlin", patch_header(raw, start, 157, b"x"))
         self.assertRefused("archive.noncanonical", release_dir)
 
+    def test_windows_alias_member_refused(self) -> None:
+        """Review round 2, PSEC-R2-2: Windows drops a trailing '.' or ' ' from a name, so a member `__init__.py.` after
+        `__init__.py` overwrites it there and nowhere else. With the golden bytes in the alias and other bytes at the
+        golden path, a Windows verifier hashed the golden tree while GNU tar, node-tar and tarfile on Linux unpacked
+        the other bytes (the reviewer emulated the Win32 rewrite on Linux). Here: the alias member alone."""
+        init = f"{self.prefix}/pennilogic_synthetic/__init__.py"
+
+        def with_alias(members, suffix: str):
+            golden = dict((info.name, data) for info, data in members)[init]
+            return members + [member(init + suffix, golden)]
+
+        for suffix in (".", " "):
+            with self.subTest(alias=f"__init__.py{suffix}"):
+                release_dir = self.fresh_release(f"alias-{ord(suffix)}")
+                rewrite_archive(release_dir, self.base.tag, "python", lambda members, suffix=suffix: with_alias(members, suffix))
+                reseal(release_dir)
+                self.assertRefused("archive.unsafe_path", release_dir)
+
     def test_noncanonical_mode_or_extra_directory_refused(self) -> None:
         """Modes and directories are outside the tree digest; GNU tar unpacked gradlew without its executable bit."""
         prefix = archive_prefix("kotlin", self.base.tag)
@@ -1309,6 +1327,33 @@ class ArchiveMemberRulesTest(unittest.TestCase):
                      f"{self.PREFIX}\\..\\escape", "C:/synthetic", f"{self.PREFIX}/file:stream", f"{self.PREFIX}/bell\x07"):
             with self.subTest(name=ascii(name)):
                 self.assertRule("archive.unsafe_path", self.clean + [member(name)])
+
+    def test_member_names_windows_rewrites_or_reserves_refused(self) -> None:
+        """Review round 2, PSEC-R2-2: components outside the POSIX portable file name characters, ending in '.', or
+        naming a Windows device. Windows drops a trailing '.' or ' ', opens a device for CON or nul.py, and resolves an
+        8.3 short name such as PKG~1 to another directory, so it would unpack another tree than every other reader."""
+        problem = contract_artifact._member_path_problem
+        pairs = {
+            "a trailing dot": ("pkg/__init__.py", "pkg/__init__.py."),
+            "a trailing dot on a directory": ("pkg/models/probe.py", "pkg./models/probe.py"),
+            "three dots": ("pkg/x..y.py", "pkg/..."),
+            "a trailing space": ("pkg/__init__.py", "pkg/__init__.py "),
+            "a space inside a name": ("pkg/two_words.py", "pkg/two words.py"),
+            "an 8.3 short name": ("pkg/PKG_1", "pkg/PKG~1"),
+            "a device name": ("pkg/console.py", "pkg/CON"),
+            "a device name in lower case with an extension": ("pkg/nullable.py", "pkg/nul.py"),
+            "a numbered device name": ("pkg/com10.kt", "pkg/com1.kt"),
+            "a printer device name": ("pkg/lpt.ts", "pkg/LPT0.ts"),
+            "a character outside the portable set that Windows accepts": ("pkg/a-b_c.d", "pkg/a+b.py"),
+            **{f"the Windows reserved character {character}": ("pkg/x.py", f"pkg/x{character}.py") for character in '*?"<>|'},
+        }
+        for label, (passing, failing) in pairs.items():
+            with self.subTest(label):
+                self.assertIsNone(problem(f"{self.PREFIX}/{passing}", self.PREFIX))
+                self.assertEqual(problem(f"{self.PREFIX}/{failing}", self.PREFIX)[0], "archive.unsafe_path")
+        for name in ("pkg/__init__.py.", "pkg/__init__.py ", "pkg/NUL", "pkg/aux.py", "PKG~1/x.py"):
+            with self.subTest(member=name):
+                self.assertRule("archive.unsafe_path", self.clean + [member(f"{self.PREFIX}/{name}")])
 
     def test_member_outside_prefix_refused(self) -> None:
         for name, kind in (("other/x.py", tarfile.REGTYPE), (self.PREFIX, tarfile.DIRTYPE),
