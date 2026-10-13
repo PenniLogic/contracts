@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "owner": "T-CON-12 (PenniLogic/contracts#16)",
+  "evidence_scope": "SYNTHETIC_PROVEN_FLOW_CONTEXT_NOT_RUNTIME_PROOF",
+  "correlation_id": "cor_00000000-0000-4000-8000-000000000001",
+  "examples": [
+    {"code": "authentication_required", "context": {}},
+    {"code": "step_up_required", "context": {}},
+    {"code": "session_revoked", "context": {"revocation_reason": "signout"}},
+    {"code": "step_up_credential_too_new", "context": {"matures_at": "2026-10-02T00:00:00.000Z"}},
+    {"code": "restricted_after_recovery", "context": {"restricted_until": "2026-10-02T00:00:00.000Z", "not_me_until": "2026-10-02T00:00:00.000Z"}},
+    {"code": "recovery_notification_pending", "context": {"window_ends_at": null, "retry_after_seconds": 30}},
+    {"code": "recovery_locked", "context": {"locked_until": "2026-10-02T00:00:00.000Z"}},
+    {"code": "recovery_pending_elsewhere", "context": {"pending_route": "recovery_code", "window_ends_at": "2026-10-02T00:00:00.000Z", "action": "cancel_and_restart"}}
+  ],
+  "invalid": [
+    {"name": "missing-explicit-null-window", "base": "recovery_notification_pending", "remove": ["window_ends_at"]},
+    {"name": "nonnull-notification-window", "base": "recovery_notification_pending", "set": {"window_ends_at": "2026-10-02T00:00:00.000Z"}},
+    {"name": "missing-delay", "base": "recovery_notification_pending", "remove": ["retry_after_seconds"]},
+    {"name": "zero-delay", "base": "recovery_notification_pending", "set": {"retry_after_seconds": 0}},
+    {"name": "float-delay", "base": "recovery_notification_pending", "set": {"retry_after_seconds": 1.5}},
+    {"name": "null-pending-window", "base": "recovery_pending_elsewhere", "set": {"window_ends_at": null}},
+    {"name": "unknown-route", "base": "recovery_pending_elsewhere", "set": {"pending_route": "sms_login"}},
+    {"name": "different-recovery-action", "base": "recovery_pending_elsewhere", "set": {"action": "continue"}},
+    {"name": "missing-maturity", "base": "step_up_credential_too_new", "remove": ["matures_at"]},
+    {"name": "bad-calendar-maturity", "base": "step_up_credential_too_new", "set": {"matures_at": "2026-02-30T00:00:00.000Z"}},
+    {"name": "missing-restriction", "base": "restricted_after_recovery", "remove": ["restricted_until"]},
+    {"name": "missing-not-me-window", "base": "restricted_after_recovery", "remove": ["not_me_until"]},
+    {"name": "missing-lock-instant", "base": "recovery_locked", "remove": ["locked_until"]},
+    {"name": "wrong-revocation-class", "base": "session_revoked", "set": {"revocation_reason": "unknown"}},
+    {"name": "context-on-unrelated-authentication", "base": "authentication_required", "set": {"window_ends_at": null}},
+    {"name": "raw-token-disclosure", "base": "session_revoked", "set": {"access_token": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "raw-email-disclosure", "base": "recovery_locked", "set": {"email": "PRIVATE_SYNTHETIC_CANARY"}},
+    {"name": "arbitrary-diagnostic", "base": "recovery_pending_elsewhere", "set": {"detail": "PRIVATE_SYNTHETIC_CANARY"}}
+  ]
+}

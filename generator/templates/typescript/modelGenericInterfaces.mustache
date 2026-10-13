@@ -1,0 +1,54 @@
+/**
+ * {{#lambda.indented_star_1}}{{{unescapedDescription}}}{{/lambda.indented_star_1}}
+ * @export
+{{^parentIsOneOf}}
+ * @interface {{classname}}
+ */
+export interface {{classname}} {{#parent}}extends {{{.}}} {{/parent}}{
+{{/parentIsOneOf}}
+{{#parentIsOneOf}}
+ */
+export type {{classname}} = {{{parent}}} & {
+{{/parentIsOneOf}}
+{{#additionalPropertiesType}}
+    [key: string]: {{{additionalPropertiesType}}}{{#hasVars}} | any{{/hasVars}};
+{{/additionalPropertiesType}}
+{{#vars}}
+    /**
+     * {{#lambda.indented_star_4}}{{{unescapedDescription}}}{{/lambda.indented_star_4}}
+    {{#deprecated}}
+     * @deprecated
+    {{/deprecated}}
+     */
+    {{#isReadOnly}}readonly {{/isReadOnly}}{{name}}{{^required}}?{{/required}}: {{#vendorExtensions.x-pennilogic-nullable-enum-items}}{{#uniqueItems}}Set{{/uniqueItems}}{{^uniqueItems}}Array{{/uniqueItems}}<{{#items}}{{>provider_type}}{{/items}}>{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{^vendorExtensions.x-pennilogic-nullable-enum-items}}{{{datatypeWithEnum}}}{{/vendorExtensions.x-pennilogic-nullable-enum-items}}{{#isNullable}} | null{{/isNullable}}{{^isNullable}}{{#vendorExtensions.x-pennilogic-nullable-enum}} | null{{/vendorExtensions.x-pennilogic-nullable-enum}}{{/isNullable}};
+{{/vars}}
+}{{#parentIsOneOf}};{{/parentIsOneOf}}{{#hasEnums}}
+
+{{#vars}}
+{{#isEnum}}
+{{#stringEnums}}
+/**
+* @export
+* @enum {string}
+*/
+export enum {{classname}}{{enumName}} {
+{{#allowableValues}}
+    {{#enumVars}}
+    {{{name}}} = {{{value}}}{{^-last}},{{/-last}}
+    {{/enumVars}}
+{{/allowableValues}}
+}
+{{/stringEnums}}{{^stringEnums}}
+/**
+ * @export
+ */
+export const {{classname}}{{enumName}} = {
+{{#allowableValues}}
+    {{#enumVars}}
+    {{{name}}}: {{{value}}},
+    {{/enumVars}}
+{{/allowableValues}}
+} as const;
+export type {{classname}}{{enumName}} = typeof {{classname}}{{enumName}}[keyof typeof {{classname}}{{enumName}}];
+{{/stringEnums}}
+{{/isEnum}}{{/vars}}{{/hasEnums}}{{>validationAttributes}}

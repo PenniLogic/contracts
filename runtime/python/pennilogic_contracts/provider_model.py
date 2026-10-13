@@ -49,7 +49,7 @@ class ProviderModel(BaseModel):
         fields = cls.model_fields
         aliases = {field.alias or name: name for name, field in fields.items()}
         accepted = set(aliases) if wire else set(aliases) | set(fields)
-        if not value.keys() <= accepted or any(item is None for item in value.values()):
+        if not value.keys() <= accepted:
             raise ProviderWireError()
         if any(field.is_required() and name not in value and (field.alias or name) not in value for name, field in fields.items()):
             raise ProviderWireError()
@@ -77,7 +77,8 @@ class ProviderModel(BaseModel):
             raise ProviderWireError()
         return {
             field.alias or name: _wire_value(self.__dict__[name])
-            for name, field in fields.items() if name in self.__dict__ and self.__dict__[name] is not None
+            for name, field in fields.items() if name in self.__dict__ and
+            (self.__dict__[name] is not None or name in self.model_fields_set)
         }
 
     @model_serializer(mode="plain")

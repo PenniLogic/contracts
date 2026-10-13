@@ -75,7 +75,8 @@ class ProviderTransportTest(unittest.TestCase):
             self.assertIsNone(client.deserialize("null", f"Optional[{name}]", "application/json"))
             self.assertEqual(client.deserialize("[null]", f"List[Optional[{name}]]", "application/json"), [None])
             count += 1
-        self.assertEqual(count, 29)
+        self.assertEqual(len(load("provider-transport.v1.json")["models"][:29]), 29)
+        self.assertEqual(count, 112)
         for legacy in ("ProblemDetail", "object"):
             self.assertIsNone(client.deserialize("null", legacy, "application/json"))
         response = RESTResponse(HTTPResponse(body=BytesIO(b""), status=204, preload_content=False))
@@ -84,6 +85,8 @@ class ProviderTransportTest(unittest.TestCase):
 
     def test_every_nested_model_and_primitive_array_rejects_null_before_transport(self) -> None:
         cases = 0
+        legacy_cases = 0
+        legacy = {row["schema"] for row in load("provider-transport.v1.json")["models"][:29]}
         for name, wire in specimens(arrays=True):
             model = getattr(generated_models, name)
             for invalid in null_array_entries(wire):
@@ -92,7 +95,10 @@ class ProviderTransportTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         read(invalid)
                 cases += 1
-        self.assertEqual(cases, 15)
+                if name in legacy:
+                    legacy_cases += 1
+        self.assertEqual(legacy_cases, 15)
+        self.assertEqual(cases, 43)
 
     def test_successful_refusal_rejects_unknown_content_in_ordinary_conversion_and_transport(self) -> None:
         valid = load("error-provider.v1.json")["refusal"]
@@ -162,7 +168,7 @@ class ProviderTransportTest(unittest.TestCase):
                         write()
                     self.assertNotIn("PRIVATE_SYNTHETIC_CANARY", str(caught.exception), name)
             count += 1
-        self.assertEqual(count, 29)
+        self.assertEqual(count, 112)
 
     def test_every_integer_and_boolean_leaf_rejects_quoted_values_before_model_conversion(self) -> None:
         cases = 0

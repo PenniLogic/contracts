@@ -61,7 +61,7 @@ class ConstraintCompilationTest(unittest.TestCase):
             ("unbound items", {"type": "array"}),
             ("untyped items", {"type": "array", "items": {}}),
             ("tuple items", {"type": "array", "items": [{"type": "integer"}]}),
-            ("ambiguous union", {"type": ["string", "null"]}),
+            ("ambiguous union", {"type": ["string", "integer", "null"]}),
             ("external reference", {"$ref": "https://pennilogic.example/schema.json"}),
             ("unresolved reference", {"$ref": "#/components/schemas/AbsentProbe"}),
             ("unsupported pattern", {"type": "string", "pattern": r"^\w+$"}),
@@ -196,7 +196,7 @@ class ConstraintCompilationTest(unittest.TestCase):
                     self.assertEqual(set(member), {"properties"})
                     self.assertIn(member, schemas[name]["allOf"])
             self.assertTrue(any(keyword in json.dumps(schemas[name]) for keyword in
-                                ('"allOf"', '"anyOf"', '"oneOf"', '"if"', '"not"', '"const"')))
+                                ('"allOf"', '"anyOf"', '"oneOf"', '"if"', '"not"', '"const"', '"enum"')))
         self.assertNotIn("egress_denial_reason", projection["OperationProblemDetail"]["required"])
         self.assertEqual(schemas["OperationProblemDetail"]["allOf"][0]["oneOf"], [
             {"ref": "ServiceProblemDetail"}, {"ref": "EgressDeniedProblemDetail"}, {"ref": "AuthenticationProblemDetail"},

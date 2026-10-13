@@ -1,0 +1,1 @@
+(item: any) => item === null ? null : {{#isArray}}{{#uniqueItems}}Array.from(item as Set<any>){{/uniqueItems}}{{^uniqueItems}}(item as Array<any>){{/uniqueItems}}.map({{#items}}{{>provider_enum_write}}{{/items}}){{/isArray}}{{^isArray}}{{datatype}}ToJSON(item){{/isArray}}

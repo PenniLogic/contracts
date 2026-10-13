@@ -1,0 +1,59 @@
+export function {{classname}}ToJSON<Input extends {{>wireInput}} | null | undefined>(value: Input): WireOutput<Input, {{classname}}Wire{{#vendorExtensions.x-pennilogic-strict-provider}}, never{{/vendorExtensions.x-pennilogic-strict-provider}}>;
+export function {{classname}}ToJSON(value: {{>wireInput}}): {{classname}}Wire;
+export function {{classname}}ToJSON(value?: {{>wireInput}} | null): {{classname}}Wire{{^vendorExtensions.x-pennilogic-strict-provider}} | null{{/vendorExtensions.x-pennilogic-strict-provider}} | undefined {
+    return {{classname}}ToJSONTyped(value, false);
+}
+
+export function {{classname}}ToJSONTyped(): undefined;
+export function {{classname}}ToJSONTyped<Input extends {{>wireInput}} | null | undefined>(value: Input, ignoreDiscriminator?: boolean): WireOutput<Input, {{classname}}Wire{{#vendorExtensions.x-pennilogic-strict-provider}}, never{{/vendorExtensions.x-pennilogic-strict-provider}}>;
+export function {{classname}}ToJSONTyped(value: {{>wireInput}}, ignoreDiscriminator?: boolean): {{classname}}Wire;
+export function {{classname}}ToJSONTyped(value?: {{>wireInput}} | null, ignoreDiscriminator: boolean = false): {{classname}}Wire{{^vendorExtensions.x-pennilogic-strict-provider}} | null{{/vendorExtensions.x-pennilogic-strict-provider}} | undefined {
+    {{#vendorExtensions.x-pennilogic-strict-provider}}
+    if (value === null) throw new ProviderWireError();
+    if (value !== undefined) providerObject(value, providerFields, false);
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{#hasVars}}
+    if (value == null) {
+        return value;
+    }
+    {{#discriminator}}
+
+    if (!ignoreDiscriminator) {
+        switch (value['{{discriminator.propertyName}}']) {
+        {{#discriminator.mappedModels}}
+            case '{{mappingName}}':
+                return {{modelName}}ToJSONTyped(value, ignoreDiscriminator);
+        {{/discriminator.mappedModels}}
+            default:
+                return value;
+        }
+    }
+    {{/discriminator}}
+
+    const result: {{classname}}Wire = {
+        {{#parent}}...{{{.}}}ToJSONTyped(value, true),{{/parent}}
+        {{#additionalPropertiesType}}
+            ...value,
+        {{/additionalPropertiesType}}
+        {{#vars}}
+        {{^isReadOnly}}
+        {{>wireMember}}
+        {{/isReadOnly}}
+        {{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}
+        {{>wireMember}}
+        {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}
+        {{/vars}}
+    };
+    {{#vendorExtensions.x-pennilogic-strict-provider}}
+    const wire = omitOptionalWire(result, [{{#vars}}{{^required}}{{^isReadOnly}}'{{baseName}}', {{/isReadOnly}}{{#isReadOnly}}{{#vendorExtensions.x-pennilogic-read-only-response}}'{{baseName}}', {{/vendorExtensions.x-pennilogic-read-only-response}}{{/isReadOnly}}{{/required}}{{/vars}}]);
+    providerWire(wire, "{{name}}");
+    return wire;
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{^vendorExtensions.x-pennilogic-strict-provider}}
+    return result;
+    {{/vendorExtensions.x-pennilogic-strict-provider}}
+    {{/hasVars}}
+    {{^hasVars}}
+    return value;
+    {{/hasVars}}
+}

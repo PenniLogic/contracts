@@ -109,6 +109,13 @@ def replace_in_section(text: str, path: tuple[str, ...], old: str, new: str) -> 
 
 
 def replace_once(text: str, old: str, new: str) -> str:
+    if old[:1].isspace() and "\n" in old:
+        pattern = re.compile("^" + re.escape(old), re.MULTILINE)
+        matches = list(pattern.finditer(text))
+        if len(matches) != 1:
+            raise AssertionError(f"expected exactly one anchored occurrence of {old!r}, found {len(matches)}")
+        match = matches[0]
+        return text[:match.start()] + new + text[match.end():]
     if text.count(old) != 1:
         raise AssertionError(f"expected exactly one occurrence of {old!r}, found {text.count(old)}")
     return text.replace(old, new)

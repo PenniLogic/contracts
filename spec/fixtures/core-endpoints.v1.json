@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "owner": "PenniLogic/contracts#1",
+  "evidence_scope": "SYNTHETIC_CONTRACT_ONLY_NOT_BACKEND_OR_AUTH_VERIFICATION",
+  "request_headers": {
+    "Authorization": "DPoP synthetic.access.signature",
+    "DPoP": "synthetic.proof.signature",
+    "Idempotency-Key": "00000000-0000-4000-8000-000000000010",
+    "Step-Up-Token": "synthetic-single-use-step-up"
+  },
+  "payloads": {
+    "account_page": {"accounts": [], "page": {"page_size": 20, "has_more": false}},
+    "transaction_page": {"transactions": [], "page": {"page_size": 20, "has_more": false}},
+    "category_page": {"categories": [], "page": {"page_size": 20, "has_more": false}},
+    "correction_result": {
+      "correction_id": "00000000-0000-7000-8000-000000000012",
+      "reversal": {
+        "transaction_id": "rec_00000000-0000-4000-8000-000000000013", "kind": "REVERSAL", "status": "posted",
+        "occurred_at": "2026-10-01T00:00:00.000Z", "booked_at": "2026-10-01T00:00:01.000Z", "currency": "INR", "entry_count": 2,
+        "reverses": "rec_00000000-0000-4000-8000-000000000004", "correction_id": "00000000-0000-7000-8000-000000000012",
+        "entries": [
+          {"entry_id": "00000000-0000-7000-8000-000000000014", "account_id": "00000000-0000-7000-8000-000000000001", "amount": {"amount": "0.01", "currency": "INR"}},
+          {"entry_id": "00000000-0000-7000-8000-000000000015", "account_id": "00000000-0000-7000-8000-000000000002", "amount": {"amount": "-0.01", "currency": "INR"}}
+        ]
+      },
+      "replacements": [{
+        "transaction_id": "rec_00000000-0000-4000-8000-000000000016", "kind": "REPOST", "status": "posted",
+        "occurred_at": "2026-10-01T00:00:00.000Z", "booked_at": "2026-10-01T00:00:01.000Z", "currency": "INR", "entry_count": 2,
+        "replaces": "rec_00000000-0000-4000-8000-000000000004", "correction_id": "00000000-0000-7000-8000-000000000012",
+        "entries": [
+          {"entry_id": "00000000-0000-7000-8000-000000000017", "account_id": "00000000-0000-7000-8000-000000000001", "amount": {"amount": "-0.01", "currency": "INR"}},
+          {"entry_id": "00000000-0000-7000-8000-000000000018", "account_id": "00000000-0000-7000-8000-000000000002", "amount": {"amount": "0.01", "currency": "INR"}}
+        ]
+      }]
+    },
+    "weighted_assignment": {"entries": [{"entry_id": "00000000-0000-7000-8000-000000000006", "mode": "weighted", "weighted_lines": [{"category_id": null, "weight": 1}]}]},
+    "create_account": {"type": "ASSET", "currency": "INR", "name": "Synthetic account"},
+    "update_account": {"is_archived": true},
+    "account": {
+      "account_id": "00000000-0000-7000-8000-000000000001",
+      "type": "ASSET", "currency": "INR", "name": "Synthetic account",
+      "is_archived": false, "created_at": "2026-10-01T00:00:00.000Z"
+    },
+    "opening_balance": {"amount": {"amount": "0.01", "currency": "INR"}, "value_date": "2026-10-01"},
+    "post_transaction": {
+      "source_event_id": "00000000-0000-4000-8000-000000000003",
+      "occurred_at": "2026-10-01T00:00:00.000Z",
+      "currency": "INR",
+      "entries": [
+        {"account_id": "00000000-0000-7000-8000-000000000001", "amount": {"amount": "-0.01", "currency": "INR"}},
+        {"account_id": "00000000-0000-7000-8000-000000000002", "amount": {"amount": "0.01", "currency": "INR"}}
+      ]
+    },
+    "transaction": {
+      "transaction_id": "rec_00000000-0000-4000-8000-000000000004",
+      "kind": "STANDARD", "status": "posted", "currency": "INR", "entry_count": 2,
+      "occurred_at": "2026-10-01T00:00:00.000Z", "booked_at": "2026-10-01T00:00:01.000Z",
+      "entries": [
+        {"entry_id": "00000000-0000-7000-8000-000000000005", "account_id": "00000000-0000-7000-8000-000000000001", "amount": {"amount": "-0.01", "currency": "INR"}},
+        {"entry_id": "00000000-0000-7000-8000-000000000006", "account_id": "00000000-0000-7000-8000-000000000002", "amount": {"amount": "0.01", "currency": "INR"}}
+      ]
+    },
+    "reverse_transaction": {"reason_note": "Synthetic correction"},
+    "correct_transaction": {
+      "replacements": [{
+        "source_event_id": "00000000-0000-4000-8000-000000000007",
+        "occurred_at": "2026-10-01T00:00:00.000Z", "currency": "INR",
+        "entries": [
+          {"account_id": "00000000-0000-7000-8000-000000000001", "amount": {"amount": "-0.01", "currency": "INR"}},
+          {"account_id": "00000000-0000-7000-8000-000000000002", "amount": {"amount": "0.01", "currency": "INR"}}
+        ]
+      }]
+    },
+    "create_category": {"name": "Synthetic category", "nature": "EXPENSE", "icon": "food", "colour": "green"},
+    "update_category": {"is_archived": true},
+    "category": {
+      "category_id": "00000000-0000-7000-8000-000000000008",
+      "kind": "USER", "nature": "EXPENSE", "name": "Synthetic category", "icon": "food", "colour": "green",
+      "is_archived": false, "created_at": "2026-10-01T00:00:00.000Z"
+    },
+    "redirect_category": {"target_category_id": "00000000-0000-7000-8000-000000000009"},
+    "category_redirect": {
+      "redirect_id": "00000000-0000-7000-8000-000000000011",
+      "source_category_id": "00000000-0000-7000-8000-000000000008",
+      "target_category_id": "00000000-0000-7000-8000-000000000009",
+      "created_at": "2026-10-01T00:00:00.000Z"
+    },
+    "category_assignment": {
+      "entries": [{
+        "entry_id": "00000000-0000-7000-8000-000000000006", "mode": "exact",
+        "exact_lines": [{"category_id": null, "amount": {"amount": "0.01", "currency": "INR"}}]
+      }]
+    },
+    "categorisation": {
+      "view": {"mode": "CURRENT", "as_of": null}, "category_id": null,
+      "assignment_id": "00000000-0000-7000-8000-000000000012",
+      "source": "USER", "reason": "USER_EDIT", "assigned_at": "2026-10-01T00:00:01.000Z",
+      "allocations": [{
+        "entry_id": "00000000-0000-7000-8000-000000000006", "position": 0,
+        "category_id": null, "system_key": null, "nature": "EXPENSE",
+        "amount": {"amount": "0.01", "currency": "INR"}
+      }]
+    },
+    "cursor_end": {"page_size": 20, "has_more": false},
+    "cursor_more": {"page_size": 100, "has_more": true, "cursor": "synthetic_bound_cursor"}
+  },
+  "endpoints": [
+    {
+      "operation_id": "getCategorisation", "method": "GET", "path": "/transactions/{transactionId}/categorisation",
+      "valid": {"path_parameters": {"transactionId": "rec_00000000-0000-4000-8000-000000000004"}, "query": {"view": "AS_RECORDED", "as_of": "2026-10-02T00:00:00.000Z"}},
+      "invalid": {"query_set": {"view": "UNKNOWN"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "assignCategories", "method": "POST", "path": "/transactions/{transactionId}/categorisation",
+      "valid": {"path_parameters": {"transactionId": "rec_00000000-0000-4000-8000-000000000004"}, "body_ref": "category_assignment"},
+      "invalid": {"body_set": {"entries": []}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "listAccounts", "method": "GET", "path": "/accounts",
+      "valid": {"query": {"page_size": 1, "sort": "created_at.asc,id.asc"}},
+      "invalid": {"query_set": {"page_size": 0}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "createAccount", "method": "POST", "path": "/accounts",
+      "valid": {"body_ref": "create_account"},
+      "invalid": {"body_add": {"balance": {"amount": "0.01", "currency": "INR"}}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "getAccount", "method": "GET", "path": "/accounts/{accountId}",
+      "valid": {"path_parameters": {"accountId": "00000000-0000-7000-8000-000000000001"}},
+      "invalid": {"path_set": {"accountId": "not-a-resource-id"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "updateAccount", "method": "PATCH", "path": "/accounts/{accountId}",
+      "valid": {"path_parameters": {"accountId": "00000000-0000-7000-8000-000000000001"}, "body_ref": "update_account"},
+      "invalid": {"body_add": {"currency": "JPY"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "postOpeningBalance", "method": "POST", "path": "/accounts/{accountId}/opening-balances",
+      "valid": {"path_parameters": {"accountId": "00000000-0000-7000-8000-000000000001"}, "body_ref": "opening_balance"},
+      "invalid": {"body_set": {"amount": 1}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "listTransactions", "method": "GET", "path": "/transactions",
+      "valid": {"query": {"page_size": 100, "sort": "occurred_at.desc,transaction_id.desc", "occurred_from": "2026-10-01T00:00:00.000Z", "occurred_before": "2026-10-02T00:00:00.000Z"}},
+      "invalid": {"query_set": {"sort": "occurred_at.desc"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "postTransaction", "method": "POST", "path": "/transactions",
+      "valid": {"body_ref": "post_transaction"},
+      "invalid": {"body_add": {"raw_sms": "SYNTHETIC_FORBIDDEN_CONTENT"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "getTransaction", "method": "GET", "path": "/transactions/{transactionId}",
+      "valid": {"path_parameters": {"transactionId": "rec_00000000-0000-4000-8000-000000000004"}},
+      "invalid": {"path_set": {"transactionId": "00000000-0000-4000-8000-000000000004"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "reverseTransaction", "method": "POST", "path": "/transactions/{transactionId}/reversals",
+      "valid": {"path_parameters": {"transactionId": "rec_00000000-0000-4000-8000-000000000004"}, "body_ref": "reverse_transaction"},
+      "invalid": {"body_add": {"entries": []}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "correctTransaction", "method": "POST", "path": "/transactions/{transactionId}/corrections",
+      "valid": {"path_parameters": {"transactionId": "rec_00000000-0000-4000-8000-000000000004"}, "body_ref": "correct_transaction"},
+      "invalid": {"body_set": {"replacements": []}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "listCategories", "method": "GET", "path": "/categories",
+      "valid": {"query": {"nature": "EXPENSE", "page_size": 20}},
+      "invalid": {"query_add": {"owner_id": "SYNTHETIC_FORBIDDEN_SCOPE"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "createCategory", "method": "POST", "path": "/categories",
+      "valid": {"body_ref": "create_category"},
+      "invalid": {"body_add": {"system_key": "debt.interest"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "getCategory", "method": "GET", "path": "/categories/{categoryId}",
+      "valid": {"path_parameters": {"categoryId": "00000000-0000-7000-8000-000000000008"}},
+      "invalid": {"path_set": {"categoryId": "not-a-resource-id"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "updateCategory", "method": "PATCH", "path": "/categories/{categoryId}",
+      "valid": {"path_parameters": {"categoryId": "00000000-0000-7000-8000-000000000008"}, "body_ref": "update_category"},
+      "invalid": {"body_add": {"parent_id": "00000000-0000-7000-8000-000000000009"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "redirectCategory", "method": "POST", "path": "/categories/{categoryId}/redirects",
+      "valid": {"path_parameters": {"categoryId": "00000000-0000-7000-8000-000000000008"}, "body_ref": "redirect_category"},
+      "invalid": {"body_add": {"raw_email": "SYNTHETIC_FORBIDDEN_CONTENT"}}, "rejection": "validation_rejected"
+    },
+    {
+      "operation_id": "retractCategoryRedirect", "method": "POST", "path": "/categories/{categoryId}/redirects/{redirectId}/retract",
+      "valid": {"path_parameters": {"categoryId": "00000000-0000-7000-8000-000000000008", "redirectId": "00000000-0000-7000-8000-000000000011"}},
+      "invalid": {"body_add": {"reactivate": true}}, "rejection": "validation_rejected"
+    }
+  ],
+  "invalid_query_boundaries": [
+    {"name": "negative page", "operation_id": "listAccounts", "set": {"page_size": -1}},
+    {"name": "float page", "operation_id": "listAccounts", "set": {"page_size": 1.5}},
+    {"name": "oversized page", "operation_id": "listAccounts", "set": {"page_size": 101}},
+    {"name": "empty cursor", "operation_id": "listAccounts", "set": {"cursor": ""}},
+    {"name": "unknown filter", "operation_id": "listTransactions", "set": {"raw_filter": "SYNTHETIC"}},
+    {"name": "unstable sort", "operation_id": "listTransactions", "set": {"sort": "occurred_at.desc"}},
+    {"name": "bad instant", "operation_id": "listTransactions", "set": {"occurred_from": "2026-02-30T00:00:00.000Z"}},
+    {"name": "empty interval", "operation_id": "listTransactions", "set": {"occurred_from": "2026-10-02T00:00:00.000Z", "occurred_before": "2026-10-02T00:00:00.000Z"}}
+  ],
+  "invalid_api_versions": ["v0", "v2", "0.4.0", ""],
+  "runtime_only_cases": [
+    "foreign or expired cursor with valid lexical form",
+    "duplicate query selectors or JSON member names",
+    "foreign resource ownership or grant denial",
+    "nonzero, balanced ledger entries and sealed entry_count",
+    "same-key payload conflict and concurrent one-effect posting",
+    "fresh DPoP signature, nonce, token hash and replay enforcement",
+    "single-use step-up issuer and request binding",
+    "category seed materialisation, redirect locking and assignment sums"
+  ]
+}

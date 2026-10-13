@@ -18,10 +18,20 @@ const base = parse(fs.readFileSync(path.join(ROOT, "spec", "openapi.yaml"), "utf
 const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, "spec", "fixtures", "custom-destination-wire.v1.json"), "utf8"));
 const planted = JSON.parse(fs.readFileSync(path.join(ROOT, "spec", "fixtures", "custom-destination-inference-negative.v1.json"), "utf8"));
 const { consequence, schema } = loadSource();
-const context = () => ({ path: [], documentInventory: {}, rule: { resolved: false } });
+const context = (documentInventory = {}) => ({ path: [], documentInventory, rule: { resolved: false } });
 const validate = (value, shape) => validateSchema(value, { schema: shape, dialect: "draft2020-12", allErrors: true }, context());
-const model = (name, value) => validate(value, { $ref: `#/components/schemas/${name}`, components: base.components });
-const findings = (doc) => contract(doc, null, context());
+// Only named models from this unchanged base share validator identities; derivative schemas remain fresh.
+const modelSchemas = new Map();
+const modelInventory = {};
+const model = (name, value) => {
+  if (!modelSchemas.has(name)) {
+    modelSchemas.set(name, { $ref: `#/components/schemas/${name}`, components: base.components });
+  }
+  return validateSchema(value, { schema: modelSchemas.get(name), dialect: "draft2020-12", allErrors: true },
+    context(modelInventory));
+};
+const artifactInventory = {};
+const findings = (doc) => contract(doc, null, context(artifactInventory));
 
 function probe() {
   const doc = structuredClone(base);
@@ -86,7 +96,7 @@ async function withLintProbe(check) {
   fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
   const directory = fs.mkdtempSync(path.join(ROOT, "build", "custom-destination-lint-"));
   try {
-    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json"]) {
+    for (const name of ["currency-registry.v1.json", "error-catalogue.v1.json", "client-state-bindings.v1.json", "import-group.v1.json", "category-seed.v1.json"]) {
       fs.copyFileSync(path.join(ROOT, "spec", name), path.join(directory, name));
     }
     const file = path.join(directory, "probe.json");
@@ -208,10 +218,94 @@ test("parallel real lint probes keep documents, diagnostics and cleanup isolated
   for (const result of results) assert.equal(result.status, "fulfilled", result.reason);
 });
 
+test("named base-model validation compiles once per model but validates every wire independently", (t) => {
+  const Ajv = require("ajv/dist/2020").default;
+  const compile = Ajv.prototype.compile;
+  const names = ["CustomDestinationRegistrationRequest", "StepUpTokenValue"];
+  const calls = [];
+  t.mock.method(Ajv.prototype, "compile", function (shape, ...args) {
+    for (const name of names) if (shape === modelSchemas.get(name)) calls.push(name);
+    return compile.call(this, shape, ...args);
+  });
+  assert.deepEqual(model(names[0], fixture.registration), []);
+  const invalid = { ...fixture.registration, providerKey: "synthetic-forbidden-key" };
+  const first = model(names[0], invalid);
+  assert.ok(first.length > 0);
+  first[0].message = "synthetic changed caller diagnostic";
+  const second = model(names[0], invalid);
+  assert.notStrictEqual(second, first);
+  assert.ok(second.length > 0);
+  assert.notEqual(second[0].message, first[0].message);
+  assert.deepEqual(model(names[0], fixture.registration), []);
+  assert.deepEqual(model(names[1], "synthetic-opaque-token"), []);
+  assert.ok(model(names[1], "").length > 0);
+  assert.deepEqual(calls, names);
+  assert.notStrictEqual(modelSchemas.get(names[0]), modelSchemas.get(names[1]));
+  const derivative = { type: "string", minLength: 1 };
+  assert.deepEqual(validate("a", derivative), []);
+  derivative.minLength = 2;
+  assert.ok(validate("a", derivative).length > 0, "mutable derivative schemas must still recompile");
+});
+
+test("canonical consequence validation compiles once without reusing mutation outcomes", (t) => {
+  const Ajv = require("ajv").default;
+  const compile = Ajv.prototype.compile;
+  const compiles = [];
+  t.mock.method(Ajv.prototype, "compile", function (shape, ...args) {
+    if (shape?.$id === schema.$id) compiles.push(shape.$id);
+    return compile.call(this, shape, ...args);
+  });
+  const read = fs.readFileSync;
+  const artifactFiles = [SOURCE.consequences, SOURCE.schema].map((name) => path.join(ROOT, "spec", name));
+  const reads = [];
+  t.mock.method(fs, "readFileSync", function (filename, ...args) {
+    if (typeof filename === "string" && artifactFiles.includes(path.resolve(filename))) {
+      reads.push(path.resolve(filename));
+    }
+    return read.call(this, filename, ...args);
+  });
+  assert.deepEqual(findings(base), []);
+  const changed = structuredClone(base);
+  changed["x-custom-destination-source"].commit = "0".repeat(40);
+  const first = findings(changed);
+  assert.ok(first.some((finding) => finding.message.includes("must bind the exact accepted")));
+  first[0].message = "synthetic changed caller diagnostic";
+  const second = findings(changed);
+  assert.notStrictEqual(second, first);
+  assert.notEqual(second[0].message, first[0].message);
+  const altered = structuredClone(base);
+  altered.components.schemas.CustomDestinationRegistrationRequest.additionalProperties = true;
+  assert.ok(findings(altered).some((finding) => finding.message.includes("must be closed")));
+  assert.deepEqual(findings(base), []);
+  for (const filename of artifactFiles) {
+    assert.equal(reads.filter((item) => item === filename).length, 5, "each rule call must re-read and pin the artifact");
+  }
+  const valid = () => validateSchema(consequence, { schema, dialect: "draft7", allErrors: true }, context(artifactInventory));
+  assert.deepEqual(valid(), []);
+  for (const change of [(value) => { value.enablement.custom_default = "on"; },
+    (value) => { value.wire.extra = true; }]) {
+    const copy = structuredClone(consequence);
+    change(copy);
+    const denied = validateSchema(copy, { schema, dialect: "draft7", allErrors: true }, context(artifactInventory));
+    assert.ok(denied.length > 0);
+    denied[0].message = "synthetic changed consequence diagnostic";
+    const again = validateSchema(copy, { schema, dialect: "draft7", allErrors: true }, context(artifactInventory));
+    assert.notStrictEqual(again, denied);
+    assert.ok(again.length > 0);
+    assert.notEqual(again[0].message, denied[0].message);
+    assert.deepEqual(valid(), []);
+  }
+  assert.deepEqual(compiles, [schema.$id]);
+  const derivative = { type: "string", minLength: 1 };
+  assert.deepEqual(validate("a", derivative), []);
+  derivative.minLength = 2;
+  assert.ok(validate("a", derivative).length > 0);
+});
+
 suite("custom-destination source controls", { concurrency: 2 }, () => {
 
 test("canonical accepted consequence satisfies its complete published closed schema", () => {
-  assert.deepEqual(validateSchema(consequence, { schema, dialect: "draft7", allErrors: true }, context()), []);
+  assert.deepEqual(validateSchema(consequence, { schema, dialect: "draft7", allErrors: true }, context(artifactInventory)), []);
   assert.deepEqual(base["x-custom-destination-source"], SOURCE);
   assert.deepEqual(findings(base), []);
 });
@@ -255,7 +349,7 @@ test("canonical source fails closed on unknown members, contradictory ON and non
   for (const mutate of mutations) {
     const copy = structuredClone(consequence);
     mutate(copy);
-    assert.ok(validateSchema(copy, { schema, dialect: "draft7", allErrors: true }, context()).length > 0);
+    assert.ok(validateSchema(copy, { schema, dialect: "draft7", allErrors: true }, context(artifactInventory)).length > 0);
   }
 });
 

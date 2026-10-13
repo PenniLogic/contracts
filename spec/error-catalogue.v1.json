@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "group_version": "1.1.0",
+  "group_version": "1.2.0",
   "owner": "T-CON-12 (PenniLogic/contracts#16)",
   "taxonomy_version": "1.1.0",
   "decisions": ["ADR-015 sections 1.5, 4.4, 4.6, 4.8 and 5", "ADR-016 section 14", "ADR-017 section 10", "ADR-018 sections 4.5 and 10", "ADR-019 section 16"],
@@ -46,6 +46,66 @@
       "state": null
     },
     {
+      "code": "recovery_locked",
+      "status": 403,
+      "title": "Recovery temporarily locked",
+      "detail": "Use a proven recovery route or wait for the stated time.",
+      "classification": "authentication_owned",
+      "condition": "recovery_locked",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "recovery_notification_pending",
+      "status": 409,
+      "title": "Recovery notification pending",
+      "detail": "Wait before checking this proven recovery request.",
+      "classification": "authentication_owned",
+      "condition": "recovery_notification_pending",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "recovery_pending_elsewhere",
+      "status": 409,
+      "title": "Recovery already pending",
+      "detail": "Confirm whether to stop the pending recovery and start here.",
+      "classification": "authentication_owned",
+      "condition": "recovery_pending_elsewhere",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "restricted_after_recovery",
+      "status": 403,
+      "title": "Recovery restrictions active",
+      "detail": "This action is not available during the stated recovery period.",
+      "classification": "authentication_owned",
+      "condition": "restricted_after_recovery",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "session_revoked",
+      "status": 401,
+      "title": "Session ended",
+      "detail": "Authenticate again to continue.",
+      "classification": "authentication_owned",
+      "condition": "session_revoked",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
+      "code": "step_up_credential_too_new",
+      "status": 403,
+      "title": "Credential confirmation unavailable",
+      "detail": "Use a mature credential or wait for the stated time.",
+      "classification": "authentication_owned",
+      "condition": "step_up_credential_too_new",
+      "flow": "authentication_required",
+      "state": null
+    },
+    {
       "code": "step_up_required",
       "status": 403,
       "title": "Confirmation required",
@@ -56,6 +116,16 @@
       "state": null
     }
   ],
+  "authentication_policies": {
+    "authentication_required": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": [], "precondition": "Sign in or satisfy the fresh DPoP nonce challenge; never retry a proof or downgrade authentication."},
+    "recovery_locked": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": ["locked_until"], "precondition": "Only a proven account recovery flow can receive this condition; valid codes still proceed and clear the lock. Anonymous requests retain the identical accepted-and-dropped shape."},
+    "recovery_notification_pending": {"retryable": true, "retry_class": "after_delay", "idempotency": "authentication_lifecycle", "required_context": ["window_ends_at", "retry_after_seconds"], "precondition": "Check only the same proven recovery flow after the stated delay. window_ends_at is explicitly null; no window has started and no new initiation or credential response is replayed."},
+    "recovery_pending_elsewhere": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": ["pending_route", "window_ends_at", "action"], "precondition": "Only a second proven credential/device can receive the pending route and window. The single action cancel_and_restart is explicit, never automatic and never charged."},
+    "restricted_after_recovery": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": ["restricted_until", "not_me_until"], "precondition": "Keep own reads and the recovering-device one-shot credential-add path; do not perform a restricted action or resume provider credentials."},
+    "session_revoked": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": ["revocation_reason"], "precondition": "End the bound session and authenticate again; never reuse the revoked family or substitute a different key to bypass device binding."},
+    "step_up_credential_too_new": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": ["matures_at"], "precondition": "Use a mature passkey or explicitly obtain a new single-use step-up after the stated instant; never weaken user verification or reuse the earlier grant."},
+    "step_up_required": {"retryable": false, "retry_class": "never", "idempotency": "authentication_lifecycle", "required_context": [], "precondition": "Obtain a fresh single-use grant bound to the exact operation and intent; no automatic retry, token copying or weaker factor."}
+  },
   "authentication_rule": "Outside the eight-state service-error projection, using its already excluded authentication_required flow. Auth codes are in the same ProblemCode vocabulary, never ordinary ServiceProblemDetail. No automatic retry or weaker fallback. Fresh per-send DPoP and step-up-request@1 remain runtime obligations; an explicitly re-authorized identical intended request retains its key and bytes within existing bounds.",
   "validation_reason_bindings": [
     {
