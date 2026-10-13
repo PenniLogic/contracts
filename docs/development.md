@@ -115,6 +115,16 @@ The initial `8d3e199` scheduler incorrectly inherited `execFile`'s separate per-
 corrects that preservation regression; the frozen `8d3e199` evidence is not relabelled.
 There is no result cache, skipped case, shared mutable probe or substitute in-process linter.
 
+The Python wrapper retains the one Node invocation's successful stdout report, including its
+subtest timings, in the existing worker stdout log. The complete source runner forwards that log
+to its own stdout in both serial-first and overlapping schedules. The wrapper refuses an empty
+report or more than 1,048,576 UTF-8 bytes before emitting anything; it never truncates or uses
+stderr as a successful-report fallback. This is an emission bound after capture, not a new
+subprocess capture limit. Nonzero exits still include the complete original stdout and stderr
+in the failing assertion, and the nested lint helpers' existing byte caps are unchanged.
+Synthetic source-runner controls cover this transport with stubbed Node execution; they do not
+replace the real Node suite or establish native runtime savings or the 600-second qualification.
+
 The normal source command above includes this suite; `node --test scripts/tests/custom_destinations.test.cjs`
 is the focused command. When measuring, record the whole elapsed span as well as step times,
 dependency/cache state and Gradle executed/up-to-date tasks. Accepted-main run `37432699878`

@@ -267,6 +267,193 @@ class SourceRunnerTest(unittest.TestCase):
             "\n" + source_tests.TIMING_PROJECTION_END, 1)[0]
         return json.loads(body)
 
+    def test_custom_destination_node_report_keeps_one_command_and_full_failure(self) -> None:
+        import test_custom_destinations as custom
+
+        command = ["synthetic-node", "--test", str(ROOT / "scripts" / "tests" / "custom_destinations.test.cjs")]
+        reports = (
+            "TAP version 13\nok 1 - synthetic control\n  ---\n  duration_ms: 12.5\n  ...\n1..1\n",
+            "\u2714 synthetic control (12.5ms)\n\u2139 tests 1\n\u2139 pass 1\n\u2139 duration_ms 12.5\n",
+        )
+        for report in reports:
+            for code in (0, 1, -9):
+                with self.subTest(report=report.splitlines()[0], code=code):
+                    completed = subprocess.CompletedProcess(command, code, report, "PRIVATE_SYNTHETIC_NODE_STDERR")
+                    with mock.patch.object(custom, "node_executable", return_value=command[0]), \
+                            mock.patch.object(custom.subprocess, "run", return_value=completed) as run, \
+                            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                        case = custom.CustomDestinationContractTest(
+                            "test_canonical_source_schemas_enums_and_recursive_lint_controls")
+                        if code:
+                            with self.assertRaises(AssertionError) as caught:
+                                case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+                            self.assertIn(report + completed.stderr, str(caught.exception))
+                        else:
+                            case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+                    run.assert_called_once_with(
+                        command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+                    self.assertEqual(stdout.getvalue(), report if code == 0 else "")
+                    self.assertNotIn(completed.stderr, stdout.getvalue())
+        for error in (OSError("synthetic launch failure"), KeyboardInterrupt("synthetic cancellation")):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(custom, "node_executable", return_value=command[0]), \
+                    mock.patch.object(custom.subprocess, "run", side_effect=error) as run, \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                    self.assertRaises(type(error)) as caught:
+                case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+            self.assertIs(caught.exception, error)
+            run.assert_called_once()
+            self.assertEqual(stdout.getvalue(), "")
+
+    def test_custom_destination_node_report_bounds_utf8_and_refuses_output_fallback(self) -> None:
+        import test_custom_destinations as custom
+
+        case = custom.CustomDestinationContractTest(
+            "test_canonical_source_schemas_enums_and_recursive_lint_controls")
+        self.assertEqual(custom.NODE_REPORT_MAX_BYTES, 1024 * 1024)
+        for delta in (-1, 0, 1):
+            size = custom.NODE_REPORT_MAX_BYTES + delta
+            report = "\u00e9" * (size // 2) + "x" * (size % 2)
+            self.assertEqual(len(report.encode("utf-8")), size)
+            completed = subprocess.CompletedProcess([], 0, report, "PRIVATE_SYNTHETIC_NODE_STDERR")
+            with self.subTest(delta=delta), \
+                    mock.patch.object(custom, "node_executable", return_value="synthetic-node"), \
+                    mock.patch.object(custom.subprocess, "run", return_value=completed) as run, \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                if delta > 0:
+                    with self.assertRaisesRegex(AssertionError, "nothing truncated or emitted") as caught:
+                        case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+                    self.assertNotIn(report, str(caught.exception))
+                    self.assertNotIn(completed.stderr, str(caught.exception))
+                else:
+                    case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+            run.assert_called_once()
+            self.assertEqual(stdout.getvalue(), report if delta <= 0 else "")
+        completed.returncode = 1
+        with mock.patch.object(custom, "node_executable", return_value="synthetic-node"), \
+                mock.patch.object(custom.subprocess, "run", return_value=completed) as run, \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                self.assertRaises(AssertionError) as caught:
+            case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+        run.assert_called_once()
+        self.assertIn(completed.stdout + completed.stderr, str(caught.exception))
+        self.assertEqual(stdout.getvalue(), "")
+        with mock.patch.object(custom, "node_executable", return_value="synthetic-node"), \
+                mock.patch.object(custom.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, "", "PRIVATE_SYNTHETIC_NODE_STDERR")) as run, \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                self.assertRaisesRegex(AssertionError, "Node success report is empty"):
+            case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+        run.assert_called_once()
+        self.assertEqual(stdout.getvalue(), "")
+        for operation in ("write", "flush"):
+            error = OSError("synthetic report output denied")
+            destination = mock.Mock()
+            getattr(destination, operation).side_effect = error
+            with self.subTest(operation=operation), \
+                    mock.patch.object(custom, "node_executable", return_value="synthetic-node"), \
+                    mock.patch.object(custom.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, "ok 1 - synthetic control\n", "")) as run, \
+                    mock.patch("sys.stdout", destination), self.assertRaises(OSError) as caught:
+                case.test_canonical_source_schemas_enums_and_recursive_lint_controls()
+            self.assertIs(caught.exception, error)
+            run.assert_called_once()
+
+    def test_custom_destination_node_report_reaches_parent_in_both_schedules(self) -> None:
+        import test_custom_destinations as custom
+
+        report = "ok 1 - synthetic Node control\n  ---\n  duration_ms: 12.5\n  ...\n1..1\n"
+        private = "PRIVATE_SYNTHETIC_NODE_STDERR"
+        for overlap in (False, True):
+            for node_code in (0, 1):
+                with self.subTest(overlap=overlap, node_code=node_code):
+                    root = self.root / f"report-{overlap}-{node_code}"
+                    root.mkdir()
+                    ordinary = type("Fixture", (unittest.TestCase,), {
+                        "__module__": "test_generate", "test_control": lambda test: test.assertTrue(True),
+                    })("test_control")
+                    node = custom.CustomDestinationContractTest(
+                        "test_canonical_source_schemas_enums_and_recursive_lint_controls")
+                    assignments = {"serial": [ordinary.id()], "cli-1": [node.id()], "cli-2": []}
+                    ids = sorted((ordinary.id(), node.id()))
+                    discovery = source_tests.Discovery([ordinary, node], ids, assignments)
+
+                    def phase(plan, lanes, states, observation, serial_ready=None):
+                        for lane in lanes:
+                            environment = source_tests.worker_environment(states / lane, lane != "serial")
+                            isolation = {name: environment.get(name) for name in (
+                                "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+                                "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "GRADLE_USER_HOME",
+                            )}
+                            if lane != "serial":
+                                isolation.update({"user.home": environment["HOME"],
+                                                  "java.io.tmpdir": environment["TEMP"]})
+                            with (plan.parent / (lane + ".stdout.txt")).open("x", encoding="utf-8") as stdout, \
+                                    (plan.parent / (lane + ".stderr.txt")).open("x", encoding="utf-8") as stderr, \
+                                    mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr), \
+                                    mock.patch.object(source_tests, "verify_isolation", return_value=isolation):
+                                code = source_tests.worker(plan, lane, overlap_cli=overlap and lane != "serial")
+                            observation.children[lane] = {"pid": os.getpid(), "exit": code}
+                            observation.cleanup_confirmed = True
+                            if lane == "serial" and serial_ready is not None:
+                                serial_ready(source_tests.ChildExit(os.getpid(), code))
+                        return {lane: source_tests.ChildExit(os.getpid(), observation.children[lane]["exit"])
+                                for lane in lanes}
+
+                    with mock.patch.object(source_tests, "ROOT", root), \
+                            mock.patch.object(source_tests, "discover", return_value=discovery), \
+                            mock.patch.object(source_tests, "input_snapshot", return_value={}), \
+                            mock.patch.object(source_tests, "shared_snapshot", return_value={}), \
+                            mock.patch.object(source_tests, "source_tool_snapshot", return_value={}), \
+                            mock.patch.object(source_tests, "overlap_profile", return_value={
+                                "enabled": overlap, "reason": "synthetic report transport", "tools": {}}), \
+                            mock.patch.object(source_tests, "run_phase", side_effect=phase), \
+                            mock.patch.object(source_tests, "receive_serial_release"), \
+                            mock.patch.dict(sys.modules, {"test_generate": types.ModuleType("test_generate")}), \
+                            mock.patch.object(custom, "node_executable", return_value="synthetic-node"), \
+                            mock.patch.object(custom.subprocess, "run", return_value=subprocess.CompletedProcess(
+                                [], node_code, report, private)) as run, \
+                            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                        code = source_tests.complete()
+                    run.assert_called_once_with(
+                        ["synthetic-node", "--test", str(ROOT / "scripts" / "tests" / "custom_destinations.test.cjs")],
+                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
+                    self.assertEqual(code, node_code)
+                    receipts = list((root / "build" / "source-tests").glob("run-*/complete.receipt.json"))
+                    self.assertEqual(len(receipts), 1)
+                    complete = json.loads(receipts[0].read_text(encoding="utf-8"))
+                    self.assertEqual(complete["complete_graph"], node_code == 0)
+                    self.assertEqual(Counter(complete["validated_executed_ids"]), Counter(ids))
+                    lane_stdout = (receipts[0].parent / "cli-1.stdout.txt").read_text(encoding="utf-8")
+                    lane_stderr = (receipts[0].parent / "cli-1.stderr.txt").read_text(encoding="utf-8")
+                    self.assertIn("test_control (test_generate.Fixture.test_control) ... ok", stderr.getvalue())
+                    self.assertEqual(lane_stdout, report if node_code == 0 else "")
+                    self.assertEqual(stdout.getvalue().count(report), 1 if node_code == 0 else 0)
+                    self.assertNotIn(private, stdout.getvalue())
+                    if node_code:
+                        self.assertIn(report + private, lane_stderr)
+                        self.assertIn(report + private, stderr.getvalue())
+                        self.assertIn("Complete source-test graph FAILED", stderr.getvalue())
+                    else:
+                        self.assertNotIn(private, lane_stderr + stderr.getvalue())
+                        self.assertIn("Complete source-test graph PASS: 2 exact methods, 0 skips", stdout.getvalue())
+                    if overlap and node_code:
+                        self.assertIn("cli-1: independent checkpoint contains failed actual TestResult evidence",
+                                      complete["problems"])
+                        omission = "source-test final timing omitted: validated independent prefixes are incomplete"
+                        self.assertEqual(complete["orchestration_errors"], [{
+                            "stage": "final timing projection", "type": "PipelineError", "error": omission,
+                        }])
+                        self.assertIn(omission, stderr.getvalue())
+                        self.assertNotIn(source_tests.TIMING_PROJECTION_BEGIN, stdout.getvalue())
+                        self.assertNotIn(source_tests.TIMING_PROJECTION_END, stdout.getvalue())
+                    else:
+                        projection = self.projected_timing(stdout.getvalue())
+                        self.assertEqual(Counter(row["test"] for lane in projection["final_receipts"]
+                                                 for row in lane["methods"]), Counter(ids))
+                        self.assertFalse(projection["hosted_600_qualification"])
+
     def test_final_timing_projection_exact_validated_coverage_bindings_and_private_field_exclusion(self) -> None:
         subject = self.timing_subject()
         plan, plan_sha, finals, prefixes, phases, total = subject
