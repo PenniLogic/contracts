@@ -32,7 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_breaking_changes as cbc  # noqa: E402
 from contract_gate import MODES, GateDecision  # noqa: E402
 from contract_report import MAX_IDENTIFIER, MAX_TEXT  # noqa: E402 - the result becomes the report's compatibility section
-from contract_schema import json_equal, printable_text  # noqa: E402
+from contract_schema import (  # noqa: E402
+    InputUnavailable, StrictJsonError, json_equal, parse_strict_json, printable_text, read_bounded,
+)
 from pl_contracts import SEMVER, PipelineError  # noqa: E402
 
 CHANGE_CLASSES = ("none", "additive", "breaking")
@@ -144,18 +146,26 @@ def classify(inputs: DetectorInputs) -> tuple[list[cbc.Finding], list[str]]:
 
 
 def read_acknowledgement(path: Path) -> dict:
-    """check_breaking_changes.load_acknowledgement for a named file; a named file must exist."""
+    """check_breaking_changes.load_acknowledgement for a named file, which must exist and be strict JSON.
+
+    load_acknowledgement parses with json.loads, which keeps the last of duplicate keys while a reviewer may
+    read the first, and which raises RecursionError for very deep nesting. The bytes are therefore read
+    with the strict reader first (bounded, no duplicate keys, byte order mark or non-finite numbers), and
+    the protocol's own reading must equal the strict one.
+    """
     try:
-        if not path.is_file():
-            raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement {ascii(path.name)} is not a file")
-        if path.stat().st_size > MAX_ACKNOWLEDGEMENT_BYTES:
-            raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement exceeds {MAX_ACKNOWLEDGEMENT_BYTES} bytes")
+        strict = parse_strict_json(read_bounded(path, MAX_ACKNOWLEDGEMENT_BYTES))
+    except (InputUnavailable, StrictJsonError) as error:
+        raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement {ascii(path.name)} {error}") from None
+    try:
         acknowledgement = cbc.load_acknowledgement(path)
     except PipelineError as error:
         raise CompatRefused("compat.acknowledgement_invalid", printable_text(str(error), MAX_TEXT)) from None
-    except (OSError, UnicodeDecodeError) as error:
-        raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement cannot be read ({type(error).__name__})") from None
-    assert acknowledgement is not None
+    except (OSError, ValueError, RecursionError) as error:
+        raise CompatRefused("compat.acknowledgement_invalid",
+                            f"the acknowledgement cannot be read ({type(error).__name__})") from None
+    if acknowledgement is None or not json_equal(acknowledgement, strict):
+        raise CompatRefused("compat.acknowledgement_invalid", "the acknowledgement changed between its two readings")
     return acknowledgement
 
 

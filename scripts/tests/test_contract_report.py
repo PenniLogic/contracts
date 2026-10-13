@@ -224,6 +224,10 @@ class ReportRuleTest(ReportTestCase):
             "boolean spelled as text": (lambda report: report.update(acceptance_eligible="true"), "/acceptance_eligible fails type"),
             "control character in a problem": (lambda report: report["compatibility"]["problems"].append("bell\x07"),
                                                "/compatibility/problems/0 fails pattern"),
+            "right-to-left override in a problem": (lambda report: report["compatibility"]["problems"].append("left\u202eright"),
+                                                    "/compatibility/problems/0 fails pattern"),
+            "more missing languages than languages (bounded before the pairwise uniqueness check)": (
+                lambda report: report.update(missing_languages=list(range(5000))), "/missing_languages fails maxItems"),
             "unknown row mode": (lambda report: report["provider"].update(mode="recorded-fixture"), "/provider/mode fails enum"),
             "impossible generation date": (lambda report: report.update(generated_at="2026-02-30T00:00:00.000Z"),
                                            "/generated_at fails instant"),
@@ -427,6 +431,9 @@ class SchemaSubsetTest(unittest.TestCase):
                     "definitions": {"text": {"type": "string", "pattern": "^a(?![\\s\\S])"}}}
 
         check_schema(valid())
+        with_bound = valid()
+        with_bound["definitions"]["text"].update(uniqueItems=True, maxItems=3)
+        check_schema(with_bound)  # boundary control: uniqueItems is supported together with maxItems
         mutations = {
             "format keyword": lambda schema: schema["definitions"]["text"].update(format="date-time"),
             "additionalProperties true": lambda schema: schema.update(additionalProperties=True),
@@ -436,6 +443,8 @@ class SchemaSubsetTest(unittest.TestCase):
             "another draft": lambda schema: schema.update({"$schema": "https://json-schema.org/draft/2020-12/schema"}),
             "invalid pattern": lambda schema: schema["definitions"]["text"].update(pattern="("),
             "definitions below the root": lambda schema: schema["definitions"]["text"].update(definitions={}),
+            "uniqueItems without maxItems (unbounded pairwise comparison)":
+                lambda schema: schema["definitions"]["text"].update(uniqueItems=True),
         }
         for label, mutate in mutations.items():
             with self.subTest(label):
@@ -466,6 +475,19 @@ class SchemaSubsetTest(unittest.TestCase):
                                  ([1, 1.0], {"type": "array", "uniqueItems": True}), ({"a": 1}, {"const": {"a": True}})):
             with self.subTest(instance=instance, schema=schema):
                 self.assertIsNotNone(first_violation(instance, schema))
+
+    def test_json_equality_of_deeply_nested_values(self) -> None:
+        """Nesting far beyond the recursion limit (the strict reader accepts it) is compared without recursion."""
+        def nested(leaf: object, depth: int = 20_000) -> list:
+            value = [leaf]
+            for _ in range(depth):
+                value = [value]
+            return value
+
+        self.assertTrue(contract_schema.json_equal(nested(1), nested(1.0)))
+        for label, other in (("another leaf", nested(2)), ("a boolean leaf", nested(True)), ("one level less", nested(1, 19_999))):
+            with self.subTest(label):
+                self.assertFalse(contract_schema.json_equal(nested(1), other))
 
 
 class RuleCoverageTest(unittest.TestCase):

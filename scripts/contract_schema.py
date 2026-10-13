@@ -1,12 +1,14 @@
 """Strict JSON reading and a closed-world draft-07 subset validator for the verification files (T-QA-02).
 
 The verification schemas under scripts/verification/ use only this subset: type, properties, required,
-additionalProperties (false only), items (one schema), minItems, maxItems, uniqueItems, enum, const,
-pattern, minLength and local `#/definitions/<name>` references, plus the annotations $schema, $id,
-title, description and definitions. A schema that uses any other keyword is refused (SchemaUnsupported)
-instead of being half-applied. Patterns are written to mean the same in ECMA-262 and Python `re`:
-anchored with `^` and `(?![\\s\\S])`, ASCII character classes only. Length and count bounds live in the
-code that owns each document. A violation names the JSON pointer and the keyword, never the value.
+additionalProperties (false only), items (one schema), minItems, maxItems, uniqueItems (only together with
+maxItems, which bounds its pairwise comparison), enum, const, pattern, minLength and local
+`#/definitions/<name>` references, plus the annotations $schema, $id, title, description and definitions.
+A schema that uses any other keyword is refused (SchemaUnsupported) instead of being half-applied.
+Patterns are written to mean the same in ECMA-262 and Python `re`: anchored with `^` and `(?![\\s\\S])`,
+ASCII character classes only. Length and count bounds live in the code that owns each document. A
+violation names the JSON pointer and the keyword, never the value. JSON equality is computed without
+recursion, so a deeply nested value cannot exhaust the interpreter's recursion limit.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ KEYWORDS = frozenset({
 ROOT_KEYWORDS = frozenset({"$schema", "$id", "definitions"})
 TYPES = frozenset({"null", "boolean", "integer", "number", "string", "array", "object"})
 DEFINITION_NAME = re.compile(r"[A-Za-z0-9_-]+")
-CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+NOT_PRINTABLE_ASCII = re.compile(r"[^\x20-\x7e]")
 
 
 class StrictJsonError(ValueError):
@@ -108,9 +110,19 @@ def dumps(value: object) -> str:
     return json.dumps(value, indent=2, ensure_ascii=True) + "\n"
 
 
+def _escape_character(match: re.Match[str]) -> str:
+    code = ord(match.group())
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
+
+
 def printable_text(value: str, limit: int) -> str:
-    """Escape control characters and cap the length, so detector text fits a report and a terminal."""
-    text = CONTROL.sub(lambda match: f"\\u{ord(match.group()):04x}", value) or "-"
+    """Escape every character outside printable ASCII and cap the length.
+
+    Detector text comes from the compared documents. Escaping C0 and C1 controls, bidirectional and invisible
+    format characters and everything else outside U+0020-U+007E keeps such text from restyling or reordering
+    a terminal, a log viewer or a report, and keeps the output encodable on any console.
+    """
+    text = NOT_PRINTABLE_ASCII.sub(_escape_character, value) or "-"
     return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
@@ -130,17 +142,30 @@ def _has_type(value: object, name: str) -> bool:
 
 
 def json_equal(left: object, right: object) -> bool:
-    """JSON equality: booleans are not numbers, 1 equals 1.0, arrays are ordered, objects are not."""
-    kinds = {json_type(left), json_type(right)}
-    if kinds <= {"integer", "number"}:
-        return left == right
-    if len(kinds) != 1:
-        return False
-    if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and all(json_equal(a, b) for a, b in zip(left, right))
-    if isinstance(left, dict) and isinstance(right, dict):
-        return left.keys() == right.keys() and all(json_equal(left[key], right[key]) for key in left)
-    return left == right
+    """JSON equality: booleans are not numbers, 1 equals 1.0, arrays are ordered, objects are not.
+
+    Iterative: the strict reader accepts nesting far deeper than the interpreter's recursion limit.
+    """
+    pending = [(left, right)]
+    while pending:
+        one, other = pending.pop()
+        kinds = {json_type(one), json_type(other)}
+        if kinds <= {"integer", "number"}:
+            if one != other:
+                return False
+        elif len(kinds) != 1:
+            return False
+        elif isinstance(one, list) and isinstance(other, list):
+            if len(one) != len(other):
+                return False
+            pending.extend(zip(one, other))
+        elif isinstance(one, dict) and isinstance(other, dict):
+            if one.keys() != other.keys():
+                return False
+            pending.extend((one[key], other[key]) for key in one)
+        elif one != other:
+            return False
+    return True
 
 
 # --- schemas ----------------------------------------------------------------------------------------------
@@ -200,6 +225,8 @@ def _check_node(node: object, definitions: dict, pointer: str, root: bool = Fals
             raise SchemaUnsupported(f"{where} {keyword} must be a non-negative integer")
     if "uniqueItems" in node and not isinstance(node["uniqueItems"], bool):
         raise SchemaUnsupported(f"{where} uniqueItems must be a boolean")
+    if node.get("uniqueItems") is True and "maxItems" not in node:
+        raise SchemaUnsupported(f"{where} uniqueItems needs maxItems, which bounds its pairwise comparison")
     if "enum" in node and (not isinstance(node["enum"], list) or not node["enum"]):
         raise SchemaUnsupported(f"{where} enum must be a non-empty list")
     if "pattern" in node:

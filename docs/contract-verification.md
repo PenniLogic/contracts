@@ -182,6 +182,13 @@ output of the pinned `oasdiff breaking` and `oasdiff diff`. Producing them from 
 needs Node 24.14.0 and the managed toolchain. That parse path is held for the second pull request, so
 nothing in this one parses YAML or runs oasdiff.
 
+The orchestration cannot tell whether the base document is the published baseline's document or
+whether the detector output belongs to the two documents; it refuses only identical documents that come
+with reported changes. Empty detector output for two different documents therefore classifies as
+`additive`. Until the held parse path produces every input from the published artifact itself, a
+`compat` result is only as good as the inputs its caller passes, and it is not compatibility evidence
+on its own.
+
 | Rule | Refused when (exit 2) |
 | --- | --- |
 | `compat.baseline_invalid` | The baseline does not fully match `check_breaking_changes.TAG`. |
@@ -189,12 +196,19 @@ nothing in this one parses YAML or runs oasdiff.
 | `compat.version_invalid` | A document's `info.version` is not `MAJOR.MINOR.PATCH`. |
 | `compat.baseline_version_mismatch` | The base document does not declare the baseline's version. |
 | `compat.detector_output_invalid` | The `oasdiff breaking` output is not a list of changes with an `id` of at most 128 characters (the report's identifier bound), an integer `level` 1-3 and string locations; the `oasdiff diff` output is not an object; identical documents come with reported changes; or the imported classifier cannot process the output (for example a string bound compared with a number, or nesting beyond the recursion limit). |
-| `compat.acknowledgement_invalid` | A named acknowledgement file is absent or too large, or `load_acknowledgement` refuses it. |
+| `compat.acknowledgement_invalid` | A named acknowledgement file is absent, unreadable, larger than 1 MiB or not strict JSON (a duplicate key, a byte order mark, a non-finite number or nesting beyond the parser), `load_acknowledgement` refuses it, or its reading differs from the strict one. |
 
 The input checks exist because the imported functions alone do not refuse malformed detector output:
 `operation_findings` treats an output that is not a list, or a change without `level`, as no finding,
-and `component_findings` raises on some malformed diffs. `check_breaking_changes.py` is not changed
-here.
+and `component_findings` raises on some malformed diffs. Likewise `load_acknowledgement` parses with
+`json.loads`, which keeps the last of duplicate keys (a reviewer may read the first) and raises
+`RecursionError` on very deep nesting, so the acknowledgement is first read with the strict reader and
+both readings must agree. `check_breaking_changes.py` is not changed here.
+
+Detector text (finding locations, problems and warnings) comes from the compared documents. It is
+printed and reported as printable ASCII: every other character, including C1 controls and
+bidirectional or invisible format characters, is escaped as `\uXXXX` (`\UXXXXXXXX` outside the Basic
+Multilingual Plane), so it cannot restyle or reorder a terminal, a log viewer or a report.
 
 `python scripts/check_breaking_changes.py` without `--base` is vacuous while no `v*` tag exists: it
 prints that there is no baseline and exits 0 without comparing anything (`--require-baseline` makes it
@@ -215,8 +229,9 @@ One committed file, `scripts/verification/compat-gate.json`, holds the gate. It 
 
 `block` blocks unacknowledged breaking changes. `warn` is the rollback of contracts#3, "downgrading the
 gate to warning with a recorded expiry", and needs `warn_until`, the fixed 24-character UTC instant
-`YYYY-MM-DDTHH:MM:SS.mmmZ`. The file changes only through a reviewed commit, so its history records
-every downgrade. Every reader decides with `contract_gate.decide` and an injected clock, and nothing
+`YYYY-MM-DDTHH:MM:SS.mmmZ`. The file is meant to change only through a reviewed pull request, so that
+its history records every downgrade; that relies on branch protection, which is held (CODEOWNERS names
+the single owner account for every path). Every reader decides with `contract_gate.decide` and an injected clock, and nothing
 defaults to warn:
 
 | Decision | When | Effective gate |
@@ -232,8 +247,9 @@ defaults to warn:
 | `gate.warn_until_unexpected` | `mode` is `block` and `warn_until` is not null. | block |
 
 `compat` applies the resolved gate whatever the state's condition. `gate` reports a refused state with
-exit 1 and a missing or unreadable one with exit 2. A report records the decision and the state's
-SHA-256.
+exit 1 and a missing or unreadable one with exit 2. A valid state exits 0 in either mode, so a pipeline
+reads the effective gate from `gate.mode` in the `--json` output, never from the exit code. A report
+records the decision and the state's SHA-256.
 
 This change does not choose a warning window. Whether the rollout starts with additive detection
 under a warning, and how long any warning may last, are owner decisions. How consumer pipelines in
@@ -264,6 +280,13 @@ exactly when the mode is `published`, the provider row is `live` and every consu
 `synthetic-fixture` report is never acceptance-eligible.
 The first published version has no baseline, so its compatibility result is `not_run` and its verdict
 is `fail` until the owner decides how a first baseline is reported.
+
+The validator checks that a report is closed and internally consistent and recomputes its verdict. It
+cannot show that the rows reflect real runs, and it has no clock, so `generated_at` is taken as
+declared. A report is evidence only when the runner itself produced it in CI, which is held. Report text
+is printable ASCII only. `missing_languages` holds at most the three languages, so its uniqueness check
+stays bounded; row, finding and problem counts and text lengths are checked before the consistency
+rules.
 
 | Rule | The report is invalid when (exit 1) |
 | --- | --- |
@@ -312,9 +335,13 @@ python -B -m unittest discover -s scripts/tests -p "test_verify_contract.py" -v
 - `test_contract_compat.py`: the gate (expiry boundary at `warn_until` minus 1 ms and at `warn_until`,
   a warning without expiry, every unusable state blocking) and compatibility orchestration (classes,
   the planted removal of a response field, acknowledgement and version-bump boundary pairs, stale and
-  blanket acknowledgements, refused detector output, and the drift guard against `compare`).
-- `test_contract_report.py`: the report schema and rules, the strict JSON reader and the schema subset.
-- `test_verify_contract.py`: subcommands and exit codes in process through `main(argv)`.
+  blanket acknowledgements, refused detector output and acknowledgement files (including a duplicate key
+  and nesting beyond the parser), deeply nested documents, hostile detector text, and the drift guard
+  against `compare`).
+- `test_contract_report.py`: the report schema and rules, the strict JSON reader and the schema subset
+  (including JSON equality of deeply nested values without recursion).
+- `test_verify_contract.py`: subcommands and exit codes in process through `main(argv)`, and printable
+  ASCII text output for hostile detector text.
   `test_runner_writes_only_inside_temp` records every file-system write and every started process with
   an audit hook, and requires the writes to be inside the temporary directory and the processes to be
   read-only git commands.

@@ -7,8 +7,9 @@ closed by scripts/verification/compat-gate.schema.v1.json:
     {"schema": "pennilogic-compat-gate@1", "mode": "block", "warn_until": null}
 
 `mode` is `block` or `warn`. A warning must carry `warn_until`, the fixed 24-character UTC instant
-YYYY-MM-DDTHH:MM:SS.mmmZ at and after which the gate blocks again; `block` carries null. The file changes
-only through a reviewed commit, so its history is the record of every downgrade.
+YYYY-MM-DDTHH:MM:SS.mmmZ at and after which the gate blocks again; `block` carries null. The file is meant
+to change only through a reviewed pull request, so that its history records every downgrade (that relies
+on branch protection, which this module cannot check).
 
 Every reader decides with the same function and an injected clock, and nothing defaults to warn:
 

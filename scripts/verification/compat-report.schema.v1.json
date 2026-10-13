@@ -59,6 +59,7 @@
     },
     "missing_languages": {
       "type": "array",
+      "maxItems": 3,
       "uniqueItems": true,
       "items": {
         "$ref": "#/definitions/language"
@@ -100,9 +101,10 @@
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\\s\\S])"
     },
     "text": {
+      "description": "Printable ASCII only: detector text is escaped (scripts/contract_schema.py printable_text) so no value can restyle or reorder a terminal, log viewer or report renderer.",
       "type": "string",
       "minLength": 1,
-      "pattern": "^[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])"
+      "pattern": "^[ -~]+(?![\\s\\S])"
     },
     "contract": {
       "description": "The contract version this report verified; a published report names its tag, tag commit and release manifest.",

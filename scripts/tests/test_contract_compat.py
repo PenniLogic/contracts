@@ -365,9 +365,14 @@ class CompatibilityTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, root, True)
         findings, _ = classify(removal_inputs())
         path = root / "breaking-change-acknowledgement.json"
-        path.write_text(json.dumps(acknowledgement_for(findings)), encoding="utf-8", newline="\n")
+        text = json.dumps(acknowledgement_for(findings))
+        path.write_text(text, encoding="utf-8", newline="\n")
         acknowledgement = read_acknowledgement(path)
         self.assertEqual(check_compatibility(removal_inputs(), BLOCK, acknowledgement, path.name).result, "pass")
+        stale_first = text.replace("{", '{"baseline": "v1.2.2", ', 1)
+        # check_breaking_changes alone (json.loads) keeps the last of the duplicate keys:
+        self.assertEqual(cbc.load_acknowledgement(self.write(root, stale_first))["baseline"], BASELINE)
+        too_deep = json.dumps(dict(acknowledgement_for(findings), acknowledged=None)).replace("null", "[" * 100_000 + "]" * 100_000)
         mutations = {
             "absent": lambda: root / "absent.json",
             "a directory": lambda: root,
@@ -375,6 +380,8 @@ class CompatibilityTest(unittest.TestCase):
             "no acknowledged list": lambda: self.write(root, json.dumps({"baseline": BASELINE})),
             "an entry without a reason": lambda: self.write(root, json.dumps(
                 {"baseline": BASELINE, "acknowledged": [{"id": "component-schema-property-removed", "location": REMOVED}]})),
+            "a duplicate key (a reviewer may read the first value)": lambda: self.write(root, stale_first),
+            "nesting beyond the parser's limit": lambda: self.write(root, too_deep),
         }
         for label, make in mutations.items():
             with self.subTest(label):
@@ -382,6 +389,12 @@ class CompatibilityTest(unittest.TestCase):
                     read_acknowledgement(make())
                 self.assertEqual(caught.exception.rule, "compat.acknowledgement_invalid")
         with self.subTest("larger than its bound"), mock.patch.object(contract_compat, "MAX_ACKNOWLEDGEMENT_BYTES", 8):
+            with self.assertRaises(CompatRefused) as caught:
+                read_acknowledgement(path)
+            self.assertEqual(caught.exception.rule, "compat.acknowledgement_invalid")
+        protocol_reading = cbc.load_acknowledgement
+        with self.subTest("the protocol's reading differs from the strict one (the file changed in between)"), \
+                mock.patch.object(cbc, "load_acknowledgement", lambda name: dict(protocol_reading(name), baseline="v1.2.2")):
             with self.assertRaises(CompatRefused) as caught:
                 read_acknowledgement(path)
             self.assertEqual(caught.exception.rule, "compat.acknowledgement_invalid")
@@ -394,10 +407,11 @@ class CompatibilityTest(unittest.TestCase):
 
     def test_result_section_fits_the_report(self) -> None:
         """A compatibility result becomes a valid report section, including hostile detector text."""
-        escape = dict(removal_inputs().oasdiff_breaking[0], operation="GET\x1b[31m")
+        # C0 escape, C1 control sequence introducer, right-to-left override, zero-width space, a non-BMP character:
+        escape = dict(removal_inputs().oasdiff_breaking[0], operation="GET\x1b[31m\u009b31m\u202e\u200b\U0001f600")
         for label, data, gate in (("none", identical_inputs(), BLOCK), ("additive", additive_inputs(), BLOCK),
                                   ("breaking, blocked", removal_inputs(), BLOCK), ("breaking, warned", removal_inputs(), WARN),
-                                  ("terminal escape in a detector location",
+                                  ("terminal and bidirectional controls in a detector location",
                                    dataclasses.replace(removal_inputs(), oasdiff_breaking=[escape]), BLOCK)):
             with self.subTest(label):
                 result = check_compatibility(data, gate)
@@ -405,7 +419,24 @@ class CompatibilityTest(unittest.TestCase):
                 assessment = contract_report.assess_report(report)
                 self.assertEqual(assessment.problems, ())
                 self.assertEqual(assessment.verdict, result.result)  # every synthetic row passes
-        self.assertIn("GET\\u001b[31m /probe", [finding["location"] for finding in report["compatibility"]["findings"]])
+        self.assertIn("GET\\u001b[31m\\u009b31m\\u202e\\u200b\\U0001f600 /probe",
+                      [finding["location"] for finding in report["compatibility"]["findings"]])
+
+    def test_deeply_nested_documents_compared_without_recursion(self) -> None:
+        """The strict reader accepts nesting deeper than the recursion limit; comparing such documents must not crash."""
+        def nested(leaf: object) -> list:
+            value = [leaf]
+            for _ in range(20_000):
+                value = [value]
+            return value
+
+        self.assertEqual(check_compatibility(identical_inputs(), BLOCK).change_class, "none")
+        for label, revision_leaf, change_class in (("identical deep extension", 1, "none"), ("different deep leaf", 2, "additive")):
+            with self.subTest(label):
+                base, revision = synthetic_document("1.2.3"), synthetic_document("1.2.3")
+                base["x-synthetic-depth"], revision["x-synthetic-depth"] = nested(1), nested(revision_leaf)
+                result = check_compatibility(inputs(revision, base=base), BLOCK)
+                self.assertEqual((result.change_class, result.result), (change_class, "pass"))
 
     def test_change_id_longer_than_the_report_bound_refused(self) -> None:
         """Boundary pair: an oasdiff id of the report's identifier bound is classified and reported; one more is refused."""

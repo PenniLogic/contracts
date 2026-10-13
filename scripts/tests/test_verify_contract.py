@@ -127,6 +127,7 @@ class CommandTestCase(unittest.TestCase):
             "acknowledgement.json": {"baseline": "v1.2.3", "target_version": "2.0.0", "acknowledged": acknowledged},
             "acknowledgement-invalid.json": {"baseline": "v1.2.3"},
             "breaking-invalid.json": [dict(change, level="3")],
+            "removal-breaking-hostile.json": [dict(change, operation="GET\u009b31m\u202e")],
             "gate-warn.json": {"schema": "pennilogic-compat-gate@1", "mode": "warn", "warn_until": UNTIL},
             "gate-warn-no-expiry.json": {"schema": "pennilogic-compat-gate@1", "mode": "warn", "warn_until": None},
             "report-synthetic.json": contract_report.build_report(**synthetic_report_parts()),
@@ -135,6 +136,8 @@ class CommandTestCase(unittest.TestCase):
         }.items():
             (cls.inputs / name).write_text(contract_schema.dumps(value), encoding="ascii", newline="\n")
         (cls.inputs / "not-json.json").write_text("{\n", encoding="ascii", newline="\n")
+        (cls.inputs / "acknowledgement-deep.json").write_text(
+            '{"baseline": "v1.2.3", "acknowledged": ' + "[" * 100_000 + "]" * 100_000 + "}\n", encoding="ascii", newline="\n")
         cls.contracts = SyntheticContracts(cls.root / "contracts")
         cls.release_dir = cls.contracts.publish()
 
@@ -289,6 +292,9 @@ class CompatCommandTest(CommandTestCase):
             "a malformed acknowledgement": (self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
                                                              "--acknowledgement", self.path("acknowledgement-invalid.json")),
                                             "compat.acknowledgement_invalid"),
+            "an acknowledgement nested beyond the parser's limit": (
+                self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                 "--acknowledgement", self.path("acknowledgement-deep.json")), "compat.acknowledgement_invalid"),
         }
         for label, (argv, rule) in cases.items():
             with self.subTest(label):
@@ -297,6 +303,19 @@ class CompatCommandTest(CommandTestCase):
                 code, out, err = self.run_command(*argv)
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn(f"[{rule}]", err)
+
+    def test_compat_text_output_is_printable_ascii(self) -> None:
+        """Detector text comes from the compared documents; it cannot restyle or reorder the terminal or a log viewer."""
+        def printable(text: str) -> bool:
+            return all(" " <= character <= "~" for line in text.splitlines() for character in line)
+
+        code, out, _ = self.run_command(*self.compat_argv())
+        self.assertEqual(code, 1)
+        self.assertTrue(printable(out), out)
+        code, out, err = self.run_command(*self.compat_argv("removal.json", "removal-breaking-hostile.json"))
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn("  finding [response-property-removed] GET\\u009b31m\\u202e /probe (oasdiff)\n", out)
+        self.assertTrue(printable(out), ascii(out))
 
 
 class ReportCommandTest(CommandTestCase):
