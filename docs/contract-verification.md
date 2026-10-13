@@ -460,9 +460,11 @@ The modules are also part of the repository's complete test run. On main that ru
   (including JSON equality of deeply nested values without recursion).
 - `test_verify_contract.py`: subcommands and exit codes in process through `main(argv)`, and printable
   ASCII text output for hostile detector text.
-  `test_runner_writes_only_inside_temp` records every file-system write and every started process with
-  an audit hook, and requires the writes to be inside the temporary directory and the processes to be
-  read-only git commands.
+  `test_runner_writes_only_inside_temp` records every file-system write and counts every process start
+  with an audit hook, reads each started command from a wrapper of `subprocess.run`, and requires the
+  writes to be inside the temporary directory and every process to be a read-only command of the git
+  that `trusted_git()` returns (`git.exe` on Windows, where the audit event carries one command-line
+  string instead of the argument list).
 
 No archive is committed and no network is used. The tests write only inside their own temporary
 directories (`verification_support.temporary_root`): under `TMPDIR` outside the checkout or, under the

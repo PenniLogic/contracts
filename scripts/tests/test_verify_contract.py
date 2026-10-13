@@ -5,8 +5,9 @@ error or a missing, unreadable or malformed input. Every command runs in process
 verify_contract.main(argv) with an injected clock; there is no clock option on the command line. Inputs
 are synthetic and live in a temporary directory; the artifact command verifies a synthetic release built by
 the real release.build_release_set and published to a temporary bare origin (verification_support).
-test_runner_writes_only_inside_temp records every file-system write and every process the commands start
-through an audit hook. No network; nothing is written inside this repository.
+test_runner_writes_only_inside_temp records every file-system write and counts every process start through an
+audit hook, and reads every started command from a wrapper of subprocess.run. No network; nothing is written
+inside this repository.
 """
 
 from __future__ import annotations
@@ -42,7 +43,13 @@ READ_ONLY_GIT = ("rev-parse", "cat-file", "ls-remote", "ls-tree", "merge-base", 
 
 
 class AuditRecorder:
-    """Writes and processes seen by one process-wide audit hook while a recorder is active."""
+    """Writes and process starts seen by one process-wide audit hook while a recorder is active.
+
+    A process start is counted from the low-level events, one per started process on either platform. Their
+    argument lists are not read here: on Windows subprocess joins the list into one command-line string before
+    it raises its audit events (review round 3, CVR3-1), so the test reads the argument lists from a wrapper of
+    subprocess.run and requires one wrapped call per counted start.
+    """
 
     active: "AuditRecorder | None" = None
     installed = False
@@ -54,10 +61,15 @@ class AuditRecorder:
         "os.symlink": ((1,), (2,)), "os.link": ((1,), (2, 3)), "shutil.rmtree": ((0,), (1,)),
         "tempfile.mkdtemp": ((0,), ()), "tempfile.mkstemp": ((0,), ()),
     }
+    # The events that start a process: subprocess raises the first on POSIX and the second on Windows.
+    PROCESS_EVENTS = frozenset({
+        "_posixsubprocess.fork_exec", "_winapi.CreateProcess", "os.posix_spawn", "os.spawn", "os.exec", "os.fork",
+        "os.forkpty", "os.system", "os.startfile",
+    })
 
     def __init__(self) -> None:
         self.writes: list[tuple[str, str]] = []
-        self.processes: list[list[str]] = []
+        self.process_starts: list[str] = []
         self.errors: list[str] = []
 
     @classmethod
@@ -76,8 +88,8 @@ class AuditRecorder:
                     return  # relative to a directory descriptor: a step inside a recorded shutil.rmtree
                 for index in paths:
                     recorder.record(event, args[index])
-            elif event == "subprocess.Popen":
-                recorder.processes.append([os.fsdecode(part) for part in args[1]])
+            elif event in cls.PROCESS_EVENTS:
+                recorder.process_starts.append(event)
         except Exception as error:  # never let the hook break the code under test; the test asserts no errors
             recorder.errors.append(f"{event}: {error!r}")
 
@@ -435,6 +447,10 @@ class ReportCommandTest(CommandTestCase):
 
 class WriteBoundaryTest(CommandTestCase):
     def test_runner_writes_only_inside_temp(self) -> None:
+        """Every write lands in the temporary directory, and every started process is a read-only command of the git the
+        loader trusts. The argument lists come from a wrapper of subprocess.run, compared with trusted_git() rather than a
+        literal name, so the test holds where the executable is git.exe and the audit event carries one string (review
+        round 3, CVR3-1); the audit hook counts the starts, so no process can bypass the wrapper unseen."""
         scratch, cwd = temporary_root("pl-verify-scratch-"), temporary_root("pl-verify-cwd-")
         self.addCleanup(shutil.rmtree, scratch, True)
         self.addCleanup(shutil.rmtree, cwd, True)
@@ -447,7 +463,17 @@ class WriteBoundaryTest(CommandTestCase):
                               self.path("acknowledgement.json")), 0),
             (["report", "--report", self.path("report-synthetic.json")], 0),
         )
-        with mock.patch.object(tempfile, "tempdir", str(scratch)), contextlib.chdir(cwd), AuditRecorder() as recorder:
+        git = contract_artifact.trusted_git(self.release_dir)
+        self.assertIsNotNone(git)
+        runs: list[list[str]] = []
+        run = contract_artifact.subprocess.run
+
+        def recording_run(argv, *args, **kwargs):
+            runs.append([os.fsdecode(part) for part in argv])
+            return run(argv, *args, **kwargs)
+
+        with mock.patch.object(tempfile, "tempdir", str(scratch)), contextlib.chdir(cwd), \
+                mock.patch.object(contract_artifact.subprocess, "run", recording_run), AuditRecorder() as recorder:
             codes = [self.run_command(*argv)[0] for argv, _ in commands]
         self.assertEqual(codes, [expected for _, expected in commands])
         self.assertEqual(recorder.errors, [])
@@ -457,9 +483,10 @@ class WriteBoundaryTest(CommandTestCase):
         self.assertEqual(list(scratch.iterdir()), [], "the loader removes its unpack directory")
         self.assertEqual(list(cwd.iterdir()), [])
         self.assertEqual([support.snapshot(path) for path in watched], before)
-        self.assertTrue(recorder.processes)
-        for argv in recorder.processes:
-            self.assertEqual((Path(argv[0]).name, argv[1:3]), ("git", ["-C", str(self.contracts.repo)]), argv)
+        self.assertTrue(runs)
+        self.assertEqual(len(recorder.process_starts), len(runs), recorder.process_starts)
+        for argv in runs:
+            self.assertEqual((argv[0], argv[1:3]), (git, ["-C", str(self.contracts.repo)]), argv)
             self.assertIn(tuple(argv[3:5]) if argv[3] == "remote" else argv[3], READ_ONLY_GIT, argv)
 
 
