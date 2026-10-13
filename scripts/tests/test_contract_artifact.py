@@ -1044,20 +1044,23 @@ class ArchiveReaderDifferentialTest(LoaderTestCase):
 class ArchiveMemberRulesTest(unittest.TestCase):
     """Member checks before unpacking, on archives written by the real release.deterministic_tar_gz.
 
-    The control (setUp) is the builder's archive of a tree with a nested package, an executable gradlew and a
-    member longer than the ustar name field (so the builder writes an extended header `path` record for it).
+    The control (setUp) is the builder's archive of a tree with a nested package, an executable gradlew, and a
+    file and a directory longer than the ustar name field (so the builder writes extended header `path`
+    records for them, the directory's with its trailing slash).
     """
 
     PREFIX = "pennilogic-contracts-python-v1.2.3"
     NAME = f"{PREFIX}.tar.gz"
     LONG = f"pkg/models/{'long_' * 18}name.py"
+    LONG_DIRECTORY = f"pkg/{'deep_' * 18}dir"
 
     def setUp(self) -> None:
         self.root = temporary_root()
         self.addCleanup(shutil.rmtree, self.root, True)
         tree = self.root / "tree"
         for relative, content in (("README.md", "synthetic\n"), ("gradlew", "#!/bin/sh\nexit 0\n"), ("pkg/__init__.py", ""),
-                                  ("pkg/models/probe.py", "x = 1\n"), (self.LONG, "y = 2\n")):
+                                  ("pkg/models/probe.py", "x = 1\n"), (self.LONG, "y = 2\n"),
+                                  (f"{self.LONG_DIRECTORY}/leaf.py", "z = 3\n")):
             (tree / relative).parent.mkdir(parents=True, exist_ok=True)
             (tree / relative).write_text(content, encoding="utf-8", newline="\n")
         built = release.deterministic_tar_gz(tree, self.PREFIX, SYNTHETIC_EPOCH)
@@ -1066,6 +1069,7 @@ class ArchiveMemberRulesTest(unittest.TestCase):
         self.assertEqual(gzip.decompress(write_archive(self.clean)), self.raw)  # the helpers write the builder's bytes
         self.assertEqual(len(self.inspect(self.clean)), len(self.clean))  # control
         self.offsets = {name[len(self.PREFIX) + 1:]: offsets for name, offsets in member_offsets(self.raw).items()}
+        self.assertLess(self.offsets[self.LONG_DIRECTORY][0], self.header(self.LONG_DIRECTORY))  # it has an extended header
 
     def inspect(self, members) -> list[tarfile.TarInfo]:
         return contract_artifact.inspect_archive_members(gzip.decompress(write_archive(members)), self.PREFIX, self.NAME)
@@ -1209,8 +1213,11 @@ class ArchiveMemberRulesTest(unittest.TestCase):
         last_end = last + tarfile.BLOCKSIZE
         bad_checksum = bytearray(self.raw)
         bad_checksum[readme + 265] = ord("x")  # the owner name field, without recomputing the checksum
+        later = bytearray(self.raw)
+        later[self.header("pkg/__init__.py") + 265] = ord("x")  # tarfile stops quietly there instead of failing
         cases = {
             "a bad header checksum": bytes(bad_checksum),
+            "a bad header checksum after the first member": bytes(later),
             "member data cut off": self.raw[:last + 3],
             "no end-of-archive marker": self.raw[:last_end],
             "a single zero block": self.raw[:last_end] + b"\0" * tarfile.BLOCKSIZE,
