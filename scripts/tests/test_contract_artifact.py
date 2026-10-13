@@ -1296,6 +1296,26 @@ class ArchiveMemberRulesTest(unittest.TestCase):
             with self.subTest(label):
                 self.assertRawRule("archive.ambiguous", raw)
 
+    def test_extended_header_records_parsed_only_to_the_second(self) -> None:
+        """Review round 3, PSEC-R3-3: the reader parsed and kept every record before it refused, so 120 MiB of five-byte
+        records from a 183 KB asset cost 8 s and 1.5 GiB. One record is the only valid content, so parsing stops at the
+        second and the refusal no longer counts the rest."""
+        record = pax_record("path", f"{self.PREFIX}/{self.LONG}")
+        self.assertEqual(len(contract_artifact.inspect_archive_members(self.with_extended_records(record), self.PREFIX,
+                                                                       self.NAME)), len(self.clean))  # control
+        where = f"{self.NAME}: the header at byte {self.offsets[self.LONG][0]}"
+        for label, records, names in (("a second record", record + pax_record("a", ""), "'path', 'a'"),
+                                      ("a million records after the first", record + pax_record("a", "") * 1_000_000,
+                                       "'path', 'a' and more")):
+            with self.subTest(label), mock.patch.object(contract_artifact, "_pax_record",
+                                                        wraps=contract_artifact._pax_record) as parse:
+                with self.assertRaises(ArtifactRefused) as caught:
+                    contract_artifact.inspect_archive_members(self.with_extended_records(records), self.PREFIX, self.NAME)
+                parsed = [call.args[1] for call in parse.call_args_list if call.args[0] == records]  # record positions
+                self.assertEqual((caught.exception.rule, caught.exception.detail, parsed),
+                                 ("archive.ambiguous", f"{where} holds extended header records other than one path ({names}), "
+                                                       "which readers apply differently", [0, len(record)]))
+
     def test_extended_header_block_other_than_the_builders_refused(self) -> None:
         """The extended header block's own fields (review round 2, PSEC-R2-1). node-tar refuses a link name or an empty
         name there and unpacks the member under its truncated ustar name; tarfile and GNU tar use the `path` record."""

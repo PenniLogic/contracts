@@ -1153,22 +1153,34 @@ def builder_mode(name: str, kind: bytes) -> int:
     return 0o755 if path.name == "gradlew" or path.suffix == ".sh" else 0o644
 
 
+def _pax_record(records: bytes, position: int, where: str) -> tuple[bytes, bytes, int]:
+    """The keyword, the value and the end of the extended header record at `position`; refuse a malformed one."""
+    space = records.find(b" ", position, position + 20)
+    digits = records[position:space] if space > position else b""
+    end = position + int(digits) if digits.isdigit() and not digits.startswith(b"0") else -1
+    keyword, equals, value = records[space + 1:end - 1].partition(b"=")
+    if end <= space or end > len(records) or records[end - 1:end] != b"\n" or not keyword or not equals:
+        raise ArtifactRefused("archive.ambiguous", f"{where} holds a malformed extended header record, which readers "
+                                                   "handle differently")
+    return keyword, value, end
+
+
 def _extended_path(records: bytes, where: str) -> str:
-    """The value of an extended header that holds exactly one `path` record and nothing else."""
-    position, keywords, value = 0, [], b""
-    while position < len(records):
-        space = records.find(b" ", position, position + 20)
-        digits = records[position:space] if space > position else b""
-        end = position + int(digits) if digits.isdigit() and not digits.startswith(b"0") else -1
-        keyword, equals, value = records[space + 1:end - 1].partition(b"=")
-        if end <= space or end > len(records) or records[end - 1:end] != b"\n" or not keyword or not equals:
-            raise ArtifactRefused("archive.ambiguous", f"{where} holds a malformed extended header record, which readers "
-                                                       "handle differently")
-        keywords.append(keyword.decode("ascii", "replace")[:40])
-        position = end
-    if keywords != ["path"]:
+    """The value of an extended header that holds exactly one `path` record and nothing else.
+
+    At most two records are parsed. The builder writes one, so a second one is refused as soon as it is read,
+    and the rest is never parsed (review round 3, PSEC-R3-3: every record of 120 MiB of five-byte records from
+    a 183 KB asset was parsed and kept before the refusal, 8 s and 1.5 GiB).
+    """
+    keywords, value, position = [], b"", 0
+    while position < len(records) and len(keywords) < 2:
+        keyword, value, position = _pax_record(records, position, where)
+        keywords.append(keyword)
+    if keywords != [b"path"]:
+        names = ", ".join(shown(keyword.decode("ascii", "replace")[:40]) for keyword in keywords) or "none"
+        more = " and more" if position < len(records) else ""
         raise ArtifactRefused("archive.ambiguous", f"{where} holds extended header records other than one path "
-                                                   f"({listed(keywords)}), which readers apply differently")
+                                                   f"({names}{more}), which readers apply differently")
     try:
         return value.decode("ascii")
     except UnicodeDecodeError:
