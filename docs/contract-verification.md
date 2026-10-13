@@ -94,12 +94,19 @@ Release was published.
 
 ### Release set and SHA256SUMS
 
-The expected asset set is computed from the tag's own tree: the specification, registry, provider
-sources (`pl_contracts.PROVIDER_SOURCE_NAMES`), `spec/fixtures/*.json`, the three client archives and
-`release-manifest.json`.
+The expected asset set is computed from the tag's own tree: the specification, the registry, the
+provider sources the tag itself names (the `PROVIDER_SOURCE_NAMES` literal of `scripts/pl_contracts.py`
+at the tag, parsed and never run), `spec/fixtures/*.json`, the three client archives and
+`release-manifest.json`. A runner therefore verifies a tag whose provider sources differ from its own.
+The rest of the release format is this runner's: the three client languages (the tag's `LANGUAGES`
+literal must name the same three) and the key sets of `release-manifest.json`, its client records,
+`generator/golden.json` records and the embedded `contracts-manifest.json` (`release.py` and
+`generate_clients.py` schema version 1). A tag in another format is refused with
+`release.format_unsupported` or `manifest.malformed`, never verified against the wrong expectations.
 
 | Rule | Refused when |
 | --- | --- |
+| `release.format_unsupported` | The tag commit has no `scripts/pl_contracts.py` with one literal `PROVIDER_SOURCE_NAMES` tuple of distinct plain file names and one literal `LANGUAGES` naming exactly Kotlin, TypeScript and Python. |
 | `anchor.asset_name_collision` | Two sources at the tag would produce the same asset name in the flat release directory. |
 | `anchor.tag_file_missing` | A file the release is built from (specification, registry, provider source, fixture, `generator/golden.json` or `toolchain/versions.json`) is not a regular file at the tag commit. |
 | `asset.not_regular_file` | An entry in the release directory is a symlink, a directory or another non-regular file. |
@@ -120,7 +127,7 @@ sources (`pl_contracts.PROVIDER_SOURCE_NAMES`), `spec/fixtures/*.json`, the thre
 | `manifest.spec_digest_mismatch` | `spec_sha256` is not the digest of the specification asset. |
 | `manifest.provider_sources_mismatch` | `provider_sources_sha256` is not the digest map of the provider-source assets. |
 | `manifest.clients_mismatch` | The clients are not exactly Kotlin, TypeScript and Python, or an archive name, archive digest or provider-source map disagrees. |
-| `spec.version_mismatch` | The specification asset's `info.version` is missing or is not the tag version. |
+| `spec.version_mismatch` | The specification's `info.version` is missing or is not the tag version. It is read only after the specification asset equals its blob at the tag commit (`anchor.asset_blob_mismatch` below), so a swapped asset is never parsed: the no-YAML `info.version` expression backtracks exponentially on some inputs. |
 
 ### Anchors at the tag's own tree
 

@@ -3,13 +3,15 @@
 A SyntheticContracts instance owns one temporary directory, never a path inside this repository:
 
 - repo/: a contracts-like repository with the specification, registry, provider sources, fixtures,
-  toolchain pins and generator/golden.json at the same relative paths as this repository, committed
-  and tagged with hermetic git;
+  toolchain pins, generator/golden.json and a synthetic scripts/pl_contracts.py that declares the
+  release format (PROVIDER_SOURCE_NAMES, LANGUAGES) at the same relative paths as this repository,
+  committed and tagged with hermetic git;
 - origin.git/: a temporary bare origin that the annotated tag is pushed to;
 - generated/<language>/: synthetic generated client trees. Each carries a contracts-manifest.json
   with the keys generate_clients.py writes, computed with the real pl_contracts.tree_hash;
 - dist/: release sets built by the real release.build_release_set, with its module-level paths
-  (DIST, GENERATED, SPEC, REGISTRY, FIXTURES and pl_contracts.VERSIONS) patched to the temporary tree;
+  (DIST, GENERATED, SPEC, REGISTRY, FIXTURES and pl_contracts.VERSIONS) patched to the temporary tree
+  and its PROVIDER_SOURCE_NAMES to the synthetic tag's;
 - downloads/: the published Release assets. release.publish uploads every file of the release set
   except RELEASE_NOTES.md.
 
@@ -62,6 +64,7 @@ REGISTRY_RELATIVE = pl_contracts.REGISTRY.relative_to(pl_contracts.ROOT).as_posi
 FIXTURES_RELATIVE = pl_contracts.FIXTURES.relative_to(pl_contracts.ROOT).as_posix()
 VERSIONS_RELATIVE = pl_contracts.VERSIONS.relative_to(pl_contracts.ROOT).as_posix()
 GOLDEN_RELATIVE = generate_clients.GOLDEN.relative_to(pl_contracts.ROOT).as_posix()
+FORMAT_RELATIVE = Path(pl_contracts.__file__).resolve().relative_to(pl_contracts.ROOT).as_posix()
 SPEC_DIRECTORY = pl_contracts.SPEC.parent.relative_to(pl_contracts.ROOT).as_posix()
 FIXTURE_NAMES = ("synthetic-money-wire.v1.json", "synthetic-probe.v1.json")
 SPEC_TEMPLATE = (
@@ -95,6 +98,13 @@ GENERATED_FILES = {
     },
 }
 GENERATOR_NAMES = {"kotlin": "kotlin", "typescript": "typescript-fetch", "python": "python"}
+
+
+def release_format_source(provider_source_names: tuple[str, ...], languages: tuple[str, ...] | None = None) -> str:
+    """A synthetic scripts/pl_contracts.py that declares a release format the way the real one does."""
+    languages = pl_contracts.LANGUAGES if languages is None else languages
+    return ('"""Synthetic release-format constants (verification tests only)."""\n\n'
+            f"PROVIDER_SOURCE_NAMES = {tuple(provider_source_names)!r}\nLANGUAGES = {tuple(languages)!r}\n")
 
 
 def synthetic_digest(label: str) -> str:
@@ -154,9 +164,11 @@ def temporary_root(prefix: str = "pl-verify-") -> Path:
 class SyntheticContracts:
     """One synthetic contracts repository with its bare origin, generated trees and release builds."""
 
-    def __init__(self, root: Path, version: str = "1.2.3") -> None:
+    def __init__(self, root: Path, version: str = "1.2.3", provider_source_names: tuple[str, ...] | None = None) -> None:
         self.root = root
         self.version = version
+        # The tag's own provider-source names; the runner's by default.
+        self.provider_source_names = pl_contracts.PROVIDER_SOURCE_NAMES if provider_source_names is None else provider_source_names
         self.tag = f"v{version}"
         self.repo = root / "repo"
         self.origin = root / "origin.git"
@@ -183,8 +195,9 @@ class SyntheticContracts:
     def write_source(self) -> None:
         self.write(SPEC_RELATIVE, SPEC_TEMPLATE.format(version=self.version))
         self.write(REGISTRY_RELATIVE, json_text({"schema_version": 1, "synthetic": "currency registry placeholder"}))
-        for name in pl_contracts.PROVIDER_SOURCE_NAMES:
+        for name in self.provider_source_names:
             self.write(f"{SPEC_DIRECTORY}/{name}", json_text({"schema_version": 1, "synthetic": f"provider source {name}"}))
+        self.write(FORMAT_RELATIVE, release_format_source(self.provider_source_names))
         for name in FIXTURE_NAMES:
             self.write(f"{FIXTURES_RELATIVE}/{name}", json_text({"schema_version": 1, "synthetic": f"fixture {name}"}))
         self.write(VERSIONS_RELATIVE, json_text({
@@ -219,7 +232,7 @@ class SyntheticContracts:
             "spec_sha256": sha256_bytes(spec),
             "currency_registry_sha256": sha256_bytes((self.repo / REGISTRY_RELATIVE).read_bytes()),
             "provider_sources_sha256": {
-                name: sha256_bytes((self.repo / SPEC_DIRECTORY / name).read_bytes()) for name in pl_contracts.PROVIDER_SOURCE_NAMES
+                name: sha256_bytes((self.repo / SPEC_DIRECTORY / name).read_bytes()) for name in self.provider_source_names
             },
             "provider_constraints_sha256": synthetic_digest("provider constraints"),
             "generator": {
@@ -286,6 +299,7 @@ class SyntheticContracts:
                 mock.patch.object(release, "SPEC", self.repo / SPEC_RELATIVE), \
                 mock.patch.object(release, "REGISTRY", self.repo / REGISTRY_RELATIVE), \
                 mock.patch.object(release, "FIXTURES", self.repo / FIXTURES_RELATIVE), \
+                mock.patch.object(release, "PROVIDER_SOURCE_NAMES", self.provider_source_names), \
                 mock.patch.object(pl_contracts, "VERSIONS", self.repo / VERSIONS_RELATIVE):
             return release.build_release_set(self.version, head or self.commit, SYNTHETIC_EPOCH)
 
@@ -319,7 +333,7 @@ class SyntheticContracts:
 
     def copy_to(self, root: Path) -> "SyntheticContracts":
         """An independent copy of the repository and its origin, for tests that change git state."""
-        other = SyntheticContracts(root, self.version)
+        other = SyntheticContracts(root, self.version, self.provider_source_names)
         shutil.copytree(self.repo, other.repo, symlinks=True)
         shutil.copytree(self.origin, other.origin, symlinks=True)
         shutil.copytree(self.generated, other.generated, symlinks=True)

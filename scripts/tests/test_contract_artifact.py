@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import tarfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -25,7 +26,7 @@ import verification_support as support
 from verification_support import (
     END_OF_ARCHIVE, FIXTURE_NAMES, GOLDEN_RELATIVE, MANIFEST_NAME, SPEC_DIRECTORY, SYNTHETIC_EPOCH, VERSIONS_RELATIVE,
     SyntheticContracts, copy_release, extended_header, git, gnu_long_header, gzip_bytes, json_text, member, member_offsets,
-    patch_header, pax_record, raw_member, read_archive, read_sums, refresh_embedded, replace_member_data, reseal,
+    patch_header, pax_record, raw_member, read_archive, read_sums, refresh_embedded, release_format_source, replace_member_data, reseal,
     rewrite_archive, snapshot, synthetic_digest, tar_padded, temporary_root, ustar_header, write_archive, write_sums,
 )
 
@@ -452,18 +453,89 @@ class ReleaseManifestTest(LoaderTestCase):
                 self.assertSwapRefused("manifest.clients_mismatch", edit=edit, name=label.replace(" ", "-"))
 
     def test_spec_info_version_ne_tag_refused(self) -> None:
-        spec = f"openapi-{self.base.tag}.yaml"
+        """The tag's own specification declares another version or none (a tag made by hand, not by release.py).
+
+        A swapped specification asset never gets this far: its tag-tree anchor refuses it before it is parsed.
+        """
+        def tagged_with(change):
+            def hook(contracts: SyntheticContracts) -> None:
+                path = contracts.repo / support.SPEC_RELATIVE
+                path.write_text(change(path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+                contracts.commit_all("Synthetic specification edited, then tagged by hand")
+                contracts.tag_annotated(force=True)
+                contracts.push_tag(force=True)
+            return hook
+
         mutations = {
             "other version": lambda text: text.replace(f"  version: {self.base.version}\n", "  version: 1.2.4\n"),
             "no version": lambda text: text.replace(f"  version: {self.base.version}\n", ""),
         }
-        for label, mutate in mutations.items():
+        for label, change in mutations.items():
             with self.subTest(label):
-                release_dir = self.fresh_release(label.replace(" ", "-"))
-                path = release_dir / spec
-                path.write_text(mutate(path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
-                reseal(release_dir)
-                self.assertRefused("spec.version_mismatch", release_dir)
+                contracts, published = self.own_release(label.replace(" ", "-"), before_build=tagged_with(change))
+                self.assertRefused("spec.version_mismatch", published, contracts=contracts)
+
+    def test_unanchored_specification_is_never_parsed(self) -> None:
+        """Review round 1, PSEC-4: the info.version expression backtracks exponentially on `  a` lines under `info:`
+        (26 lines took 6 s, 40 would take hours). A swapped specification is refused by its anchor before parsing."""
+        hostile = "openapi: 3.1.0\ninfo:\n" + "  a\n" * 40 + "paths: {}\n"
+        release_dir = self.fresh_release()
+        (release_dir / f"openapi-{self.base.tag}.yaml").write_text(hostile, encoding="utf-8", newline="\n")
+        reseal(release_dir)
+        parsed: list[str] = []
+        real = contract_artifact.spec_version
+
+        def guarded(text: str) -> str:
+            if text == hostile:
+                parsed.append(text)
+                raise AssertionError("info.version was parsed from an unanchored specification asset")
+            return real(text)
+
+        with mock.patch.object(contract_artifact, "spec_version", guarded):
+            started = time.perf_counter()
+            self.assertRefused("anchor.asset_blob_mismatch", release_dir)
+            self.assertLess(time.perf_counter() - started, 10.0)
+        self.assertEqual(parsed, [])
+
+
+class ReleaseFormatTest(LoaderTestCase):
+    """The expected release set follows the tag's own release format, read from the literals of its
+    scripts/pl_contracts.py, not this runner's (review round 1, CVR-3)."""
+
+    def test_release_format_comes_from_the_tag(self) -> None:
+        self.load(self.release_dir)  # control: the tag and the runner share one format
+        extra = pl_contracts.PROVIDER_SOURCE_NAMES + ("category-seed.v1.json",)
+        with self.subTest("the runner knows a provider source the tag does not have"):
+            with mock.patch.object(pl_contracts, "PROVIDER_SOURCE_NAMES", extra):
+                self.load(self.release_dir)
+        with self.subTest("the tag has a provider source the runner does not know"):
+            contracts = SyntheticContracts(self.work / "four-sources", provider_source_names=extra)
+            artifact = self.load(contracts.publish(), contracts=contracts)
+            self.assertIn("category-seed.v1.json", artifact.assets)
+
+    def test_unsupported_release_format_refused(self) -> None:
+        def format_module(source: str):
+            return lambda contracts: contracts.write(support.FORMAT_RELATIVE, source)
+
+        names, languages = pl_contracts.PROVIDER_SOURCE_NAMES, pl_contracts.LANGUAGES
+        cases = {
+            "no format module at the tag": {"uncommitted": (support.FORMAT_RELATIVE,)},
+            "another client language": {"after_source": format_module(release_format_source(names, languages + ("swift",)))},
+            "provider names computed, not a literal": {"after_source": format_module(
+                f"PROVIDER_SOURCE_NAMES = tuple(sorted({names!r}))\nLANGUAGES = {languages!r}\n")},
+            "provider names assigned twice": {"after_source": format_module(
+                release_format_source(names) + f"PROVIDER_SOURCE_NAMES = {names!r}\n")},
+            "a provider name with a path": {"after_source": format_module(release_format_source(names + ("../escape.json",)))},
+        }
+        for label, hooks in cases.items():
+            with self.subTest(label):
+                contracts, published = self.own_release(label.replace(" ", "-").replace(",", ""), **hooks)
+                self.assertRefused("release.format_unsupported", published, contracts=contracts)
+
+    def test_this_repository_declares_its_release_format_as_literals(self) -> None:
+        source = (pl_contracts.ROOT / contract_artifact.FORMAT_PATH).read_bytes()
+        self.assertEqual(contract_artifact._literal_constants(source, contract_artifact.FORMAT_CONSTANTS),
+                         {"PROVIDER_SOURCE_NAMES": pl_contracts.PROVIDER_SOURCE_NAMES, "LANGUAGES": pl_contracts.LANGUAGES})
 
 
 class TagTreeAnchorTest(LoaderTestCase):

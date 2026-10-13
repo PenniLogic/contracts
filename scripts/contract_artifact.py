@@ -11,13 +11,15 @@ docs/contract-verification.md lists them.
    object that names itself <tag> and targets a commit, and the remote's refs/tags/<tag>
    (git ls-remote) is that same tag object. That is what "published" means here.
 2. Release set. The directory holds exactly the assets release.build_release_set produces for the
-   tag, plus SHA256SUMS. SHA256SUMS is in its canonical form, lists exactly those assets, and every
-   digest matches the bytes.
+   tag, plus SHA256SUMS: the provider-source names and client languages come from the tag's own
+   scripts/pl_contracts.py (read without running it), the fixture names from the tag's tree.
+   SHA256SUMS is in its canonical form, lists exactly those assets, and every digest matches the bytes.
 3. Manifest. release-manifest.json has exactly the builder's keys. It agrees with the tag (tag,
    version, commit), with SHA256SUMS and with the info.version of the specification it ships.
 4. Tag-tree anchors. The specification, registry, provider-source and fixture assets equal their
-   blobs at the tag commit. The toolchain pins equal toolchain/versions.json there. The tag's
-   generator/golden.json is self-consistent and records the shipped specification for every language.
+   blobs at the tag commit, before any of them is parsed. The toolchain pins equal
+   toolchain/versions.json there. The tag's generator/golden.json is self-consistent and records the
+   shipped specification for every language.
 5. Archives. Each client archive is one gzip member, decompressed with a size bound. A strict reader
    accepts only the tar subset release.deterministic_tar_gz writes, so that GNU tar, npm's node-tar
    and Python's tarfile read the same members: POSIX ustar headers with plain octal numbers, regular
@@ -37,7 +39,7 @@ so a loaded artifact alone never claims that the Release exists.
 
 from __future__ import annotations
 
-import gzip
+import ast
 import io
 import os
 import re
@@ -70,7 +72,7 @@ RULES = (
     "archive.unsafe_path", "archive.outside_prefix", "archive.link_member", "archive.special_member",
     "archive.duplicate_member", "archive.case_collision", "archive.manifest_missing", "archive.manifest_invalid",
     "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch", "archive.ambiguous",
-    "archive.noncanonical",
+    "archive.noncanonical", "release.format_unsupported",
 )
 
 RELEASE_MANIFEST = "release-manifest.json"
@@ -100,6 +102,10 @@ REGISTRY_PATH = pl_contracts.REGISTRY.relative_to(pl_contracts.ROOT).as_posix()
 FIXTURES_PATH = pl_contracts.FIXTURES.relative_to(pl_contracts.ROOT).as_posix()
 GOLDEN_PATH = GOLDEN.relative_to(pl_contracts.ROOT).as_posix()
 VERSIONS_PATH = pl_contracts.VERSIONS.relative_to(pl_contracts.ROOT).as_posix()
+# The module whose PROVIDER_SOURCE_NAMES and LANGUAGES literals release.build_release_set uses at the tag.
+FORMAT_PATH = Path(pl_contracts.__file__).resolve().relative_to(pl_contracts.ROOT).as_posix()
+FORMAT_CONSTANTS = ("PROVIDER_SOURCE_NAMES", "LANGUAGES")
+FORMAT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 # Asset sources that are not files of the tag's tree.
 ARCHIVE_SOURCE = "archive:"
 MANIFEST_SOURCE = "release:manifest"
@@ -194,12 +200,13 @@ def is_tag_path(source: str) -> bool:
     return not source.startswith(ARCHIVE_SOURCE) and source != MANIFEST_SOURCE
 
 
-def expected_asset_sources(tag: str, fixture_names: list[str]) -> dict[str, str]:
+def expected_asset_sources(tag: str, fixture_names: list[str], provider_names: tuple[str, ...] | None = None) -> dict[str, str]:
     """Map every asset name release.build_release_set writes for `tag` to its source.
 
-    The source is a path in the tag's tree, `archive:<language>` or `release:manifest`. The builder
-    writes every asset into one flat directory, so two sources with one name would silently
-    overwrite each other; that is refused instead.
+    `provider_names` are the tag's own provider-source names (default: this runner's). The source is a
+    path in the tag's tree, `archive:<language>` or `release:manifest`. The builder writes every asset
+    into one flat directory, so two sources with one name would silently overwrite each other; that is
+    refused instead.
     """
     sources: dict[str, str] = {}
 
@@ -211,7 +218,7 @@ def expected_asset_sources(tag: str, fixture_names: list[str]) -> dict[str, str]
 
     add(spec_asset_name(tag), SPEC_PATH)
     add(PurePosixPath(REGISTRY_PATH).name, REGISTRY_PATH)
-    for name in pl_contracts.PROVIDER_SOURCE_NAMES:
+    for name in pl_contracts.PROVIDER_SOURCE_NAMES if provider_names is None else provider_names:
         add(name, f"{SPEC_DIR}/{name}")
     for name in fixture_names:
         add(name, f"{FIXTURES_PATH}/{name}")
@@ -239,15 +246,18 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
     tag_object, commit = _resolve_annotated_tag(git, tag)
     _check_published(git, remote, tag, tag_object, commit)
     tree = _TagTree(git, commit)
-    sources = expected_asset_sources(tag, tree.fixture_names())
+    provider_names = tree.release_format()
+    sources = expected_asset_sources(tag, tree.fixture_names(), provider_names)
     tree.read(sorted({source for source in sources.values() if is_tag_path(source)} | {GOLDEN_PATH, VERSIONS_PATH}))
     sums, data = _read_release_set(release_dir, sources)
-    manifest = _check_manifest(data[RELEASE_MANIFEST], sums, tag, version, commit)
+    manifest = _check_manifest(data[RELEASE_MANIFEST], sums, tag, version, commit, provider_names)
     spec_name = spec_asset_name(tag)
-    _check_spec_version(data[spec_name], version)
+    # Anchor every asset to its blob before anything parses it: an unanchored specification could make
+    # the info.version expression backtrack for hours (review round 1, PSEC-4).
     for name, source in sorted(sources.items()):
         if is_tag_path(source):
             _check_blob(tree, source, name, data[name])
+    _check_spec_version(data[spec_name], version)
     _check_toolchain(tree, manifest)
     golden = _check_golden(tree, sums[spec_name], version)
     clients: dict[str, dict] = {}
@@ -399,7 +409,8 @@ class _TagTree:
     def __init__(self, git: _Git, commit: str) -> None:
         self.git = git
         self.commit = commit
-        pathspecs = sorted({SPEC_DIR, PurePosixPath(REGISTRY_PATH).parent.as_posix(), FIXTURES_PATH, GOLDEN_PATH, VERSIONS_PATH})
+        pathspecs = sorted({SPEC_DIR, PurePosixPath(REGISTRY_PATH).parent.as_posix(), FIXTURES_PATH, GOLDEN_PATH, VERSIONS_PATH,
+                            FORMAT_PATH})
         completed = git.run("ls-tree", "-r", "-z", "--full-tree", commit, "--", *pathspecs)
         if completed is None or completed.returncode != 0:
             raise ArtifactRefused("anchor.tag_file_missing", f"the tree of the tag commit {commit} cannot be listed")
@@ -416,6 +427,28 @@ class _TagTree:
         prefix = f"{FIXTURES_PATH}/"
         return sorted(path[len(prefix):] for path in self.entries
                       if path.startswith(prefix) and "/" not in path[len(prefix):] and path.endswith(".json"))
+
+    def release_format(self) -> tuple[str, ...]:
+        """The tag's provider-source names, from the literals in its own scripts/pl_contracts.py (never run).
+
+        Refuse a tag that declares no such literals or other client languages than this runner verifies.
+        """
+        entry = self.entries.get(FORMAT_PATH)
+        if entry is None or entry[1] != "blob" or entry[0] not in REGULAR_BLOB_MODES:
+            raise ArtifactRefused("release.format_unsupported", f"the tag commit has no {FORMAT_PATH} declaring its release format")
+        values = _literal_constants(self.blob(FORMAT_PATH), FORMAT_CONSTANTS)
+        providers, languages = values.get("PROVIDER_SOURCE_NAMES"), values.get("LANGUAGES")
+        if (not isinstance(languages, tuple) or len(set(languages)) != len(languages)
+                or set(languages) != set(pl_contracts.LANGUAGES)):
+            raise ArtifactRefused("release.format_unsupported",
+                                  f"{FORMAT_PATH} at the tag commit does not declare the client languages "
+                                  f"{', '.join(pl_contracts.LANGUAGES)} as one literal; this runner verifies exactly those")
+        if (not isinstance(providers, tuple) or not providers or len(set(providers)) != len(providers)
+                or not all(isinstance(name, str) and FORMAT_NAME.fullmatch(name) for name in providers)):
+            raise ArtifactRefused("release.format_unsupported",
+                                  f"{FORMAT_PATH} at the tag commit does not declare PROVIDER_SOURCE_NAMES as one literal "
+                                  "tuple of distinct plain file names")
+        return providers
 
     def require_regular_file(self, path: str) -> str:
         entry = self.entries.get(path)
@@ -441,6 +474,37 @@ class _TagTree:
         if path not in self.contents:
             self.read([path])
         return self.contents[path]
+
+
+def _literal_constants(source: bytes, names: tuple[str, ...]) -> dict[str, object]:
+    """The module-level literal values of `names` in Python source, parsed and never run.
+
+    A name assigned twice, or to something other than a literal, has no value here.
+    """
+    try:
+        module = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return {}
+    values: dict[str, object] = {}
+    assigned: set[str] = set()
+    for statement in module.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            target, value = statement.target, statement.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or target.id not in names:
+            continue
+        if target.id in assigned:
+            values.pop(target.id, None)
+            continue
+        assigned.add(target.id)
+        try:
+            values[target.id] = ast.literal_eval(value)
+        except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError):
+            pass
+    return values
 
 
 # --- release set -------------------------------------------------------------------------------------
@@ -582,7 +646,8 @@ def _manifest_shape_problem(manifest: object) -> str | None:
     return None
 
 
-def _check_manifest(data: bytes, sums: dict[str, str], tag: str, version: str, commit: str) -> dict:
+def _check_manifest(data: bytes, sums: dict[str, str], tag: str, version: str, commit: str,
+                    provider_names: tuple[str, ...]) -> dict:
     manifest = strict_json(data, "manifest.malformed", RELEASE_MANIFEST)
     problem = _manifest_shape_problem(manifest)
     if problem is not None:
@@ -605,10 +670,10 @@ def _check_manifest(data: bytes, sums: dict[str, str], tag: str, version: str, c
     if manifest["spec_sha256"] != sums[spec_name]:
         raise ArtifactRefused("manifest.spec_digest_mismatch", f"{RELEASE_MANIFEST} spec_sha256 is not the digest of {spec_name}")
     providers = manifest["provider_sources_sha256"]
-    if providers != {name: sums[name] for name in pl_contracts.PROVIDER_SOURCE_NAMES}:
+    if providers != {name: sums[name] for name in provider_names}:
         raise ArtifactRefused("manifest.provider_sources_mismatch",
                               f"{RELEASE_MANIFEST} provider_sources_sha256 is not the digest map of "
-                              f"{', '.join(pl_contracts.PROVIDER_SOURCE_NAMES)}")
+                              f"{', '.join(provider_names)}")
     clients = manifest["clients"]
     if set(clients) != set(pl_contracts.LANGUAGES):
         raise ArtifactRefused("manifest.clients_mismatch",
