@@ -18,12 +18,18 @@ docs/contract-verification.md lists them.
 4. Tag-tree anchors. The specification, registry, provider-source and fixture assets equal their
    blobs at the tag commit. The toolchain pins equal toolchain/versions.json there. The tag's
    generator/golden.json is self-consistent and records the shipped specification for every language.
-5. Archives. Each client archive is read with bounded sizes and checked member by member: regular
-   files and directories only, one prefix, no absolute or parent paths, no links or devices, no
-   duplicates or case collisions. It is then unpacked with the tarfile data filter. The tree digest
-   is recomputed with pl_contracts.tree_hash, excluding contracts-manifest.json exactly as
-   generate_clients.py does. It must equal the archive's own manifest, the release manifest and
-   golden.json[language].tree_sha256 at the tag.
+5. Archives. Each client archive is one gzip member, decompressed with a size bound. A strict reader
+   accepts only the tar subset release.deterministic_tar_gz writes, so that GNU tar, npm's node-tar
+   and Python's tarfile read the same members: POSIX ustar headers with plain octal numbers, regular
+   files and directories only, at most one extended header holding one `path` record before a member,
+   nothing after the end-of-archive marker. The members must be the builder's canonical form (its
+   modes, owner 0, one modification time, sorted names, directories exactly the parents of the files)
+   with bounded printable ASCII names inside one prefix: no absolute or parent paths, no links or
+   devices, no duplicates or case collisions. tarfile must read the same members at the same offsets.
+   The archive is then unpacked with the tarfile data filter. The tree digest is recomputed with
+   pl_contracts.tree_hash, excluding contracts-manifest.json exactly as generate_clients.py does. It
+   must equal the archive's own manifest, the release manifest and golden.json[language].tree_sha256
+   at the tag.
 
 The GitHub Release presence check needs the network and is held. The result reports it as not_run,
 so a loaded artifact alone never claims that the Release exists.
@@ -63,7 +69,8 @@ RULES = (
     "anchor.golden_spec_mismatch", "archive.malformed", "archive.too_large", "archive.too_many_members",
     "archive.unsafe_path", "archive.outside_prefix", "archive.link_member", "archive.special_member",
     "archive.duplicate_member", "archive.case_collision", "archive.manifest_missing", "archive.manifest_invalid",
-    "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch",
+    "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch", "archive.ambiguous",
+    "archive.noncanonical",
 )
 
 RELEASE_MANIFEST = "release-manifest.json"
@@ -110,7 +117,6 @@ OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 REMOTE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 SUMS_LINE = re.compile(r"([0-9a-f]{64})  ([^\x00-\x1f\x7f/\\]{1,255})")
 REGULAR_BLOB_MODES = ("100644", "100755")
-FILE_TYPES = (tarfile.REGTYPE, tarfile.AREGTYPE)
 LINK_TYPES = (tarfile.SYMTYPE, tarfile.LNKTYPE)
 # Variables that would point git at another repository, index or object store than the one given.
 REPOSITORY_ENVIRONMENT = (
@@ -119,7 +125,8 @@ REPOSITORY_ENVIRONMENT = (
 )
 PASSED_CHECKS = (
     "tag.grammar", "tag.annotated", "tag.published_remote_ref", "release.sha256sums_exact", "release.manifest_agreement",
-    "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.golden", "archive.safe_extraction", "archive.tree_digest",
+    "anchor.tag_tree_blobs", "anchor.toolchain_pins", "anchor.golden", "archive.canonical_form", "archive.safe_extraction",
+    "archive.tree_digest",
 )
 HELD_CHECKS = ("github_release.presence",)
 
@@ -685,24 +692,71 @@ def _check_golden(tree: _TagTree, spec_digest: str, version: str) -> dict[str, d
 
 
 # --- archives ----------------------------------------------------------------------------------------
+#
+# Every reader of a client archive must see the tree that was verified. Python's tarfile is lenient where
+# other readers (GNU tar, npm's node-tar) are not: it skips by the header size and then applies a pax
+# global `size`, keeps a GNU long name over a following pax `path`, stops quietly at an unreadable header
+# and reads the next header right after a directory that declares data. So a strict reader first accepts
+# only the subset release.deterministic_tar_gz writes and refuses everything else; tarfile must then read
+# the same members at the same offsets before anything is unpacked.
+
+TAR_BLOCK = tarfile.BLOCKSIZE
+POSIX_MAGIC = b"ustar\x0000"
+# (name, offset, length) of the numeric fields of a ustar header block, and (offset, length) of the others.
+NUMERIC_FIELDS = (("mode", 100, 8), ("uid", 108, 8), ("gid", 116, 8), ("size", 124, 12), ("mtime", 136, 12))
+NAME_FIELD, LINKNAME_FIELD, UNAME_FIELD, GNAME_FIELD = (0, 100), (157, 100), (265, 32), (297, 32)
+DEVICE_FIELDS, PREFIX_FIELD, HEADER_PADDING = ((329, 8), (337, 8)), (345, 155), (500, 12)
+# tarfile leaves the device numbers of files and directories empty in current Python versions and wrote
+# zeros in earlier ones; both mean "no device" to every reader.
+ZERO_DEVICE_FIELDS = (b"\0" * 8, b"0000000\0")
+USTAR_NAME_LENGTH = 100
+MEMBER_TYPES = (tarfile.REGTYPE, tarfile.DIRTYPE)
+SPECIAL_TYPES = (tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE, tarfile.CONTTYPE)
+# Bounds on member names; the real clients' longest path is under 130 characters and 10 components.
+MAX_MEMBER_NAME_LENGTH = 1024
+MAX_MEMBER_DEPTH = 64
+MAX_MEMBER_COMPONENT_LENGTH = 255
+
+
+@dataclass(frozen=True)
+class _Member:
+    """One archive member as the strict reader sees it."""
+
+    name: str
+    kind: bytes
+    size: int
+    mtime: int
+    data_offset: int
+
 
 def _gunzip_bounded(data: bytes, name: str) -> bytes:
+    """Decompress exactly one gzip member with a size bound; anything after that member is refused."""
+    decompressor = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
     try:
-        with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as stream:
-            raw = stream.read(MAX_ARCHIVE_TAR_BYTES + 1)
-    except (OSError, EOFError, zlib.error):
+        raw = decompressor.decompress(data, MAX_ARCHIVE_TAR_BYTES + 1)
+    except zlib.error:
         raise ArtifactRefused("archive.malformed", f"{name} is not a gzip-compressed archive") from None
     if len(raw) > MAX_ARCHIVE_TAR_BYTES:
         raise ArtifactRefused("archive.too_large", f"{name} expands beyond {MAX_ARCHIVE_TAR_BYTES} bytes")
+    if not decompressor.eof:
+        raise ArtifactRefused("archive.malformed", f"{name} is a truncated gzip stream")
+    if decompressor.unused_data:
+        raise ArtifactRefused("archive.ambiguous", f"{name} has data after its gzip member (another member or trailing "
+                                                   "bytes), which gzip readers handle differently")
     return raw
 
 
 def _member_path_problem(name: str, prefix: str) -> tuple[str, str] | None:
-    if not name or any(ord(character) < 0x20 or ord(character) == 0x7F for character in name):
-        return "archive.unsafe_path", "a member name is empty or contains control characters"
+    if not name or not all(" " <= character <= "~" for character in name):
+        return "archive.unsafe_path", "a member name is empty or not printable ASCII (a control or non-ASCII character)"
+    if len(name) > MAX_MEMBER_NAME_LENGTH:
+        return "archive.unsafe_path", f"a member name is longer than {MAX_MEMBER_NAME_LENGTH} characters"
     if "\\" in name or name.startswith("/"):
         return "archive.unsafe_path", f"member {ascii(name)} is absolute or uses a backslash separator"
     parts = name.split("/")
+    if len(parts) > MAX_MEMBER_DEPTH or any(len(part) > MAX_MEMBER_COMPONENT_LENGTH for part in parts):
+        return "archive.unsafe_path", (f"a member name has more than {MAX_MEMBER_DEPTH} components or a component longer "
+                                       f"than {MAX_MEMBER_COMPONENT_LENGTH} characters")
     if any(part in ("", ".", "..") or ":" in part for part in parts):
         return "archive.unsafe_path", f"member {ascii(name)} has an empty, '.', '..' or drive/stream component"
     if parts[0] != prefix or len(parts) < 2:
@@ -710,45 +764,198 @@ def _member_path_problem(name: str, prefix: str) -> tuple[str, str] | None:
     return None
 
 
-def inspect_archive_members(raw_tar: bytes, prefix: str, name: str) -> list[tarfile.TarInfo]:
-    """Check every member of an uncompressed tar before anything is unpacked; return the members.
+def _field(header: bytes, field: tuple[int, int]) -> bytes:
+    start, length = field
+    return header[start:start + length]
 
-    Stricter than the data filter alone, which accepts `prefix/../x` while it stays inside the
-    destination and accepts links that stay inside it. Data hidden after an unreadable header is
-    refused, so this reader and GNU tar see the same members.
+
+def _octal(field: bytes) -> int | None:
+    """A numeric field as tarfile writes it: octal digits that fill the field, then one NUL."""
+    digits = field[:-1]
+    if field[-1:] != b"\0" or not digits or digits.strip(b"01234567"):
+        return None
+    return int(digits, 8)
+
+
+def _text(field: bytes) -> tuple[bytes, bool]:
+    """A NUL-terminated text field: its value, and whether only NUL bytes follow that value."""
+    value, _, rest = field.partition(b"\0")
+    return value, not rest.strip(b"\0")
+
+
+def builder_mode(name: str, kind: bytes) -> int:
+    """The mode release.deterministic_tar_gz gives a member."""
+    if kind == tarfile.DIRTYPE:
+        return 0o755
+    path = PurePosixPath(name)
+    return 0o755 if path.name == "gradlew" or path.suffix == ".sh" else 0o644
+
+
+def _extended_path(records: bytes, where: str) -> str:
+    """The value of an extended header that holds exactly one `path` record and nothing else."""
+    position, keywords, value = 0, [], b""
+    while position < len(records):
+        space = records.find(b" ", position, position + 20)
+        digits = records[position:space] if space > position else b""
+        end = position + int(digits) if digits.isdigit() and not digits.startswith(b"0") else -1
+        keyword, equals, value = records[space + 1:end - 1].partition(b"=")
+        if end <= space or end > len(records) or records[end - 1:end] != b"\n" or not keyword or not equals:
+            raise ArtifactRefused("archive.ambiguous", f"{where} holds a malformed extended header record, which readers "
+                                                       "handle differently")
+        keywords.append(keyword.decode("ascii", "replace")[:40])
+        position = end
+    if keywords != ["path"]:
+        raise ArtifactRefused("archive.ambiguous", f"{where} holds extended header records other than one path "
+                                                   f"({', '.join(map(ascii, keywords[:5])) or 'none'}), which readers "
+                                                   "apply differently")
+    try:
+        return value.decode("ascii")
+    except UnicodeDecodeError:
+        raise ArtifactRefused("archive.unsafe_path", f"{where}: a member name is not printable ASCII") from None
+
+
+def _member_header_problem(header: bytes, member: str, kind: bytes, full_name: str, extended: bool,
+                           padding: bytes) -> str | None:
+    """Why a readable member is not one release.deterministic_tar_gz writes, or None."""
+    numbers = {field: _octal(header[start:start + length]) for field, start, length in NUMERIC_FIELDS}
+    owners = [_text(_field(header, field)) for field in (UNAME_FIELD, GNAME_FIELD, LINKNAME_FIELD)]
+    name_field, name_clean = _text(_field(header, NAME_FIELD))
+    if numbers["mode"] != builder_mode(member, kind):
+        return f"has mode {numbers['mode']:o}, not the builder's {builder_mode(member, kind):o}"
+    if numbers["uid"] or numbers["gid"] or owners != [(b"", True)] * 3:
+        return "has an owner other than 0 without names, or a link name"
+    if any(_field(header, field) not in ZERO_DEVICE_FIELDS for field in DEVICE_FIELDS) or _field(header, HEADER_PADDING).strip(b"\0"):
+        return "has device numbers or header padding the builder never writes"
+    if not name_clean or (kind == tarfile.DIRTYPE) != full_name.endswith("/"):
+        return "has a name field the builder never writes"
+    if extended and (len(full_name) <= USTAR_NAME_LENGTH or name_field != full_name.encode("ascii")[:USTAR_NAME_LENGTH]):
+        return "has an extended header path that the builder would not write for its ustar name"
+    if padding.strip(b"\0"):
+        return "has data in the padding after its content"
+    return None
+
+
+def _strict_members(raw: bytes, prefix: str, name: str) -> list[_Member]:
+    """Read an uncompressed tar as the subset release.deterministic_tar_gz writes; refuse anything else.
+
+    The subset: POSIX ustar headers with a valid checksum, plain octal numbers and no prefix field;
+    regular files and directories only; at most one extended header, holding exactly one `path` record,
+    directly before a member; NUL padding; a two-block end-of-archive marker with nothing after it. The
+    members are in the builder's canonical form: printable ASCII names inside one prefix, the builder's
+    modes, owner 0 without names, sorted names, one shared modification time, and directories that are
+    exactly the parents of the files.
     """
-    members: list[tarfile.TarInfo] = []
+    members: list[_Member] = []
     folded: dict[str, str] = {}
+    offset, path, path_offset = 0, None, 0
+    while True:
+        header = raw[offset:offset + TAR_BLOCK]
+        where = f"{name}: the header at byte {offset}"
+        if len(header) < TAR_BLOCK:
+            raise ArtifactRefused("archive.malformed", f"{name} ends without an end-of-archive marker")
+        if not header.strip(b"\0"):
+            if path is not None:
+                raise ArtifactRefused("archive.ambiguous", f"{name}: the extended header at byte {path_offset} precedes no member")
+            break
+        if header[148:156] != b"%06o\0 " % (256 + sum(header[:148]) + sum(header[156:])):
+            raise ArtifactRefused("archive.malformed", f"{where} has a bad or non-standard checksum")
+        if header[257:265] != POSIX_MAGIC:
+            raise ArtifactRefused("archive.ambiguous", f"{where} is not a POSIX ustar header; GNU and V7 headers are read "
+                                                       "differently")
+        numbers = {field: _octal(header[start:start + length]) for field, start, length in NUMERIC_FIELDS}
+        if None in numbers.values() or _field(header, PREFIX_FIELD).strip(b"\0"):
+            raise ArtifactRefused("archive.ambiguous", f"{where} has a numeric field that is not plain octal, or uses the "
+                                                       "ustar prefix field; readers decode these differently")
+        kind, size = header[156:157], numbers["size"]
+        assert size is not None
+        data_offset = offset + TAR_BLOCK
+        end = data_offset + size + (-size % TAR_BLOCK)
+        if end > len(raw):
+            raise ArtifactRefused("archive.malformed", f"{where} declares data beyond the end of the archive")
+        padding = raw[data_offset + size:end]
+        if kind == tarfile.XHDTYPE:
+            if path is not None:
+                raise ArtifactRefused("archive.ambiguous", f"{where} is a second extended header for one member")
+            path, path_offset, offset = _extended_path(raw[data_offset:data_offset + size], where), offset, end
+            if padding.strip(b"\0"):
+                raise ArtifactRefused("archive.noncanonical", f"{where} has data in the padding after its records")
+            continue
+        if kind not in MEMBER_TYPES + LINK_TYPES + SPECIAL_TYPES:
+            raise ArtifactRefused("archive.ambiguous", f"{where} has type {ascii(kind)} (a pax global header, a GNU long "
+                                                       "name or long link, sparse or vendor data), which readers apply "
+                                                       "differently")
+        if len(members) >= MAX_ARCHIVE_MEMBERS:
+            raise ArtifactRefused("archive.too_many_members", f"{name} has more than {MAX_ARCHIVE_MEMBERS} members")
+        name_field, _ = _text(_field(header, NAME_FIELD))
+        if path is None and not name_field.isascii():
+            raise ArtifactRefused("archive.unsafe_path", f"{where}: a member name is not printable ASCII")
+        full_name = path if path is not None else name_field.decode("ascii")
+        member = full_name[:-1] if kind == tarfile.DIRTYPE and full_name.endswith("/") else full_name
+        problem = _member_path_problem(member, prefix)
+        if problem is not None:
+            raise ArtifactRefused(problem[0], f"{name}: {problem[1]}")
+        if kind in LINK_TYPES:
+            raise ArtifactRefused("archive.link_member", f"{name}: member {ascii(member)} is a link")
+        if kind in SPECIAL_TYPES:
+            raise ArtifactRefused("archive.special_member", f"{name}: member {ascii(member)} is not a regular file or directory")
+        if kind == tarfile.DIRTYPE and size:
+            raise ArtifactRefused("archive.ambiguous", f"{name}: directory {ascii(member)} declares data, which readers skip "
+                                                       "differently")
+        if size > MAX_MEMBER_BYTES:
+            raise ArtifactRefused("archive.too_large", f"{name}: member {ascii(member)} exceeds {MAX_MEMBER_BYTES} bytes")
+        key = member.casefold()
+        if key in folded:
+            if folded[key] == member:
+                raise ArtifactRefused("archive.duplicate_member", f"{name}: member {ascii(member)} appears twice")
+            raise ArtifactRefused("archive.case_collision",
+                                  f"{name}: members {ascii(folded[key])} and {ascii(member)} differ only in case")
+        problem_text = _member_header_problem(header, member, kind, full_name, path is not None, padding)
+        if problem_text is not None:
+            raise ArtifactRefused("archive.noncanonical", f"{name}: member {ascii(member)} {problem_text}")
+        folded[key] = member
+        assert numbers["mtime"] is not None
+        members.append(_Member(member, kind, size, numbers["mtime"], data_offset))
+        path, offset = None, end
+    # tarfile and GNU tar stop at the first zero block, but data hidden after it is still data a reader
+    # with other options (GNU tar --ignore-zeros) unpacks; only zero blocks may follow the last member.
+    if len(raw) - offset < 2 * TAR_BLOCK or raw[offset:].strip(b"\0") or len(raw) % TAR_BLOCK:
+        raise ArtifactRefused("archive.malformed", f"{name} has data after its last readable member, or no two-block "
+                                                   "end-of-archive marker")
+    names = [member.name for member in members]
+    if names != sorted(names):
+        raise ArtifactRefused("archive.noncanonical", f"{name}: members are not in the builder's sorted order")
+    directories = {member.name for member in members if member.kind == tarfile.DIRTYPE}
+    parents = {"/".join(parts[:index]) for parts in (member.name.split("/") for member in members
+                                                     if member.kind == tarfile.REGTYPE) for index in range(2, len(parts))}
+    if directories != parents:
+        extra, missing = sorted(directories - parents)[:3], sorted(parents - directories)[:3]
+        raise ArtifactRefused("archive.noncanonical", f"{name}: the directories are not exactly the parents of its files "
+                                                      f"(not a parent: {', '.join(map(ascii, extra)) or 'none'}; missing: "
+                                                      f"{', '.join(map(ascii, missing)) or 'none'})")
+    if len({member.mtime for member in members}) > 1:
+        raise ArtifactRefused("archive.noncanonical", f"{name}: the members do not share one modification time")
+    return members
+
+
+def inspect_archive_members(raw_tar: bytes, prefix: str, name: str) -> list[tarfile.TarInfo]:
+    """Check every member of an uncompressed tar before anything is unpacked; return tarfile's members.
+
+    The strict reader decides (see _strict_members). Its member rules are stricter than the data filter
+    alone, which accepts `prefix/../x` while it stays inside the destination and accepts links that stay
+    inside it. tarfile must then read exactly the same names, types, sizes and data offsets, so the members
+    unpacked are the members checked.
+    """
+    members = _strict_members(raw_tar, prefix, name)
     try:
         with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:") as archive:
-            for member in archive:
-                if len(members) >= MAX_ARCHIVE_MEMBERS:
-                    raise ArtifactRefused("archive.too_many_members", f"{name} has more than {MAX_ARCHIVE_MEMBERS} members")
-                problem = _member_path_problem(member.name, prefix)
-                if problem is not None:
-                    raise ArtifactRefused(problem[0], f"{name}: {problem[1]}")
-                if member.type in LINK_TYPES:
-                    raise ArtifactRefused("archive.link_member", f"{name}: member {ascii(member.name)} is a link")
-                if member.type not in FILE_TYPES and member.type != tarfile.DIRTYPE:
-                    raise ArtifactRefused("archive.special_member",
-                                          f"{name}: member {ascii(member.name)} is not a regular file or directory")
-                if member.type in FILE_TYPES and member.size > MAX_MEMBER_BYTES:
-                    raise ArtifactRefused("archive.too_large", f"{name}: member {ascii(member.name)} exceeds {MAX_MEMBER_BYTES} bytes")
-                key = member.name.casefold()
-                if key in folded:
-                    if folded[key] == member.name:
-                        raise ArtifactRefused("archive.duplicate_member", f"{name}: member {ascii(member.name)} appears twice")
-                    raise ArtifactRefused("archive.case_collision",
-                                          f"{name}: members {ascii(folded[key])} and {ascii(member.name)} differ only in case")
-                folded[key] = member.name
-                members.append(member)
-            # tarfile stops quietly at an unreadable header after the first member, where GNU tar skips
-            # ahead and unpacks what follows; only end-of-archive zero padding may follow the last member.
-            if raw_tar[archive.offset:].strip(b"\0"):
-                raise ArtifactRefused("archive.malformed", f"{name} has data after its last readable member")
-    except tarfile.TarError:
+            infos = list(archive)
+            global_headers = dict(archive.pax_headers)
+    except (tarfile.TarError, RecursionError):
         raise ArtifactRefused("archive.malformed", f"{name} is not a readable tar archive") from None
-    return members
+    read = [(info.name, info.type, info.size, info.offset_data) for info in infos]
+    if global_headers or read != [(member.name, member.kind, member.size, member.data_offset) for member in members]:
+        raise ArtifactRefused("archive.ambiguous", f"{name} is read differently by Python's tarfile and by the strict reader")
+    return infos
 
 
 def _embedded_manifest_problem(embedded: object) -> str | None:
@@ -785,7 +992,7 @@ def _check_archive(language: str, tag: str, version: str, data: dict[str, bytes]
     try:
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
             archive.extractall(destination, members=members, filter="data")
-    except (tarfile.TarError, OSError):
+    except (tarfile.TarError, OSError, RecursionError):
         raise ArtifactRefused("archive.malformed", f"{name} could not be unpacked under the data filter") from None
     root = destination / prefix
     manifest_path = root / MANIFEST_NAME

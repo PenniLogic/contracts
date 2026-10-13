@@ -10,6 +10,7 @@ written inside this repository.
 
 from __future__ import annotations
 
+import copy
 import gzip
 import io
 import json
@@ -22,9 +23,10 @@ from unittest import mock
 
 import verification_support as support
 from verification_support import (
-    FIXTURE_NAMES, GOLDEN_RELATIVE, MANIFEST_NAME, SPEC_DIRECTORY, SYNTHETIC_EPOCH, VERSIONS_RELATIVE, SyntheticContracts,
-    copy_release, git, json_text, member, read_archive, read_sums, refresh_embedded, replace_member_data, reseal,
-    rewrite_archive, snapshot, synthetic_digest, temporary_root, write_archive, write_sums,
+    END_OF_ARCHIVE, FIXTURE_NAMES, GOLDEN_RELATIVE, MANIFEST_NAME, SPEC_DIRECTORY, SYNTHETIC_EPOCH, VERSIONS_RELATIVE,
+    SyntheticContracts, copy_release, extended_header, git, gnu_long_header, gzip_bytes, json_text, member, member_offsets,
+    patch_header, pax_record, raw_member, read_archive, read_sums, refresh_embedded, replace_member_data, reseal,
+    rewrite_archive, snapshot, synthetic_digest, tar_padded, temporary_root, ustar_header, write_archive, write_sums,
 )
 
 import contract_artifact  # noqa: E402 - verification_support puts scripts/ on sys.path
@@ -662,21 +664,147 @@ class ArchiveContentTest(LoaderTestCase):
                 self.assertRefused("archive.manifest_mismatch", release_dir)
 
 
+class ArchiveReaderDifferentialTest(LoaderTestCase):
+    """Consistent swaps that only a lenient tar reader accepts (review round 1). Each archive verified as golden
+    under Python's tarfile alone, while GNU tar or npm's node-tar unpacked other bytes, or the loader crashed."""
+
+    @property
+    def prefix(self) -> str:
+        return archive_prefix("python", self.base.tag)
+
+    def swap_raw(self, release_dir: Path, language: str, raw: bytes) -> None:
+        (release_dir / archive_name(language, self.base.tag)).write_bytes(gzip_bytes(raw))
+        reseal(release_dir)
+
+    def test_pax_global_header_size_differential_refused(self) -> None:
+        """A pax global `size`: tarfile skips the last member by its ustar size and reads the golden bytes; GNU tar
+        and node-tar skip by the global size and unpack the hidden member over pennilogic_synthetic/__init__.py."""
+        release_dir = self.fresh_release()
+        *head, (last, last_data) = read_archive((release_dir / archive_name("python", self.base.tag)).read_bytes())
+        assert last_data is not None
+        init = f"{self.prefix}/pennilogic_synthetic/__init__.py"
+        hidden = b"raise SystemExit('unverified synthetic bytes')".ljust(len(last_data) - 1) + b"\n"
+        tail = tar_padded(last_data) + extended_header(tarfile.XHDTYPE, pax_record("size", str(len(hidden))) + pax_record("path", init))
+        tail += ustar_header(init, len(hidden)) + tar_padded(hidden)
+        raw = b"".join(raw_member(info, data) for info, data in head)
+        raw += extended_header(tarfile.XGLTYPE, pax_record("size", str(len(last_data))))
+        raw += ustar_header(last.name, len(tail)) + tail + END_OF_ARCHIVE
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:  # tarfile alone sees only the golden bytes
+            seen = [archive.extractfile(info).read() for info in archive if info.isfile()]  # type: ignore[union-attr]
+        self.assertEqual((seen[-1], hidden in seen), (last_data, False))
+        self.swap_raw(release_dir, "python", raw)
+        self.assertRefused("archive.ambiguous", release_dir)
+
+    def test_gnu_long_name_with_pax_path_differential_refused(self) -> None:
+        """A GNU long name followed by a pax `path`: tarfile keeps the long name, GNU tar and node-tar the pax path."""
+        init = f"{self.prefix}/pennilogic_synthetic/__init__.py"
+        model = f"{self.prefix}/pennilogic_synthetic/models/synthetic_probe.py"
+        cases = {
+            "two golden files cross-named": {init: model, model: init},
+            "a pax path outside the prefix": {f"{self.prefix}/pyproject.toml": f"{self.prefix}/../outside-prefix.toml"},
+        }
+        for label, renames in cases.items():
+            with self.subTest(label):
+                release_dir = self.fresh_release(label.replace(" ", "-"))
+                raw = b""
+                for info, data in read_archive((release_dir / archive_name("python", self.base.tag)).read_bytes()):
+                    if info.name in renames:
+                        assert data is not None
+                        raw += gnu_long_header(info.name) + extended_header(tarfile.XHDTYPE, pax_record("path", renames[info.name]))
+                        raw += ustar_header(info.name, len(data)) + tar_padded(data)
+                    else:
+                        raw += raw_member(info, data)
+                self.swap_raw(release_dir, "python", raw + END_OF_ARCHIVE)
+                self.assertRefused("archive.ambiguous", release_dir)
+
+    def test_noncanonical_mode_or_extra_directory_refused(self) -> None:
+        """Modes and directories are outside the tree digest; GNU tar unpacked gradlew without its executable bit."""
+        prefix = archive_prefix("kotlin", self.base.tag)
+
+        def not_executable(members):
+            for info, _ in members:
+                if info.name == f"{prefix}/gradlew":
+                    info.mode = 0o644
+            return members
+
+        cases = {
+            "gradlew not executable": not_executable,
+            "an extra empty directory": lambda members: members + [member(f"{prefix}/.git", kind=tarfile.DIRTYPE)],
+        }
+        for label, transform in cases.items():
+            with self.subTest(label):
+                release_dir = self.fresh_release(label.replace(" ", "-"))
+                rewrite_archive(release_dir, self.base.tag, "kotlin", transform)
+                reseal(release_dir)
+                self.assertRefused("archive.noncanonical", release_dir)
+
+    def test_gzip_stream_must_be_exactly_one_member(self) -> None:
+        name = archive_name("python", self.base.tag)
+        cases = {
+            "two gzip members": (lambda data: gzip_bytes(gzip.decompress(data)[:1024]) + gzip_bytes(gzip.decompress(data)[1024:]),
+                                 "archive.ambiguous"),
+            "zero bytes after the gzip member": (lambda data: data + b"\0" * 8, "archive.ambiguous"),
+            "a truncated gzip member": (lambda data: data[:-8], "archive.malformed"),
+        }
+        for label, (mutate, rule) in cases.items():
+            with self.subTest(label):
+                release_dir = self.fresh_release(label.replace(" ", "-"))
+                (release_dir / name).write_bytes(mutate((release_dir / name).read_bytes()))
+                reseal(release_dir)
+                self.assertRefused(rule, release_dir)
+
+    def test_hostile_archives_refused_without_a_crash(self) -> None:
+        """Each of these raised RecursionError or UnicodeEncodeError out of the loader instead of a static rule."""
+        prefix = self.prefix
+        chained = b"".join(gnu_long_header(f"{prefix}/chain-{index}.py") for index in range(5000))
+        chained += ustar_header(f"{prefix}/x.py", 2) + tar_padded(b"x\n") + END_OF_ARCHIVE
+        cases = {
+            "5000 chained GNU long-name headers": (lambda release_dir: self.swap_raw(release_dir, "python", chained), "archive.ambiguous"),
+            "a member name of 1502 components": (lambda release_dir: rewrite_archive(
+                release_dir, self.base.tag, "python", lambda members: members + [member(prefix + "/a" * 1500 + "/x.py")]),
+                "archive.unsafe_path"),
+            "a member name that is not UTF-8": (lambda release_dir: rewrite_archive(
+                release_dir, self.base.tag, "python", lambda members: members + [member(f"{prefix}/pennilogic_synthetic/x\udcff.py")]),
+                "archive.ambiguous"),
+        }
+        for label, (mutate, rule) in cases.items():
+            with self.subTest(label):
+                release_dir = self.fresh_release(label.replace(" ", "-"))
+                mutate(release_dir)
+                reseal(release_dir)
+                self.assertRefused(rule, release_dir)
+
+    def test_unpacking_failure_refused(self) -> None:
+        release_dir = self.fresh_release()
+        with mock.patch.object(tarfile.TarFile, "extractall", side_effect=RecursionError("synthetic")):
+            self.assertRefused("archive.malformed", release_dir)
+
+
 class ArchiveMemberRulesTest(unittest.TestCase):
-    """Member checks before unpacking, on archives written by the real release.deterministic_tar_gz."""
+    """Member checks before unpacking, on archives written by the real release.deterministic_tar_gz.
+
+    The control (setUp) is the builder's archive of a tree with a nested package, an executable gradlew and a
+    member longer than the ustar name field (so the builder writes an extended header `path` record for it).
+    """
 
     PREFIX = "pennilogic-contracts-python-v1.2.3"
     NAME = f"{PREFIX}.tar.gz"
+    LONG = f"pkg/models/{'long_' * 18}name.py"
 
     def setUp(self) -> None:
         self.root = temporary_root()
         self.addCleanup(shutil.rmtree, self.root, True)
         tree = self.root / "tree"
-        for relative, content in (("README.md", "synthetic\n"), ("pkg/__init__.py", ""), ("pkg/models/probe.py", "x = 1\n")):
+        for relative, content in (("README.md", "synthetic\n"), ("gradlew", "#!/bin/sh\nexit 0\n"), ("pkg/__init__.py", ""),
+                                  ("pkg/models/probe.py", "x = 1\n"), (self.LONG, "y = 2\n")):
             (tree / relative).parent.mkdir(parents=True, exist_ok=True)
             (tree / relative).write_text(content, encoding="utf-8", newline="\n")
-        self.clean = read_archive(release.deterministic_tar_gz(tree, self.PREFIX, SYNTHETIC_EPOCH))
+        built = release.deterministic_tar_gz(tree, self.PREFIX, SYNTHETIC_EPOCH)
+        self.clean = read_archive(built)
+        self.raw = gzip.decompress(built)
+        self.assertEqual(gzip.decompress(write_archive(self.clean)), self.raw)  # the helpers write the builder's bytes
         self.assertEqual(len(self.inspect(self.clean)), len(self.clean))  # control
+        self.offsets = {name[len(self.PREFIX) + 1:]: offsets for name, offsets in member_offsets(self.raw).items()}
 
     def inspect(self, members) -> list[tarfile.TarInfo]:
         return contract_artifact.inspect_archive_members(gzip.decompress(write_archive(members)), self.PREFIX, self.NAME)
@@ -685,6 +813,187 @@ class ArchiveMemberRulesTest(unittest.TestCase):
         with self.assertRaises(ArtifactRefused) as caught:
             self.inspect(members)
         self.assertEqual(caught.exception.rule, rule, caught.exception.detail)
+
+    def assertRawRule(self, rule: str, raw: bytes) -> None:
+        with self.assertRaises(ArtifactRefused) as caught:
+            contract_artifact.inspect_archive_members(raw, self.PREFIX, self.NAME)
+        self.assertEqual(caught.exception.rule, rule, caught.exception.detail)
+
+    def header(self, relative: str) -> int:
+        """Offset of the member's own ustar header block (after its extended header, if it has one)."""
+        return self.offsets[relative][1] - tarfile.BLOCKSIZE
+
+    def with_extended_records(self, records: bytes) -> bytes:
+        """The control archive with the long member's extended header records replaced."""
+        start, data = self.offsets[self.LONG]
+        return self.raw[:start] + extended_header(tarfile.XHDTYPE, records) + self.raw[data - tarfile.BLOCKSIZE:]
+
+    def edited(self, relative: str, **changes: object) -> list:
+        """The control members, in the same order, with one member's header fields changed."""
+        members = []
+        for info, data in self.clean:
+            if info.name == f"{self.PREFIX}/{relative}":
+                info = copy.copy(info)
+                for key, value in changes.items():
+                    setattr(info, key, value)
+            members.append((info, data))
+        return members
+
+    def test_header_types_that_readers_apply_differently_refused(self) -> None:
+        """The parser-differential mechanisms: tarfile and GNU tar or node-tar would read different members."""
+        readme = self.header("README.md")
+        long_name = f"{self.PREFIX}/README.md".encode("ascii") + b"\0"
+        cases = {
+            "a pax global header": extended_header(tarfile.XGLTYPE, pax_record("comment", "synthetic")) + self.raw,
+            "a GNU long name (GNU header)": self.raw[:readme] + gnu_long_header(f"{self.PREFIX}/README.md") + self.raw[readme:],
+            "a GNU long name (POSIX header)": (self.raw[:readme] + ustar_header("././@LongLink", len(long_name), tarfile.GNUTYPE_LONGNAME)
+                                               + tar_padded(long_name) + self.raw[readme:]),
+            "a GNU long link": self.raw[:readme] + gnu_long_header("README.md", tarfile.GNUTYPE_LONGLINK) + self.raw[readme:],
+            "an old-style regular file type": patch_header(self.raw, readme, 156, tarfile.AREGTYPE),
+            "a GNU sparse member": patch_header(self.raw, readme, 156, tarfile.GNUTYPE_SPARSE),
+            "a Solaris extended header": patch_header(self.raw, readme, 156, tarfile.SOLARIS_XHDTYPE),
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.ambiguous", raw)
+
+    def test_extended_header_other_than_one_path_record_refused(self) -> None:
+        path = f"{self.PREFIX}/{self.LONG}"
+        record = pax_record("path", path)
+        self.assertEqual(self.with_extended_records(record), self.raw)  # control: the builder's own extended header
+        end_of_members = len(self.raw.rstrip(b"\0")) + -len(self.raw.rstrip(b"\0")) % tarfile.BLOCKSIZE
+        start, data = self.offsets[self.LONG]
+        cases = {
+            "a size record": self.with_extended_records(record + pax_record("size", "6")),
+            "a linkpath record": self.with_extended_records(record + pax_record("linkpath", "README.md")),
+            "an mtime record": self.with_extended_records(record + pax_record("mtime", str(SYNTHETIC_EPOCH))),
+            "a hdrcharset record": self.with_extended_records(pax_record("hdrcharset", "BINARY") + record),
+            "a second path record": self.with_extended_records(record + record),
+            "no path record": self.with_extended_records(pax_record("comment", "synthetic")),
+            "a record whose length is one too long": self.with_extended_records(
+                str(len(record) + 1).encode("ascii") + record[len(str(len(record))):]),
+            "two extended headers before one member": (self.raw[:start] + extended_header(tarfile.XHDTYPE, record)
+                                                       + self.raw[start:]),
+            "an extended header that precedes no member": (self.raw[:end_of_members] + extended_header(tarfile.XHDTYPE, record)
+                                                           + END_OF_ARCHIVE),
+        }
+        self.assertLess(data, end_of_members)
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.ambiguous", raw)
+
+    def test_header_fields_that_readers_decode_differently_refused(self) -> None:
+        readme, package = self.header("README.md"), self.header("pkg")
+        with_data = patch_header(self.raw, package, 124, b"%011o\0" % tarfile.BLOCKSIZE)
+        cases = {
+            "GNU magic": patch_header(self.raw, readme, 257, b"ustar  \0"),
+            "no magic (V7)": patch_header(self.raw, readme, 257, b"\0" * 8),
+            "a base-256 size": patch_header(self.raw, readme, 124, b"\x80" + (10).to_bytes(11, "big")),
+            "a space-terminated mode": patch_header(self.raw, readme, 100, b"000644 \0"),
+            "the ustar prefix field": patch_header(self.raw, readme, 345, b"pkg"),
+            "a directory that declares data": (with_data[:package + tarfile.BLOCKSIZE] + b"x" * tarfile.BLOCKSIZE
+                                               + with_data[package + tarfile.BLOCKSIZE:]),
+        }
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.ambiguous", raw)
+
+    def test_tarfile_must_read_what_the_strict_reader_read(self) -> None:
+        strict = contract_artifact._strict_members
+        with mock.patch.object(contract_artifact, "_strict_members", lambda raw, prefix, name: strict(raw, prefix, name)[:-1]):
+            self.assertRawRule("archive.ambiguous", self.raw)
+
+    def test_noncanonical_member_refused(self) -> None:
+        """Valid, unambiguous tar members that release.deterministic_tar_gz never writes."""
+        readme, package = self.header("README.md"), self.header("pkg")
+        size = len("synthetic\n")
+        records_end = self.offsets[self.LONG][0] + tarfile.BLOCKSIZE + len(pax_record("path", f"{self.PREFIX}/{self.LONG}"))
+        members = {
+            "a plain file with mode 600": self.edited("README.md", mode=0o600),
+            "a plain file marked executable": self.edited("README.md", mode=0o755),
+            "gradlew not executable": self.edited("gradlew", mode=0o644),
+            "a directory with mode 700": self.edited("pkg", mode=0o700),
+            "a numeric owner": self.edited("README.md", uid=1000),
+            "an owner name": self.edited("README.md", uname="synthetic"),
+            "a link name on a plain file": self.edited("README.md", linkname="pkg/__init__.py"),
+            "another modification time": self.edited("README.md", mtime=SYNTHETIC_EPOCH + 1),
+            "members out of order": [self.clean[1], self.clean[0], *self.clean[2:]],
+            "a missing parent directory": [item for item in self.clean if item[0].name != f"{self.PREFIX}/pkg/models"],
+            "an empty directory": sorted(self.clean + [member(f"{self.PREFIX}/pkg/empty", kind=tarfile.DIRTYPE)],
+                                         key=lambda item: item[0].name),
+        }
+        for label, edited in members.items():
+            with self.subTest(label):
+                self.assertRule("archive.noncanonical", edited)
+        raws = {
+            "device numbers": patch_header(self.raw, readme, 329, b"0000001\0"),
+            "header padding": patch_header(self.raw, readme, 500, b"x"),
+            "bytes after the end of the name": patch_header(self.raw, readme, len(f"{self.PREFIX}/README.md") + 1, b"x"),
+            "a directory name without its trailing slash": patch_header(self.raw, package, len(f"{self.PREFIX}/pkg"), b"\0"),
+            "data in the padding after a file": (self.raw[:readme + tarfile.BLOCKSIZE + size] + b"x"
+                                                 + self.raw[readme + tarfile.BLOCKSIZE + size + 1:]),
+            "data in the padding after extended header records": self.raw[:records_end] + b"x" + self.raw[records_end + 1:],
+            "an extended header for a short name": (self.raw[:readme]
+                                                    + extended_header(tarfile.XHDTYPE, pax_record("path", f"{self.PREFIX}/README.md"))
+                                                    + self.raw[readme:]),
+            "a ustar name that is not the start of the extended path": patch_header(self.raw, self.header(self.LONG), 0, b"q"),
+        }
+        for label, raw in raws.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.noncanonical", raw)
+
+    def test_malformed_tar_structure_refused(self) -> None:
+        readme = self.header("README.md")
+        _, last = self.offsets["pkg/models/probe.py"]
+        last_end = last + tarfile.BLOCKSIZE
+        bad_checksum = bytearray(self.raw)
+        bad_checksum[readme + 265] = ord("x")  # the owner name field, without recomputing the checksum
+        cases = {
+            "a bad header checksum": bytes(bad_checksum),
+            "member data cut off": self.raw[:last + 3],
+            "no end-of-archive marker": self.raw[:last_end],
+            "a single zero block": self.raw[:last_end] + b"\0" * tarfile.BLOCKSIZE,
+            "data after the end-of-archive marker": self.raw + b"\x01" + b"\0" * (tarfile.BLOCKSIZE - 1),
+            "a length that is not a multiple of 512": self.raw + b"\0" * 100,
+        }
+        self.assertEqual(self.raw[last_end:].strip(b"\0"), b"")  # the last member really is the last
+        for label, raw in cases.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.malformed", raw)
+
+    def test_member_names_are_bounded_printable_ascii(self) -> None:
+        problem = contract_artifact._member_path_problem
+        prefix = self.PREFIX
+
+        def of_length(length: int) -> str:
+            name = prefix
+            while len(name) < length:
+                name += "/" + "a" * min(200, length - len(name) - 1)
+            return name
+
+        pairs = {
+            "name length": (of_length(contract_artifact.MAX_MEMBER_NAME_LENGTH),
+                            of_length(contract_artifact.MAX_MEMBER_NAME_LENGTH + 1)),
+            "component count": (prefix + "/a" * (contract_artifact.MAX_MEMBER_DEPTH - 1),
+                                prefix + "/a" * contract_artifact.MAX_MEMBER_DEPTH),
+            "component length": (prefix + "/" + "a" * contract_artifact.MAX_MEMBER_COMPONENT_LENGTH,
+                                 prefix + "/" + "a" * (contract_artifact.MAX_MEMBER_COMPONENT_LENGTH + 1)),
+            "non-ASCII character": (prefix + "/cafe.py", prefix + "/caf\u00e9.py"),
+            "surrogate (a name that is not UTF-8)": (prefix + "/x.py", prefix + "/x\udcff.py"),
+        }
+        for label, (passing, failing) in pairs.items():
+            with self.subTest(label):
+                self.assertIsNone(problem(passing, prefix))
+                self.assertEqual(problem(failing, prefix)[0], "archive.unsafe_path")
+        path = f"{prefix}/{self.LONG}".encode("ascii")
+        raws = {
+            "a non-ASCII byte in the ustar name": patch_header(self.raw, self.header("README.md"), len(prefix) + 1, b"\xff"),
+            "a UTF-8 extended path": self.with_extended_records(pax_record("path", path[:-3] + "\u00e9.py".encode("utf-8"))),
+            "an extended path that is not UTF-8": self.with_extended_records(pax_record("path", path[:-3] + b"\xff.py")),
+        }
+        for label, raw in raws.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.unsafe_path", raw)
 
     def test_absolute_parent_or_drive_member_path_refused(self) -> None:
         for name in ("/etc/synthetic", f"{self.PREFIX}/../escape", f"{self.PREFIX}/./x", f"{self.PREFIX}//x",

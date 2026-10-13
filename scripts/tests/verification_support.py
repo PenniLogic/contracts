@@ -78,6 +78,10 @@ GENERATED_FILES = {
         "gradlew": "#!/bin/sh\n# Synthetic wrapper (verification tests only).\nexit 0\n",
         "src/main/kotlin/com/pennilogic/synthetic/SyntheticProbe.kt":
             "package com.pennilogic.synthetic\n\ndata class SyntheticProbe(val total: String)\n",
+        # Longer than the 100-character ustar name field inside the archive prefix, so the builder writes an
+        # extended header `path` record for it, as it does for the real Kotlin client's longest paths.
+        "src/main/kotlin/com/pennilogic/synthetic/models/SyntheticProbeResponseWithALongGeneratedName.kt":
+            "package com.pennilogic.synthetic.models\n\ndata class SyntheticProbeResponseWithALongGeneratedName(val total: String)\n",
     },
     "typescript": {
         "package.json": '{\n  "name": "@pennilogic/synthetic-client",\n  "private": true\n}\n',
@@ -397,10 +401,7 @@ def write_archive(members: Members) -> bytes:
             else:
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
-    compressed = io.BytesIO()
-    with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0, filename="") as handle:
-        handle.write(buffer.getvalue())
-    return compressed.getvalue()
+    return gzip_bytes(buffer.getvalue())
 
 
 def member(name: str, data: bytes | None = b"synthetic\n", kind: bytes = tarfile.REGTYPE, linkname: str = "") -> tuple[tarfile.TarInfo, bytes | None]:
@@ -429,9 +430,89 @@ def refresh_embedded(members: Members, prefix: str) -> Members:
     return refreshed
 
 
-def rewrite_archive(release_dir: Path, tag: str, language: str, transform: Callable[[Members], Members]) -> None:
+def rewrite_archive(release_dir: Path, tag: str, language: str, transform: Callable[[Members], Members],
+                    keep_order: bool = False) -> None:
+    """Rewrite one client archive with `transform` applied to its members, as a consistent swap would.
+
+    The members are written in the builder's sorted order (unless `keep_order`), so a swapped archive is
+    in the builder's canonical form and reaches the checks after it.
+    """
     path = release_dir / f"pennilogic-contracts-{language}-{tag}.tar.gz"
-    path.write_bytes(write_archive(transform(read_archive(path.read_bytes()))))
+    members = transform(read_archive(path.read_bytes()))
+    path.write_bytes(write_archive(members if keep_order else sorted(members, key=lambda item: item[0].name)))
+
+
+# --- raw tar blocks (archive reader differential and canonical-form tests) ----------------------------
+
+END_OF_ARCHIVE = b"\0" * (2 * tarfile.BLOCKSIZE)
+
+
+def tar_padded(data: bytes) -> bytes:
+    return data + b"\0" * (-len(data) % tarfile.BLOCKSIZE)
+
+
+def pax_record(keyword: str, value: str | bytes) -> bytes:
+    """One extended header record `<length> <keyword>=<value>\\n`; the length counts the whole record."""
+    body = b" " + keyword.encode("ascii") + b"=" + (value if isinstance(value, bytes) else value.encode("utf-8")) + b"\n"
+    length = len(body) + 1
+    while len(str(length)) + len(body) != length:
+        length = len(str(length)) + len(body)
+    return str(length).encode("ascii") + body
+
+
+def ustar_header(name: str, size: int, kind: bytes = tarfile.REGTYPE, mode: int = 0o644, mtime: int = SYNTHETIC_EPOCH) -> bytes:
+    """One POSIX ustar header block for a name of at most 100 characters (no extended header)."""
+    if len(name) > 100:
+        raise AssertionError("ustar_header takes names of at most 100 characters")
+    info = tarfile.TarInfo(name)
+    info.type, info.size, info.mode, info.mtime = kind, size, mode, mtime
+    return info.tobuf(format=tarfile.USTAR_FORMAT)
+
+
+def extended_header(kind: bytes, records: bytes) -> bytes:
+    """A pax extended (`x`) or global (`g`) header block followed by its padded records."""
+    return ustar_header("././@PaxHeader", len(records), kind, mode=0, mtime=0) + tar_padded(records)
+
+
+def gnu_long_header(name: str, kind: bytes = tarfile.GNUTYPE_LONGNAME) -> bytes:
+    """A GNU long-name (`L`) or long-link (`K`) header block followed by its padded name."""
+    data = name.encode("utf-8") + b"\0"
+    info = tarfile.TarInfo("././@LongLink")
+    info.type, info.size, info.mtime = kind, len(data), 0
+    return info.tobuf(format=tarfile.GNU_FORMAT) + tar_padded(data)
+
+
+def raw_member(info: tarfile.TarInfo, data: bytes | None) -> bytes:
+    """One member exactly as the builder's tarfile PAX writer writes it."""
+    return info.tobuf(format=tarfile.PAX_FORMAT) + (b"" if data is None else tar_padded(data))
+
+
+def raw_tar(members: Members) -> bytes:
+    """An uncompressed tar of these members in this order, ended by the two-block end-of-archive marker."""
+    return b"".join(raw_member(info, data) for info, data in members) + END_OF_ARCHIVE
+
+
+def gzip_bytes(raw: bytes) -> bytes:
+    """One gzip member, as the builder compresses (mtime 0, no file name)."""
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0, filename="") as handle:
+        handle.write(raw)
+    return buffer.getvalue()
+
+
+def member_offsets(raw: bytes) -> dict[str, tuple[int, int]]:
+    """name -> (offset of its first header block, offset of its data), as tarfile reads `raw`."""
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+        return {info.name: (info.offset, info.offset_data) for info in archive}
+
+
+def patch_header(raw: bytes, offset: int, start: int, value: bytes) -> bytes:
+    """Overwrite bytes of the header block at `offset` and recompute its checksum as tarfile writes it."""
+    header = bytearray(raw[offset:offset + tarfile.BLOCKSIZE])
+    header[start:start + len(value)] = value
+    header[148:156] = b"        "
+    header[148:156] = b"%06o\0 " % sum(header)
+    return raw[:offset] + bytes(header) + raw[offset + tarfile.BLOCKSIZE:]
 
 
 def replace_member_data(members: Members, name: str, change: Callable[[bytes], bytes]) -> Members:

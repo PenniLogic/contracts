@@ -138,17 +138,41 @@ tag commit instead:
 
 ### Client archives
 
-Each archive is decompressed with a size bound and checked member by member before anything is
-unpacked. The rules are stricter than the tarfile `data` filter, which accepts `prefix/../x` while it
+Every reader of a client archive must see the tree that was verified, not only Python's tarfile.
+tarfile is lenient where GNU tar and npm's node-tar are not: it applies a pax global `size` after
+skipping by the header size, keeps a GNU long name over a following pax `path`, and stops quietly at
+an unreadable header. Archives built that way verified as golden under tarfile while GNU tar and
+node-tar unpacked other bytes. So an archive must be exactly one gzip member, decompressed with a
+size bound, and a strict reader accepts only the tar subset `release.deterministic_tar_gz` writes:
+
+- POSIX ustar headers (magic `ustar`, version `00`) with the checksum tarfile writes, plain octal
+  numbers and an empty prefix field;
+- regular files and directories only, and directories without data;
+- at most one extended header before a member, holding exactly one `path` record, and only for a
+  name longer than the 100-character ustar name field;
+- NUL padding, and a two-block end-of-archive marker with nothing after it.
+
+The members must also be in the builder's canonical form: mode 0755 for directories, `gradlew` and
+`*.sh` files and 0644 for every other file; owner 0 without owner or link names; one modification
+time; sorted names; and directories that are exactly the parents of the files, so an empty or extra
+directory is refused. Member names are printable ASCII, at most 1024 characters and 64 components of
+at most 255 characters, inside one prefix. tarfile must then read the same members at the same data
+offsets. These rules are stricter than the tarfile `data` filter, which accepts `prefix/../x` while it
 stays inside the destination. The archive is then unpacked with `filter="data"`. The tree digest is
 recomputed with `pl_contracts.tree_hash`, excluding `contracts-manifest.json`, exactly as
 `generate_clients.py` computes it.
 
+The tar bytes are not compared with a rebuild of the tree. The builder's exact bytes depend on its
+Python version (current tarfile versions leave the device fields of files empty, earlier ones wrote
+zeros, and both forms are accepted), and `release.py` runs on the owner's machine, outside CI.
+
 | Rule | Refused when |
 | --- | --- |
-| `archive.malformed` | The archive is not gzip or tar. Data that tarfile would skip but GNU tar would unpack follows the last readable member. Or unpacking fails. |
+| `archive.malformed` | The archive is not gzip or not a complete tar: a bad header checksum, data cut off, no two-block end-of-archive marker, data after that marker (a reader that skips zero blocks would unpack it), a length that is not a multiple of 512 bytes, or unpacking fails. |
+| `archive.ambiguous` | Tar or gzip readers would read different members: a pax global header; a GNU long name or long link; a sparse, old-style or vendor type; an extended header record other than one `path` (for example `size`, `linkpath` or `hdrcharset`) or a malformed record; two extended headers for one member, or one that precedes no member; a GNU or V7 header; a numeric field that is not plain octal; a used prefix field; a directory that declares data; more than one gzip member or data after it; or tarfile reading other members than the strict reader. |
+| `archive.noncanonical` | The tar is readable and unambiguous but not what the builder writes: another mode, owner, owner name or link name; device numbers or header padding; bytes after the end of a name; a directory name without its trailing slash; an extended header for a short name, or one whose `path` does not start with the ustar name; data in padding; members out of order; an empty, extra or missing directory; or more than one modification time. |
 | `archive.too_large` / `archive.too_many_members` | The decompressed size, a member's size or the member count exceeds its bound. |
-| `archive.unsafe_path` | A member name is absolute, uses a backslash, or has an empty, `.`, `..`, drive or stream component, or a control character. |
+| `archive.unsafe_path` | A member name is not printable ASCII (a control or non-ASCII character, or bytes that are not UTF-8), is absolute, uses a backslash, exceeds the length or depth bounds, or has an empty, `.`, `..`, drive or stream component. |
 | `archive.outside_prefix` | A member is not inside `pennilogic-contracts-<language>-<tag>/`. |
 | `archive.link_member` / `archive.special_member` | A member is a symlink or hard link, or anything other than a regular file or directory (a device, a FIFO, a contiguous file). |
 | `archive.duplicate_member` / `archive.case_collision` | Two members share a name, or differ only in case and would collide on Windows or macOS. |
@@ -336,7 +360,9 @@ The modules are also part of the repository's complete test run. On main that ru
   temporary directory. It uses hermetic git (`-c user.name`, `-c user.email`, signing off, no global or
   system configuration, fixed dates) and a temporary bare origin.
   `test_builder_and_loader_keys_agree` fails when the builder's output keys and the loader's expected
-  keys diverge.
+  keys diverge. `ArchiveReaderDifferentialTest` replays the archives that verified as golden under
+  tarfile while GNU tar or node-tar unpacked other bytes, and `ArchiveMemberRulesTest` mutates the
+  builder's own archive one header field at a time.
 - `test_contract_compat.py`: the gate (expiry boundary at `warn_until` minus 1 ms and at `warn_until`,
   a warning without expiry, every unusable state blocking) and compatibility orchestration (classes,
   the planted removal of a response field, acknowledgement and version-bump boundary pairs, stale and

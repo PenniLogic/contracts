@@ -218,6 +218,29 @@ class ArtifactCommandTest(CommandTestCase):
             self.assertEqual((code, out), (2, ""))
             self.assertIn(f"[{rule}]", err)
 
+    def test_hostile_archive_refused_with_one_json_document(self) -> None:
+        """Hostile archives are refusals with a static rule and exit 1, never a traceback with empty stdout."""
+        code, payload = self.run_json(*self.artifact_argv())
+        self.assertEqual((code, payload["verified"]), (0, True))  # control
+        work = temporary_root()
+        self.addCleanup(shutil.rmtree, work, True)
+        prefix = f"pennilogic-contracts-python-{self.contracts.tag}"
+        chained = b"".join(support.gnu_long_header(f"{prefix}/chain-{index}.py") for index in range(5000))
+        chained += support.ustar_header(f"{prefix}/x.py", 2) + support.tar_padded(b"x\n") + support.END_OF_ARCHIVE
+        archive = f"{prefix}.tar.gz"
+        cases = {
+            "5000 chained GNU long-name headers": lambda release: (release / archive).write_bytes(support.gzip_bytes(chained)),
+            "a member name that is not UTF-8": lambda release: support.rewrite_archive(
+                release, self.contracts.tag, "python", lambda members: members + [support.member(f"{prefix}/x\udcff.py")]),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label):
+                release = copy_release(self.release_dir, work, label.replace(" ", "-"))
+                mutate(release)
+                support.reseal(release)
+                code, payload = self.run_json(*self.artifact_argv(release))
+                self.assertEqual((code, payload["verified"], payload["refusal"]["rule"]), (1, False, "archive.ambiguous"))
+
     def test_verified_artifact_fills_the_report_contract_section(self) -> None:
         artifact = load_published_artifact(self.contracts.tag, self.release_dir, repo=self.contracts.repo)
         section = contract_report.contract_section(artifact)
