@@ -620,15 +620,19 @@ class ReleaseFormatTest(LoaderTestCase):
     scripts/pl_contracts.py, not this runner's (review round 1, CVR-3)."""
 
     def test_release_format_comes_from_the_tag(self) -> None:
+        """The reviewer's case: main's runner gained category-seed.v1.json (PR #38) after an older tag was cut.
+        A synthetic name stands in for it, so the test holds on either side of that change."""
         self.load(self.release_dir)  # control: the tag and the runner share one format
-        extra = pl_contracts.PROVIDER_SOURCE_NAMES + ("category-seed.v1.json",)
+        added = "synthetic-added-source.v1.json"
+        self.assertNotIn(added, pl_contracts.PROVIDER_SOURCE_NAMES)
+        extra = pl_contracts.PROVIDER_SOURCE_NAMES + (added,)
         with self.subTest("the runner knows a provider source the tag does not have"):
             with mock.patch.object(pl_contracts, "PROVIDER_SOURCE_NAMES", extra):
                 self.load(self.release_dir)
         with self.subTest("the tag has a provider source the runner does not know"):
-            contracts = SyntheticContracts(self.work / "four-sources", provider_source_names=extra)
+            contracts = SyntheticContracts(self.work / "added-source", provider_source_names=extra)
             artifact = self.load(contracts.publish(), contracts=contracts)
-            self.assertIn("category-seed.v1.json", artifact.assets)
+            self.assertIn(added, artifact.assets)
 
     def test_unsupported_release_format_refused(self) -> None:
         def format_module(source: str):
