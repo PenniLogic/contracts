@@ -624,6 +624,21 @@ class ReleaseManifestTest(LoaderTestCase):
             detail = self.assertRefused("manifest.tag_mismatch", release_dir).detail
             self.assertIn("\\xe9'... (100001 characters), not v1.2.3", detail)  # cut to 200 characters, then escaped
             self.assertLess(len(detail), 1000)
+        with self.subTest("a long clients key (review round 3, PSEC-R3-2: echoed whole, 40 MB for 4000000 characters)"):
+            release_dir = self.fresh_release("long-client")
+            reseal(release_dir, edit=lambda manifest: manifest["clients"].update({"\U0010ffff" * 100_000: {}}))
+            detail = self.assertRefused("manifest.malformed", release_dir).detail
+            self.assertIn("\\U0010ffff'... (100000 characters)] keys differ from the release builder's", detail)
+            self.assertLess(len(detail), 2500)  # 200 characters of at most 10 escaped characters each
+        with self.subTest("a long file_count in an archive's contracts-manifest.json"):
+            release_dir = self.fresh_release("long-count")
+            embedded = f"{archive_prefix('python', self.base.tag)}/{MANIFEST_NAME}"
+            rewrite_archive(release_dir, self.base.tag, "python", lambda members: replace_member_data(
+                members, embedded, lambda data: json_text({**json.loads(data), "file_count": 10 ** 4000}).encode("utf-8")))
+            reseal(release_dir)
+            detail = self.assertRefused("archive.tree_mismatch", release_dir).detail
+            self.assertIn("0... (4001 characters) files)", detail)
+            self.assertLess(len(detail), 1000)
 
     def test_manifest_tag_mismatch_refused(self) -> None:
         self.assertSwapRefused("manifest.tag_mismatch", edit=lambda manifest: manifest.update(tag="v1.2.4"))

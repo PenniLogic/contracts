@@ -188,11 +188,13 @@ class ArtifactRefused(Exception):
 
 
 def shown(value: object, limit: int = MAX_SHOWN_TEXT) -> str:
-    """ascii(value) for a refusal detail; a longer string is cut to `limit` characters before it is escaped, so a
-    value from the release is never echoed or copied whole."""
-    if isinstance(value, str) and len(value) > limit:
-        return f"{ascii(value[:limit])}... ({len(value)} characters)"
-    return ascii(value)
+    """ascii(value) of a string or number for a refusal detail; a longer string is cut to `limit` characters before it
+    is escaped, so a value from the release is never echoed or copied whole. A number is cut after its digits are
+    written (the strict JSON reader refuses an integer of more than 4300 digits, Python's default limit)."""
+    if isinstance(value, str):
+        return f"{ascii(value[:limit])}... ({len(value)} characters)" if len(value) > limit else ascii(value)
+    text = ascii(value)
+    return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} characters)"
 
 
 def listed(names, limit: int = MAX_LISTED_NAMES) -> str:
@@ -830,16 +832,18 @@ def _is_digest_map(value: object) -> bool:
 
 
 def _client_shape_problem(language: str, client: object) -> str | None:
+    """Why one release-manifest.json client record is malformed, or None. `language` is a key of the release's
+    manifest, so it is shown cut to its bound (review round 3, PSEC-R3-2: a 4000000-character key was echoed whole)."""
     if not isinstance(client, dict) or set(client) != CLIENT_KEYS:
-        return f"clients[{ascii(language)}] keys differ from the release builder's"
+        return f"clients[{shown(language)}] keys differ from the release builder's"
     if not isinstance(client["archive"], str) or not all(
             _is_hex64(client[key]) for key in ("archive_sha256", "tree_sha256", "runtime_sha256")):
-        return f"clients[{ascii(language)}] archive name or digests are malformed"
+        return f"clients[{shown(language)}] archive name or digests are malformed"
     if not _is_count(client["file_count"]) or not _is_digest_map(client["provider_sources_sha256"]):
-        return f"clients[{ascii(language)}] file_count or provider_sources_sha256 is malformed"
+        return f"clients[{shown(language)}] file_count or provider_sources_sha256 is malformed"
     problem = _generator_record_problem(client["generator"])
     if problem is not None:
-        return f"clients[{ascii(language)}] generator {problem}"
+        return f"clients[{shown(language)}] generator {problem}"
     return None
 
 
@@ -1395,7 +1399,7 @@ def _check_archive(language: str, tag: str, version: str, data: dict[str, bytes]
     if embedded["tree_sha256"] != digest or embedded["file_count"] != len(entries) or embedded["files"] != recorded:
         raise ArtifactRefused("archive.tree_mismatch",
                               f"{name} content (tree {digest}, {len(entries)} files) differs from its {MANIFEST_NAME} "
-                              f"(tree {embedded['tree_sha256']}, {embedded['file_count']} files)")
+                              f"(tree {embedded['tree_sha256']}, {shown(embedded['file_count'])} files)")
     client = manifest["clients"][language]
     agreement = {
         "target": language, "spec_version": version, "spec_sha256": sums[spec_asset_name(tag)],
