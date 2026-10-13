@@ -93,7 +93,9 @@ that its tagger controlled.
 
 The loader downloads nothing. It unpacks the archives into a temporary directory and removes it
 before it returns. It refuses with `ArtifactRefused`, whose `rule` is one of the static IDs below.
-It stops at the first failing rule.
+It stops at the first failing rule. The `detail` text names at most five assets, keys or paths and
+counts the rest, and shows at most 200 characters of one value, so a hostile release cannot flood a
+log through it.
 
 A loaded artifact reports `github_release.presence` as `not_run`. Checking that the GitHub Release
 exists needs the network and is held. A loaded artifact therefore never shows by itself that the

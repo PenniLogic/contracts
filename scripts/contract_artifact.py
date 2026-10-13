@@ -140,6 +140,9 @@ MAX_ARCHIVE_MEMBERS = 20_000
 MAX_MEMBER_BYTES = 32 * 1024 * 1024
 MAX_TAG_BLOB_BYTES = 64 * 1024 * 1024
 GIT_TIMEOUT_SECONDS = 120
+# Names a refusal detail lists before it only counts the rest, and the characters it shows of one value.
+MAX_LISTED_NAMES = 5
+MAX_SHOWN_TEXT = 200
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
 OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
@@ -179,6 +182,23 @@ class ArtifactRefused(Exception):
         super().__init__(f"{rule}: {detail}")
         self.rule = rule
         self.detail = detail
+
+
+def shown(value: object, limit: int = MAX_SHOWN_TEXT) -> str:
+    """ascii(value) for a refusal detail, cut to `limit` characters: a value from the release is never echoed whole."""
+    text = ascii(value)
+    return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} characters)"
+
+
+def listed(names, limit: int = MAX_LISTED_NAMES) -> str:
+    """Sorted names for a refusal detail (each as `shown`): at most `limit` of them and how many more, or 'none'.
+
+    The names often come from the release (asset names, manifest keys), so a detail never echoes an
+    unbounded list (review round 2, PSEC-R2-5: 400000 unknown manifest keys made a 6.4 MB refusal).
+    """
+    names = sorted(names)
+    text = ", ".join(shown(name) for name in names[:limit]) or "none"
+    return text if len(names) <= limit else f"{text} and {len(names) - limit} more"
 
 
 @dataclass(frozen=True)
@@ -728,18 +748,17 @@ def _read_release_set(release_dir: Path, sources: dict[str, str]) -> tuple[dict[
     sums = parse_sums(_read_bounded(present[SUMS], SUMS))
     missing = sorted(set(sources) - set(sums))
     if missing:
-        raise ArtifactRefused("sums.missing_entry", f"SHA256SUMS does not list {', '.join(map(ascii, missing))}")
+        raise ArtifactRefused("sums.missing_entry", f"SHA256SUMS does not list {listed(missing)}")
     extra = sorted(set(sums) - set(sources))
     if extra:
-        raise ArtifactRefused("sums.extra_entry",
-                              f"SHA256SUMS lists assets the tag does not produce: {', '.join(map(ascii, extra))}")
+        raise ArtifactRefused("sums.extra_entry", f"SHA256SUMS lists assets the tag does not produce: {listed(extra)}")
     absent = sorted(set(sources) - set(present))
     if absent:
-        raise ArtifactRefused("asset.missing", f"the release directory lacks {', '.join(map(ascii, absent))}")
+        raise ArtifactRefused("asset.missing", f"the release directory lacks {listed(absent)}")
     unexpected = sorted(set(present) - set(sources) - {SUMS})
     if unexpected:
         raise ArtifactRefused("asset.unexpected",
-                              f"the release directory holds files that are not Release assets: {', '.join(map(ascii, unexpected))}")
+                              f"the release directory holds files that are not Release assets: {listed(unexpected)}")
     data: dict[str, bytes] = {}
     for name in sorted(sources):
         data[name] = _read_bounded(present[name], name)
@@ -800,8 +819,8 @@ def _manifest_shape_problem(manifest: object) -> str | None:
     if not isinstance(manifest, dict):
         return "is not a JSON object"
     if set(manifest) != RELEASE_MANIFEST_KEYS:
-        return (f"keys differ from the release builder's (missing {sorted(RELEASE_MANIFEST_KEYS - set(manifest))}, "
-                f"unknown {sorted(map(ascii, set(manifest) - RELEASE_MANIFEST_KEYS))})")
+        return (f"keys differ from the release builder's (missing {listed(RELEASE_MANIFEST_KEYS - set(manifest))}; "
+                f"unknown {listed(set(manifest) - RELEASE_MANIFEST_KEYS)})")
     if type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1:
         return "schema_version is not 1"
     if not all(isinstance(manifest[key], str) for key in ("tag", "spec_version", "publication")):
@@ -836,16 +855,16 @@ def _check_manifest(data: bytes, sums: dict[str, str], tag: str, version: str, c
     if problem is not None:
         raise ArtifactRefused("manifest.malformed", f"{RELEASE_MANIFEST} {problem}")
     assert isinstance(manifest, dict)
-    listed = {name: digest for name, digest in sums.items() if name != RELEASE_MANIFEST}
-    if manifest["files"] != listed:
-        differing = sorted(name for name in set(listed) | set(manifest["files"]) if listed.get(name) != manifest["files"].get(name))
-        raise ArtifactRefused("manifest.files_mismatch",
-                              f"{RELEASE_MANIFEST} files disagree with SHA256SUMS for {', '.join(map(ascii, differing))}")
+    expected_files = {name: digest for name, digest in sums.items() if name != RELEASE_MANIFEST}
+    if manifest["files"] != expected_files:
+        differing = [name for name in set(expected_files) | set(manifest["files"])
+                     if expected_files.get(name) != manifest["files"].get(name)]
+        raise ArtifactRefused("manifest.files_mismatch", f"{RELEASE_MANIFEST} files disagree with SHA256SUMS for {listed(differing)}")
     if manifest["tag"] != tag:
-        raise ArtifactRefused("manifest.tag_mismatch", f"{RELEASE_MANIFEST} names tag {ascii(manifest['tag'])}, not {tag}")
+        raise ArtifactRefused("manifest.tag_mismatch", f"{RELEASE_MANIFEST} names tag {shown(manifest['tag'])}, not {tag}")
     if manifest["spec_version"] != version:
         raise ArtifactRefused("manifest.version_mismatch",
-                              f"{RELEASE_MANIFEST} spec_version {ascii(manifest['spec_version'])} is not the tag version {version}")
+                              f"{RELEASE_MANIFEST} spec_version {shown(manifest['spec_version'])} is not the tag version {version}")
     if manifest["commit"] != commit:
         raise ArtifactRefused("manifest.commit_mismatch",
                               f"{RELEASE_MANIFEST} was built from {manifest['commit']}, the tag commit is {commit}")
@@ -855,16 +874,15 @@ def _check_manifest(data: bytes, sums: dict[str, str], tag: str, version: str, c
     providers = manifest["provider_sources_sha256"]
     if providers != {name: sums[name] for name in provider_names}:
         raise ArtifactRefused("manifest.provider_sources_mismatch",
-                              f"{RELEASE_MANIFEST} provider_sources_sha256 is not the digest map of "
-                              f"{', '.join(provider_names)}")
+                              f"{RELEASE_MANIFEST} provider_sources_sha256 is not the digest map of {listed(provider_names)}")
     clients = manifest["clients"]
     if set(clients) != set(pl_contracts.LANGUAGES):
         raise ArtifactRefused("manifest.clients_mismatch",
-                              f"{RELEASE_MANIFEST} clients {sorted(map(ascii, clients))} are not {sorted(pl_contracts.LANGUAGES)}")
+                              f"{RELEASE_MANIFEST} clients {listed(clients)} are not {', '.join(sorted(pl_contracts.LANGUAGES))}")
     for language in pl_contracts.LANGUAGES:
         client, name = clients[language], archive_name(language, tag)
         if client["archive"] != name:
-            raise ArtifactRefused("manifest.clients_mismatch", f"clients[{language}] archive is {ascii(client['archive'])}, not {name}")
+            raise ArtifactRefused("manifest.clients_mismatch", f"clients[{language}] archive is {shown(client['archive'])}, not {name}")
         if client["archive_sha256"] != sums[name]:
             raise ArtifactRefused("manifest.clients_mismatch", f"clients[{language}] archive_sha256 is not the digest of {name}")
         if client["provider_sources_sha256"] != providers:
@@ -1106,8 +1124,7 @@ def _extended_path(records: bytes, where: str) -> str:
         position = end
     if keywords != ["path"]:
         raise ArtifactRefused("archive.ambiguous", f"{where} holds extended header records other than one path "
-                                                   f"({', '.join(map(ascii, keywords[:5])) or 'none'}), which readers "
-                                                   "apply differently")
+                                                   f"({listed(keywords)}), which readers apply differently")
     try:
         return value.decode("ascii")
     except UnicodeDecodeError:
@@ -1251,10 +1268,9 @@ def _strict_members(raw: bytes, prefix: str, name: str) -> list[_Member]:
     parents = {"/".join(parts[:index]) for parts in (member.name.split("/") for member in members
                                                      if member.kind == tarfile.REGTYPE) for index in range(2, len(parts))}
     if directories != parents:
-        extra, missing = sorted(directories - parents)[:3], sorted(parents - directories)[:3]
         raise ArtifactRefused("archive.noncanonical", f"{name}: the directories are not exactly the parents of its files "
-                                                      f"(not a parent: {', '.join(map(ascii, extra)) or 'none'}; missing: "
-                                                      f"{', '.join(map(ascii, missing)) or 'none'})")
+                                                      f"(not a parent: {listed(directories - parents)}; missing: "
+                                                      f"{listed(parents - directories)})")
     if len({member.mtime for member in members}) > 1:
         raise ArtifactRefused("archive.noncanonical", f"{name}: the members do not share one modification time")
     return members
@@ -1295,9 +1311,9 @@ def _embedded_manifest_problem(embedded: object) -> str | None:
         return "digests are not lowercase SHA-256"
     if not _is_count(embedded["file_count"]) or not _is_digest_map(embedded["provider_sources_sha256"]):
         return "file_count or provider_sources_sha256 is malformed"
-    unknown = sorted(map(ascii, set(embedded) - EMBEDDED_MANIFEST_KEYS - EMBEDDED_OPTIONAL_KEYS))
+    unknown = set(embedded) - EMBEDDED_MANIFEST_KEYS - EMBEDDED_OPTIONAL_KEYS
     if unknown:
-        return f"has keys generate_clients.py never writes ({', '.join(unknown[:5])})"
+        return f"has keys generate_clients.py never writes ({listed(unknown)})"
     if "provider_constraints_sha256" in embedded and not _is_hex64(embedded["provider_constraints_sha256"]):
         return "provider_constraints_sha256 is not a lowercase SHA-256"
     if not all(isinstance(embedded[key], dict) for key in ("generation_examples", "generation_model_projection") if key in embedded):
@@ -1353,8 +1369,8 @@ def _check_archive(language: str, tag: str, version: str, data: dict[str, bytes]
                                   f"{name} {MANIFEST_NAME} {key} disagrees with {RELEASE_MANIFEST} and the shipped assets")
     if digest != golden["tree_sha256"] or len(entries) != golden["file_count"]:
         current = dict(entries)
-        differing = sorted(path for path in set(golden["files"]) | set(current) if golden["files"].get(path) != current.get(path))
+        differing = [path for path in set(golden["files"]) | set(current) if golden["files"].get(path) != current.get(path)]
         raise ArtifactRefused("anchor.golden_tree_mismatch",
                               f"{name} tree {digest} is not {GOLDEN_PATH}[{language}].tree_sha256 {golden['tree_sha256']} "
-                              f"at the tag commit; differing paths: {', '.join(map(ascii, differing[:5]))}")
+                              f"at the tag commit; differing paths: {listed(differing)}")
     return {"archive": name, "archive_sha256": sums[name], "tree_sha256": digest, "file_count": len(entries)}

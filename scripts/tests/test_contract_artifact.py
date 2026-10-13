@@ -557,6 +557,35 @@ class ReleaseManifestTest(LoaderTestCase):
     def test_manifest_files_mismatch_refused(self) -> None:
         self.assertSwapRefused("manifest.files_mismatch", edit=lambda manifest: manifest["files"].update({FIXTURE: synthetic_digest("x")}))
 
+    def test_refusal_details_are_bounded(self) -> None:
+        """Review round 2, PSEC-R2-5: a detail listed every name the release chose (400000 unknown manifest keys made a
+        6.4 MB refusal). Now at most five names, each cut to its bound, then how many more; one long value is cut too."""
+        count = 100
+        names = {f"synthetic-{index:03d}.json": synthetic_digest(str(index)) for index in range(count)}
+        cases = {
+            "unknown manifest keys": (lambda release_dir: reseal(release_dir, edit=lambda manifest: manifest.update(
+                dict.fromkeys(names, 0))), "manifest.malformed"),
+            "extra manifest files entries": (lambda release_dir: reseal(release_dir, edit=lambda manifest: manifest["files"].update(
+                names)), "manifest.files_mismatch"),
+            "extra SHA256SUMS entries": (lambda release_dir: write_sums(release_dir, {**read_sums(release_dir), **names}),
+                                         "sums.extra_entry"),
+            "unexpected files": (lambda release_dir: [(release_dir / name).write_text("{}\n", encoding="utf-8") for name in names],
+                                 "asset.unexpected"),
+        }
+        for label, (mutate, rule) in cases.items():
+            with self.subTest(label):
+                release_dir = self.fresh_release(label.replace(" ", "-"))
+                mutate(release_dir)
+                detail = self.assertRefused(rule, release_dir).detail
+                self.assertIn(f"'synthetic-004.json' and {count - 5} more", detail)
+                self.assertNotIn("synthetic-005", detail)
+        with self.subTest("a long tag value"):
+            release_dir = self.fresh_release("long-tag")
+            reseal(release_dir, edit=lambda manifest: manifest.update(tag="v" + "9" * 100_000))
+            detail = self.assertRefused("manifest.tag_mismatch", release_dir).detail
+            self.assertIn("... (100003 characters), not v1.2.3", detail)
+            self.assertLess(len(detail), 400)
+
     def test_manifest_tag_mismatch_refused(self) -> None:
         self.assertSwapRefused("manifest.tag_mismatch", edit=lambda manifest: manifest.update(tag="v1.2.4"))
 
