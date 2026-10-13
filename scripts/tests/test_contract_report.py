@@ -370,12 +370,21 @@ class ReportRuleTest(ReportTestCase):
         later = "2026-01-02T03:04:05.001Z"
         with self.subTest("boundary control: a warning that expires 1 ms after generation is consistent"):
             self.assertDerived(lambda report: report.update(gate=dict(WARNING_GATE, warn_until=later)), "pass", [], True)
+        for reason in contract_gate.UNREAD_REASONS:
+            with self.subTest(f"boundary control: {reason} without the digest of a state that was never read"):
+                self.assertDerived(lambda report, reason=reason: report["gate"].update(reason=reason, state_sha256=None),
+                                   "pass", [], True)
         mutations = {
             "warning reason under the blocking mode": lambda report: report["gate"].update(reason="gate.warn_active"),
             "warning mode with a blocking reason": lambda report: report["gate"].update(mode="warn", warn_until=later),
             "warning that expired at generation": lambda report: report.update(gate=dict(WARNING_GATE, warn_until=SYNTHETIC_INSTANT)),
             "expired reason before the expiry": lambda report: report["gate"].update(reason="gate.warn_expired", warn_until=later),
             "blocking gate naming an expiry": lambda report: report["gate"].update(warn_until=later),
+            # Review round 3, CVR3-3: contract_gate records the digest of every state it read.
+            "a blocking decision without the digest of the state it read": lambda report: report["gate"].update(state_sha256=None),
+            "a warning without the digest of the state it read": lambda report: report.update(
+                gate=dict(WARNING_GATE, state_sha256=None)),
+            "a missing state with a digest": lambda report: report["gate"].update(reason="gate.missing"),
         }
         for label, mutate in mutations.items():
             with self.subTest(label):

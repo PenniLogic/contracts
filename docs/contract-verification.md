@@ -353,7 +353,8 @@ defaults to warn:
 `compat` applies the resolved gate whatever the state's condition. `gate` reports a refused state with
 exit 1 and a missing or unreadable one with exit 2. A valid state exits 0 in either mode, so a pipeline
 reads the effective gate from `gate.mode` in the `--json` output, never from the exit code. A report
-records the decision and the state's SHA-256.
+records the decision and the state's SHA-256, which is null exactly when no state bytes were read
+(`gate.missing`, `gate.unreadable`).
 
 This change does not choose a warning window. Whether the rollout starts with additive detection
 under a warning, and how long any warning may last, are owner decisions. How consumer pipelines in
@@ -417,7 +418,7 @@ rules.
 | `report.live_row_unidentified` | A live row does not name the version or the repository commit it verified. |
 | `report.contract_version_mismatch` | A row that ran names another contract version than the report. |
 | `report.compat_inconsistent` | The class, findings, problems, result, baseline and gate of the compatibility section contradict each other or the contract version, including a breaking change that passed without the version bump `check_breaking_changes.version_bump_ok` requires against the baseline (from 1.x a MAJOR bump, from 0.y a MINOR one; the function is imported, not copied). |
-| `report.gate_inconsistent` | The gate mode, reason and `warn_until` contradict each other or `generated_at`. |
+| `report.gate_inconsistent` | The gate mode, reason and `warn_until` contradict each other or `generated_at`, or `state_sha256` is null for a decision that read the state or set for one that did not (only `gate.missing` and `gate.unreadable` have no digest). |
 | `report.missing_languages_inconsistent`, `report.verdict_inconsistent`, `report.acceptance_eligible_inconsistent` | The declared value differs from the recomputed one. |
 
 | Reason | Verdict |

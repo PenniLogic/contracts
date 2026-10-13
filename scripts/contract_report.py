@@ -23,6 +23,8 @@ adds the rules the schema subset cannot express:
   consumers[].{name, language, version, commit, verified_contract_version}.
 - The compatibility section is consistent with itself, the gate and the contract version; a breaking change
   that passed carries the version bump check_breaking_changes.version_bump_ok requires (imported, not copied).
+- The gate decision is consistent with itself and generated_at, and carries the state's digest exactly when
+  the state was read (only gate.missing and gate.unreadable have none).
 - The declared verdict, missing_languages and acceptance_eligible must equal the recomputed values.
 
 Every problem and every verdict reason carries one static rule ID and a subject: a required language,
@@ -40,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_breaking_changes import version_bump_ok  # noqa: E402
-from contract_gate import VERIFICATION, format_instant, parse_instant  # noqa: E402
+from contract_gate import UNREAD_REASONS, VERIFICATION, format_instant, parse_instant  # noqa: E402
 from contract_schema import (  # noqa: E402
     InputTooLarge, SchemaViolation, StrictJsonError, first_violation, load_schema, parse_strict_json, read_bounded,
 )
@@ -218,7 +220,8 @@ def _consistency_problems(report: dict) -> list[Note]:
         consistent = until is not None and generated >= until
     else:
         consistent = gate["reason"] != "gate.warn_active" and gate["warn_until"] is None
-    if not consistent:
+    # contract_gate records the state's digest for every decision that read it (review round 3, CVR3-3).
+    if not consistent or (gate["state_sha256"] is None) != (gate["reason"] in UNREAD_REASONS):
         problems.append(Note("report.gate_inconsistent", "gate"))
     return problems
 

@@ -172,10 +172,13 @@ class GateStateTest(unittest.TestCase):
             with self.subTest(label):
                 decision = resolve_gate(path, at(UNTIL, -1))
                 self.assertEqual((decision.mode, decision.reason, decision.warn_until), ("block", rule, None))
+                # The report validator relies on this (review round 3, CVR3-3): a digest exactly when bytes were read.
+                self.assertEqual(decision.state_sha256 is None, rule in contract_gate.UNREAD_REASONS)
         with self.subTest("larger than its bound"):
             path = self.write(state_bytes(WARN_STATE), "large.json")
             with mock.patch.object(contract_gate, "MAX_STATE_BYTES", 8):
-                self.assertEqual(resolve_gate(path, at(UNTIL, -1)).reason, "gate.unreadable")
+                self.assertEqual(resolve_gate(path, at(UNTIL, -1)).as_dict(),
+                                 {"mode": "block", "reason": "gate.unreadable", "warn_until": None, "state_sha256": None})
 
     def test_warn_until_must_be_a_real_utc_instant(self) -> None:
         self.assertEqual(parse_gate_state(state_bytes(WARN_STATE)).warn_until, datetime(2026, 11, 1, tzinfo=timezone.utc))

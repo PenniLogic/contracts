@@ -47,6 +47,8 @@ RULES = (
 )
 # Every reason a decision can carry: the three regular outcomes, then the refusals (all of which block).
 DECISIONS = ("gate.block", "gate.warn_active", "gate.warn_expired") + RULES
+# The reasons of a decision made without reading the state's bytes, the only ones without state_sha256.
+UNREAD_REASONS = ("gate.missing", "gate.unreadable")
 
 
 class GateRefused(Exception):
