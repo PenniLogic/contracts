@@ -418,6 +418,8 @@ class ReleaseSetTest(LoaderTestCase):
     def test_release_dir_missing_refused(self) -> None:
         self.load(self.release_dir)
         self.assertRefused("release_dir.missing", self.work / "absent")
+        with self.subTest("a path that cannot be resolved (an embedded NUL; the git lookup resolves the directory first)"):
+            self.assertRefused("release_dir.missing", self.work / "absent\0name")
 
     def test_branch_build_refused(self) -> None:
         """A release set inside the checkout (build/dist/<tag>) is a working-tree build, not the downloaded assets."""

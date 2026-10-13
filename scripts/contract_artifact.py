@@ -340,6 +340,14 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
 GIT_EXECUTABLE = "git.exe" if os.name == "nt" else "git"
 
 
+def _resolved(path: str | Path) -> Path | None:
+    """The absolute path with its symlinks resolved, or None when it cannot be resolved (an embedded NUL, say)."""
+    try:
+        return Path(os.path.abspath(path)).resolve()
+    except (OSError, ValueError):
+        return None
+
+
 def trusted_git(release_dir: Path | None = None) -> str | None:
     """The first git executable in an absolute PATH entry, never one inside `release_dir`; None if there is none.
 
@@ -348,18 +356,19 @@ def trusted_git(release_dir: Path | None = None) -> str | None:
     downloaded release directory (`gh release download` without --dir), whose files anyone who can
     replace a Release asset controls, and git runs before that directory is checked (review round 2,
     PSEC-R2-4). So only absolute entries are searched, a git that resolves into the release directory is
-    skipped, and on Windows only git.exe is taken, never a .bat or .cmd file.
+    skipped, and on Windows only git.exe is taken, never a .bat or .cmd file. A release directory that
+    cannot be resolved holds no git; the loader refuses it as release_dir.missing.
     """
     path = os.environ.get("PATH")
-    excluded = None if release_dir is None else Path(os.path.abspath(release_dir)).resolve()
+    excluded = None if release_dir is None else _resolved(release_dir)
     for entry in (os.defpath if path is None else path).split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
         candidate = Path(os.path.abspath(os.path.join(entry, GIT_EXECUTABLE)))
         if not candidate.is_file() or not os.access(candidate, os.X_OK):
             continue
-        resolved = candidate.resolve()
-        if excluded is not None and (resolved == excluded or excluded in resolved.parents):
+        resolved = _resolved(candidate)
+        if resolved is None or (excluded is not None and (resolved == excluded or excluded in resolved.parents)):
             continue
         return str(candidate)
     return None
