@@ -485,6 +485,14 @@ directory anywhere else inside the checkout is refused;
 checkout. Every refusal test runs a passing control, applies exactly one mutation and asserts the exact
 rule ID.
 
+The modules have been run on Windows only in a limited form: once with Windows Python 3.14.2 and Git for
+Windows 2.52.0, where all 167 tests passed and one subtest was skipped because that environment cannot
+create symlinks. That run was not from a Windows checkout. The code and every temporary directory were
+on a Linux (WSL) file system reached through a `\\wsl.localhost` path, and the tests' global git
+configuration held `safe.directory=*` instead of being empty, because Git for Windows refuses
+repositories there otherwise. A run from an NTFS checkout, with its own temporary directory and
+`file:///C:/` URLs, is unverified.
+
 ## Held criteria and open questions
 
 - No published tag or Release exists. Acceptance criterion 5 (verification against the published
