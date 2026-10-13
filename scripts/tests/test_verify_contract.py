@@ -244,6 +244,18 @@ class ArtifactCommandTest(CommandTestCase):
             code, out, err = self.run_command(*self.artifact_argv())
             self.assertEqual((code, out), (2, ""))
             self.assertIn(f"[{rule}]", err)
+        rule = "repository.objects_missing"
+        with self.subTest("a blob-less partial clone: the checkout lacks the tag's files and git never fetches them"):
+            origin = work / "filtered-origin.git"
+            shutil.copytree(self.contracts.origin, origin)
+            support.git(origin, "config", "uploadpack.allowFilter", "true")
+            url = origin.as_uri()
+            partial = work / "partial-clone"
+            support.git(work, "clone", "--quiet", "--no-checkout", "--filter=blob:none", url, str(partial))
+            with mock.patch.object(contract_artifact, "CANONICAL_REMOTE_URLS", (url,)):
+                code, out, err = self.run_command(*self.artifact_argv(repo=partial))
+            self.assertEqual((code, out), (2, ""))
+            self.assertIn(f"[{rule}]", err)
 
     def test_hostile_archive_refused_with_one_json_document(self) -> None:
         """Hostile archives are refusals with a static rule and exit 1, never a traceback with empty stdout."""
@@ -465,11 +477,11 @@ class WriteBoundaryTest(CommandTestCase):
         )
         git = contract_artifact.trusted_git(self.release_dir)
         self.assertIsNotNone(git)
-        runs: list[list[str]] = []
+        runs: list[tuple[list[str], dict]] = []
         run = contract_artifact.subprocess.run
 
         def recording_run(argv, *args, **kwargs):
-            runs.append([os.fsdecode(part) for part in argv])
+            runs.append(([os.fsdecode(part) for part in argv], dict(kwargs.get("env") or {})))
             return run(argv, *args, **kwargs)
 
         with mock.patch.object(tempfile, "tempdir", str(scratch)), contextlib.chdir(cwd), \
@@ -485,9 +497,13 @@ class WriteBoundaryTest(CommandTestCase):
         self.assertEqual([support.snapshot(path) for path in watched], before)
         self.assertTrue(runs)
         self.assertEqual(len(recorder.process_starts), len(runs), recorder.process_starts)
-        for argv in runs:
+        for argv, environment in runs:
             self.assertEqual((argv[0], argv[1:3]), (git, ["-C", str(self.contracts.repo)]), argv)
             self.assertIn(tuple(argv[3:5]) if argv[3] == "remote" else argv[3], READ_ONLY_GIT, argv)
+            # Review round 3, PSEC-R3-1: git itself may start processes (a lazy fetch in a partial clone), which no hook
+            # here sees, so every git runs without lazy fetching and every one but ls-remote without any transport.
+            self.assertEqual((environment.get("GIT_NO_LAZY_FETCH"), environment.get("GIT_ALLOW_PROTOCOL")),
+                             ("1", None if argv[3] == "ls-remote" else ""), argv)
 
 
 class TemporaryRootTest(unittest.TestCase):

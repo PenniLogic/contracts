@@ -282,6 +282,33 @@ class TagProvenanceTest(LoaderTestCase):
             with self.subTest(repo=repo.name):
                 self.assertRefused("repository.invalid", self.release_dir, repo=repo)
 
+    def test_partial_clone_refused_without_fetching(self) -> None:
+        """Review round 3, PSEC-R3-1: in a blob-less clone (CI checkouts often use `filter: blob:none`) git fetched the
+        tag's files from the clone's promisor remote, which can be a mirror rather than the verified remote, and wrote
+        72 files into the checkout; with that remote offline the refusal read like a bad tag. Git now never fetches:
+        the checkout is refused and stays unchanged. Control: a full clone of the same origin. The last case removes
+        GIT_NO_LAZY_FETCH, as a git older than 2.45 ignores it; the empty transport allow list still stops the fetch."""
+        contracts = self.fresh_contracts()
+        git(contracts.origin, "config", "uploadpack.allowFilter", "true")
+        url = contracts.origin.as_uri()
+        full = self.work / "full-clone"
+        git(self.work, "clone", "--quiet", "--no-checkout", url, str(full))
+        self.load(self.release_dir, contracts=contracts, repo=full, accepted=(url,))  # control: the checkout has every object
+        cases = (("a blob-less clone", "blob:none", ()), ("a treeless clone", "tree:0", ()),
+                 ("a blob-less clone and a git that ignores GIT_NO_LAZY_FETCH", "blob:none", ("GIT_NO_LAZY_FETCH",)))
+        for index, (label, specification, ignored) in enumerate(cases):
+            with self.subTest(label):
+                clone = self.work / f"partial-clone-{index}"
+                git(self.work, "clone", "--quiet", "--no-checkout", f"--filter={specification}", url, str(clone))
+                before = snapshot(clone / ".git")
+                with mock.patch.dict(contract_artifact.GIT_ENVIRONMENT):
+                    for key in ignored:
+                        del contract_artifact.GIT_ENVIRONMENT[key]
+                    refusal = self.assertRefused("repository.objects_missing", self.release_dir, contracts=contracts, repo=clone,
+                                                 accepted=(url,))
+                self.assertIn("partial clone", refusal.detail)
+                self.assertEqual(snapshot(clone / ".git"), before, "git fetched or wrote objects into the checkout")
+
     def test_git_unavailable_refused(self) -> None:
         self.load(self.release_dir)
         with mock.patch.dict(os.environ, {"PATH": str(self.work)}):

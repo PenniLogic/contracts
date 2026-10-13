@@ -38,8 +38,8 @@ also for a usage error: `{"command": ..., "usage_error": {"rule": ..., "detail":
 `command` is null when no subcommand was recognized. Without `--json`, usage errors go to stderr.
 Usage rule IDs are `usage.arguments` (the command line itself: an unknown or missing option or
 subcommand; options cannot be abbreviated), `input.missing`, `input.unreadable` and `input.not_json`,
-the loader's `git.unavailable`, `repository.invalid` and `remote.invalid`, and the `compat.*` refusals
-below.
+the loader's `git.unavailable`, `repository.invalid`, `repository.objects_missing` and `remote.invalid`,
+and the `compat.*` refusals below.
 
 A missing input file of `compat` (a document, detector output or a named acknowledgement), of `gate`
 or of `report` exits 2, not 1: the command could not evaluate anything, and 2 keeps that apart from an
@@ -53,7 +53,13 @@ with the same path exits 2 (`input.missing`).
 There is no clock option: the commands use the real UTC clock, and tests inject one through
 `verify_contract.main(argv, clock=...)`. Nothing is written to disk except the loader's temporary
 unpack directory, which is removed before the command returns. The only network access is the
-loader's `git ls-remote` against the configured remote.
+loader's `git ls-remote` against the configured remote. Every git process runs with
+`GIT_NO_LAZY_FETCH=1`, and every one except `git ls-remote` with an empty `GIT_ALLOW_PROTOCOL`, which
+allows no transport. So a partial clone (`git clone --filter=blob:none`, common in CI checkouts) never
+fetches the objects it lacks from its promisor remote, which can be another remote than the one
+verified, and never writes them into the checkout; the loader refuses it instead
+(`repository.objects_missing`). git 2.45 and later honour `GIT_NO_LAZY_FETCH`; for an older git the
+empty transport list alone stops the fetch.
 
 ## What "published artifact" means
 
@@ -96,8 +102,8 @@ reported `not_run`, so a verified artifact never implies it. Run the verifier fr
 of this repository's `main`, not from the tag's own checkout: the tag's tree carries the verifier code
 that its tagger controlled.
 
-The loader downloads nothing. It unpacks the archives into a temporary directory and removes it
-before it returns. It refuses with `ArtifactRefused`, whose `rule` is one of the static IDs below.
+The loader downloads nothing: it reads the tag's files from the checkout's own objects. It unpacks the
+archives into a temporary directory and removes it before it returns. It refuses with `ArtifactRefused`, whose `rule` is one of the static IDs below.
 It stops at the first failing rule. The `detail` text names at most five assets, keys or paths and
 counts the rest, and shows at most 200 characters of one value, so a hostile release cannot flood a
 log through it.
@@ -118,6 +124,7 @@ acceptance-eligible (see the report section).
 | `tag.grammar` | The tag does not fully match `check_breaking_changes.TAG`. That covers leading zeros, a trailing newline, branch names, commit IDs, `refs/tags/...` and pre-release suffixes. |
 | `git.unavailable` | There is no `git` (on Windows `git.exe`) in an absolute `PATH` entry outside the release directory. An empty, `.` or relative entry is never searched, nor the current directory that Windows searches first: the current directory can hold the downloaded Release assets, and git runs before they are checked. |
 | `repository.invalid` | `repo` is not the top level of a git checkout. |
+| `repository.objects_missing` | The checkout cannot provide an object of the tag commit that the loader reads: a partial clone (`git clone --filter=blob:none` or `--filter=tree:0`) lacks it, or the object store is damaged. Git never fetches it here, so this names the checkout, not the tag; verify from a full clone. |
 | `release_dir.missing` | The release directory does not exist. |
 | `release_dir.inside_repository` | The release directory is inside the checkout, for example `build/dist/<tag>`. That is a working-tree build, not the downloaded assets. |
 | `remote.invalid` | The remote is not a plain name configured in the checkout. An unconfigured name could resolve to a local path. |
@@ -447,7 +454,8 @@ The modules are also part of the repository's complete test run. On main that ru
   temporary directory. It uses hermetic git (`-c user.name`, `-c user.email`, signing off, no global or
   system configuration, fixed dates) and a temporary bare origin.
   `test_builder_and_loader_keys_agree` fails when the builder's output keys and the loader's expected
-  keys diverge. `ArchiveReaderDifferentialTest` replays the archives that verified as golden under
+  keys diverge. `test_partial_clone_refused_without_fetching` refuses blob-less and treeless clones,
+  also with `GIT_NO_LAZY_FETCH` removed as an older git ignores it, and requires their `.git` unchanged. `ArchiveReaderDifferentialTest` replays the archives that verified as golden under
   tarfile while GNU tar or node-tar unpacked other bytes, and `ArchiveMemberRulesTest` mutates the
   builder's own archive one header field at a time.
 - `test_contract_compat.py`: the gate (expiry boundary at `warn_until` minus 1 ms and at `warn_until`,

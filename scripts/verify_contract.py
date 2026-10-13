@@ -20,7 +20,8 @@ release directory is a refused artifact), 2 usage error or a missing, unreadable
 the reason in its output and exits as the comparison does. Results go to stdout (with --json, one JSON
 document, also for a usage error); without --json usage errors go to stderr. Nothing is written to disk
 except the loader's temporary unpack directory, which is removed before the command returns. The only
-network access is the loader's `git ls-remote` against the configured remote. No run of this command is
+network access is the loader's `git ls-remote` against the configured remote: git never fetches the
+objects a partial clone lacks (repository.objects_missing, exit 2). No run of this command is
 product verification unless its report says acceptance_eligible, which needs a published artifact whose
 every check passed (the held GitHub Release presence check included), the live provider and every live
 consumer.
@@ -54,7 +55,7 @@ RULES = ("input.missing", "input.unreadable", "input.not_json", "usage.arguments
 COMMANDS = ("artifact", "gate", "compat", "report")
 # Loader refusals about the command's own arguments or environment rather than about the artifact. A missing
 # release directory is not among them: it is a missing artifact, which is refused (exit 1).
-ARTIFACT_USAGE_RULES = frozenset({"git.unavailable", "repository.invalid", "remote.invalid"})
+ARTIFACT_USAGE_RULES = frozenset({"git.unavailable", "repository.invalid", "repository.objects_missing", "remote.invalid"})
 USAGE_RULES = frozenset(RULES) | ARTIFACT_USAGE_RULES | frozenset(contract_compat.RULES)
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_LINE_TEXT = 400

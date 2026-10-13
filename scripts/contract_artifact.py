@@ -42,7 +42,10 @@ docs/contract-verification.md lists them.
    at the tag.
 
 The GitHub Release presence check needs the network and is held. The result reports it as not_run,
-so a loaded artifact alone never claims that the Release exists.
+so a loaded artifact alone never claims that the Release exists. Git reads only the checkout apart from
+that one `git ls-remote`: every git process runs with GIT_NO_LAZY_FETCH=1, and every one but ls-remote
+with an empty GIT_ALLOW_PROTOCOL (no transport at all), so a partial clone that lacks the tag's files is
+refused (repository.objects_missing) instead of fetching them from its promisor remote.
 """
 
 from __future__ import annotations
@@ -81,7 +84,7 @@ RULES = (
     "archive.duplicate_member", "archive.case_collision", "archive.manifest_missing", "archive.manifest_invalid",
     "archive.tree_mismatch", "archive.manifest_mismatch", "anchor.golden_tree_mismatch", "archive.ambiguous",
     "archive.noncanonical", "release.format_unsupported", "remote.not_canonical", "tag.pin_mismatch",
-    "tag.not_on_main", "anchor.manifest_metadata_mismatch",
+    "tag.not_on_main", "anchor.manifest_metadata_mismatch", "repository.objects_missing",
 )
 
 RELEASE_MANIFEST = "release-manifest.json"
@@ -340,6 +343,20 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
 # --- git ---------------------------------------------------------------------------------------------
 
 GIT_EXECUTABLE = "git.exe" if os.name == "nt" else "git"
+# The environment of every git process: no prompt, no replace objects, literal pathspecs, the C locale, and no lazy
+# fetching. A partial clone (`git clone --filter=blob:none`, common in CI checkouts) lacks the tag's files; git would
+# fetch each missing object from the clone's promisor remote, which can be another remote than the one verified (a
+# mirror), and write packs into the checkout (review round 3, PSEC-R3-1). git 2.45 and later honour GIT_NO_LAZY_FETCH.
+GIT_ENVIRONMENT = {
+    "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_LITERAL_PATHSPECS": "1", "GIT_NO_LAZY_FETCH": "1",
+    "LC_ALL": "C", "LANGUAGE": "C",
+}
+# Added for every git process except `git ls-remote`: an empty transport allow list, so even a git older than 2.45,
+# which ignores GIT_NO_LAZY_FETCH, cannot fetch (git reads GIT_ALLOW_PROTOCOL as a colon-separated allow list).
+OFFLINE_ENVIRONMENT = {"GIT_ALLOW_PROTOCOL": ""}
+# Why the checkout cannot provide an object of the tag commit that it lists.
+OBJECTS_MISSING = ("the checkout lacks objects of the tag commit, as a partial clone (git clone --filter=...) does, or its "
+                   "object store is damaged; the loader never fetches objects, so verify from a full clone")
 
 
 def _resolved(path: str | Path) -> Path | None:
@@ -377,7 +394,10 @@ def trusted_git(release_dir: Path | None = None) -> str | None:
 
 
 class _Git:
-    """Plumbing commands against exactly one repository, with a trusted executable and bounded time."""
+    """Plumbing commands against exactly one repository, with a trusted executable and bounded time.
+
+    Only `git ls-remote` (run with network=True) may use a transport; every other command reads the checkout alone.
+    """
 
     def __init__(self, repo: Path, release_dir: Path | None = None) -> None:
         executable = trusted_git(release_dir)
@@ -386,34 +406,39 @@ class _Git:
         self.executable = executable
         self.repo = repo
         environment = {key: value for key, value in os.environ.items() if key not in REPOSITORY_ENVIRONMENT}
-        environment.update({
-            "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_LITERAL_PATHSPECS": "1",
-            "LC_ALL": "C", "LANGUAGE": "C",
-        })
+        environment.update(GIT_ENVIRONMENT)
         self.environment = environment
+        self.offline_environment = {**environment, **OFFLINE_ENVIRONMENT}
 
-    def run(self, *args: str, input_data: bytes = b"") -> subprocess.CompletedProcess[bytes] | None:
+    def run(self, *args: str, input_data: bytes = b"", network: bool = False) -> subprocess.CompletedProcess[bytes] | None:
         """Return the completed process, or None when git could not start or exceeded the time bound."""
         try:
             return subprocess.run(
-                [self.executable, "-C", str(self.repo), *args], input=input_data, capture_output=True, env=self.environment,
-                timeout=GIT_TIMEOUT_SECONDS, check=False,
+                [self.executable, "-C", str(self.repo), *args], input=input_data, capture_output=True,
+                env=self.environment if network else self.offline_environment, timeout=GIT_TIMEOUT_SECONDS, check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
 
 
-def _read_objects(git: _Git, names: list[str], rule: str, what: str) -> list[tuple[str, str, bytes] | None]:
-    """Read objects with one `git cat-file --batch`: (object ID, type, content), or None for a missing name."""
+def _outcome(completed: subprocess.CompletedProcess[bytes] | None) -> str:
+    return "no exit status (start failure or timeout)" if completed is None else f"exit {completed.returncode}"
+
+
+def _read_objects(git: _Git, names: list[str], rule: str, what: str, why: str = "") -> list[tuple[str, str, bytes] | None]:
+    """Read objects with one `git cat-file --batch`: (object ID, type, content), or None for a missing name.
+
+    A refusal names `what` and then `why`, when given.
+    """
     completed = git.run("cat-file", "--batch", input_data="".join(f"{name}\n" for name in names).encode("utf-8"))
     if completed is None or completed.returncode != 0:
-        raise ArtifactRefused(rule, f"{what} cannot be read")
+        raise ArtifactRefused(rule, f"{what} cannot be read ({_outcome(completed)}){why}")
     output, position = completed.stdout, 0
     objects: list[tuple[str, str, bytes] | None] = []
     for name in names:
         newline = output.find(b"\n", position)
         if newline < 0:
-            raise ArtifactRefused(rule, f"{what}: git returned a truncated object stream")
+            raise ArtifactRefused(rule, f"{what}: git returned a truncated object stream{why}")
         header = output[position:newline].decode("utf-8", "replace")
         position = newline + 1
         if header == f"{name} missing":
@@ -421,11 +446,11 @@ def _read_objects(git: _Git, names: list[str], rule: str, what: str) -> list[tup
             continue
         fields = header.split(" ")
         if len(fields) != 3 or OBJECT_ID.fullmatch(fields[0]) is None or not fields[2].isdigit():
-            raise ArtifactRefused(rule, f"{what}: git returned an unexpected object header")
+            raise ArtifactRefused(rule, f"{what}: git returned an unexpected object header{why}")
         size = int(fields[2])
         content = output[position:position + size]
         if len(content) != size or output[position + size:position + size + 1] != b"\n":
-            raise ArtifactRefused(rule, f"{what}: git returned a truncated object stream")
+            raise ArtifactRefused(rule, f"{what}: git returned a truncated object stream{why}")
         objects.append((fields[0], fields[1], content))
         position += size + 1
     return objects
@@ -546,10 +571,10 @@ def _resolve_annotated_tag(git: _Git, tag: str) -> tuple[str, str]:
 def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: str) -> str | None:
     """Refuse a tag the remote does not carry as this tag object; return the remote main's commit, if any."""
     ref = f"refs/tags/{tag}"
-    completed = git.run("ls-remote", remote, ref, MAIN_REF)
+    completed = git.run("ls-remote", remote, ref, MAIN_REF, network=True)
     if completed is None or completed.returncode != 0:
-        outcome = "no exit status (start failure or timeout)" if completed is None else f"exit {completed.returncode}"
-        raise ArtifactRefused("tag.remote_unreachable", f"git ls-remote {remote} failed ({outcome}); publication is unknown")
+        raise ArtifactRefused("tag.remote_unreachable",
+                              f"git ls-remote {remote} failed ({_outcome(completed)}); publication is unknown")
     advertised: dict[str, str] = {}
     for line in completed.stdout.decode("utf-8", "replace").splitlines():
         object_id, _, name = line.partition("\t")
@@ -570,7 +595,9 @@ def _check_published(git: _Git, remote: str, tag: str, tag_object: str, commit: 
 class _TagTree:
     """The files of the tag commit that the release set and its manifests are built from.
 
-    Every regular file under these paths is read with one git process when the tree is listed.
+    Every regular file under these paths is read with one git process when the tree is listed. A path the tree
+    does not list as a regular file is anchor.tag_file_missing; an object the tree lists but the checkout cannot
+    provide is repository.objects_missing, because git never fetches it here.
     """
 
     def __init__(self, git: _Git, commit: str) -> None:
@@ -580,7 +607,8 @@ class _TagTree:
                             FORMAT_PATH, RELEASE_SOURCE_PATH, IGNORE_PATH, *CONFIG_PATHS.values(), *RUNTIME_PATHS.values()})
         completed = git.run("ls-tree", "-r", "-z", "--full-tree", commit, "--", *pathspecs)
         if completed is None or completed.returncode != 0:
-            raise ArtifactRefused("anchor.tag_file_missing", f"the tree of the tag commit {commit} cannot be listed")
+            raise ArtifactRefused("repository.objects_missing",
+                                  f"the tree of the tag commit {commit} cannot be listed ({_outcome(completed)}): {OBJECTS_MISSING}")
         self.entries: dict[str, tuple[str, str, str]] = {}
         for record in completed.stdout.split(b"\0"):
             if record:
@@ -631,11 +659,12 @@ class _TagTree:
             return
         unique = sorted(set(object_ids.values()))
         what = f"the files of the tag commit {self.commit}"
-        objects = dict(zip(unique, _read_objects(self.git, unique, "anchor.tag_file_missing", what)))
+        objects = dict(zip(unique, _read_objects(self.git, unique, "repository.objects_missing", what, f": {OBJECTS_MISSING}")))
         for path, object_id in object_ids.items():
             entry = objects[object_id]
             if entry is None or entry[1] != "blob":
-                raise ArtifactRefused("anchor.tag_file_missing", f"{ascii(path)} cannot be read at the tag commit {self.commit}")
+                raise ArtifactRefused("repository.objects_missing",
+                                      f"{ascii(path)} at the tag commit {self.commit} cannot be read: {OBJECTS_MISSING}")
             if len(entry[2]) > MAX_TAG_BLOB_BYTES:
                 raise ArtifactRefused("asset.too_large", f"{ascii(path)} at the tag commit exceeds {MAX_TAG_BLOB_BYTES} bytes")
             self.contents[path] = entry[2]
