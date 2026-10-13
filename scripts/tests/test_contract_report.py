@@ -370,7 +370,7 @@ class ReportRuleTest(ReportTestCase):
         later = "2026-01-02T03:04:05.001Z"
         with self.subTest("boundary control: a warning that expires 1 ms after generation is consistent"):
             self.assertDerived(lambda report: report.update(gate=dict(WARNING_GATE, warn_until=later)), "pass", [], True)
-        for reason in contract_gate.UNREAD_REASONS:
+        for reason in ("gate.missing", "gate.unreadable"):  # written out, not read from contract_gate.UNREAD_REASONS
             with self.subTest(f"boundary control: {reason} without the digest of a state that was never read"):
                 self.assertDerived(lambda report, reason=reason: report["gate"].update(reason=reason, state_sha256=None),
                                    "pass", [], True)

@@ -1314,7 +1314,7 @@ class ArchiveMemberRulesTest(unittest.TestCase):
                                                         wraps=contract_artifact._pax_record) as parse:
                 with self.assertRaises(ArtifactRefused) as caught:
                     contract_artifact.inspect_archive_members(self.with_extended_records(records), self.PREFIX, self.NAME)
-                parsed = [call.args[1] for call in parse.call_args_list if call.args[0] == records]  # record positions
+                parsed = [call.args[1] for call in parse.call_args_list if call.args[2] == where]  # this header's records
                 self.assertEqual((caught.exception.rule, caught.exception.detail, parsed),
                                  ("archive.ambiguous", f"{where} holds extended header records other than one path ({names}), "
                                                        "which readers apply differently", [0, len(record)]))
