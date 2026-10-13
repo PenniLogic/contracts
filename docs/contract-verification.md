@@ -416,7 +416,7 @@ rules.
 | `report.synthetic_row_name` | A `synthetic-fixture` row is not named `synthetic-<language>` (`synthetic-provider`), or a `live` row is named `synthetic-*`. A `not_run` row may carry either kind of name. |
 | `report.live_row_unidentified` | A live row does not name the version or the repository commit it verified. |
 | `report.contract_version_mismatch` | A row that ran names another contract version than the report. |
-| `report.compat_inconsistent` | The class, findings, problems, result, baseline and gate of the compatibility section contradict each other or the contract version. |
+| `report.compat_inconsistent` | The class, findings, problems, result, baseline and gate of the compatibility section contradict each other or the contract version, including a breaking change that passed without the version bump `check_breaking_changes.version_bump_ok` requires against the baseline (from 1.x a MAJOR bump, from 0.y a MINOR one; the function is imported, not copied). |
 | `report.gate_inconsistent` | The gate mode, reason and `warn_until` contradict each other or `generated_at`. |
 | `report.missing_languages_inconsistent`, `report.verdict_inconsistent`, `report.acceptance_eligible_inconsistent` | The declared value differs from the recomputed one. |
 

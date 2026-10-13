@@ -21,6 +21,8 @@ adds the rules the schema subset cannot express:
 - A published report names the tag, the tag commit, the annotated tag object and the release manifest.
   The join keys other records use are contract.{version, tag, tag_commit, spec_sha256} and
   consumers[].{name, language, version, commit, verified_contract_version}.
+- The compatibility section is consistent with itself, the gate and the contract version; a breaking change
+  that passed carries the version bump check_breaking_changes.version_bump_ok requires (imported, not copied).
 - The declared verdict, missing_languages and acceptance_eligible must equal the recomputed values.
 
 Every problem and every verdict reason carries one static rule ID and a subject: a required language,
@@ -37,6 +39,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_breaking_changes import version_bump_ok  # noqa: E402
 from contract_gate import VERIFICATION, format_instant, parse_instant  # noqa: E402
 from contract_schema import (  # noqa: E402
     InputTooLarge, SchemaViolation, StrictJsonError, first_violation, load_schema, parse_strict_json, read_bounded,
@@ -199,7 +202,11 @@ def _consistency_problems(report: dict) -> list[Note]:
             and (compat["change_class"] != "none" or compat["baseline"] == f"v{version}")
             and (compat["result"] == "pass") == (not compat["problems"])
             and (compat["result"] != "warn" or gate["mode"] == "warn")
-            and (compat["result"] != "fail" or gate["mode"] == "block"))
+            and (compat["result"] != "fail" or gate["mode"] == "block")
+            # A breaking change passes the acknowledgement protocol only with the bump check_breaking_changes
+            # requires (review round 3, CVR3-2): from 1.x a MAJOR bump, from 0.y a MINOR one.
+            and (compat["change_class"] != "breaking" or compat["result"] != "pass"
+                 or version_bump_ok(compat["baseline"], version)[0]))
     else:
         consistent = consistent and not compat["findings"] and not compat["problems"]
     if not consistent:

@@ -345,6 +345,27 @@ class ReportRuleTest(ReportTestCase):
             with self.subTest(label):
                 self.assertProblems([("report.compat_inconsistent", "compatibility")], mutate)
 
+    def test_breaking_change_that_passed_needs_the_required_version_bump(self) -> None:
+        """Review round 3, CVR3-2: a breaking change that passed without the bump check_breaking_changes.version_bump_ok
+        requires was a valid, acceptance-eligible report (published v1.2.2 -> 1.2.3). Boundary pairs as in
+        test_acknowledged_break_without_the_required_bump_fails: from 1.x a MAJOR bump, from 0.y a MINOR bump."""
+        def breaking_pass(baseline: str, version: str):
+            def mutate(report: dict) -> None:
+                report["contract"].update(version=version, tag=f"v{version}")
+                for row in [report["provider"], *report["consumers"]]:
+                    row["verified_contract_version"] = version
+                report["compatibility"] = {"baseline": baseline, "revision_version": version, "change_class": "breaking",
+                                           "findings": [dict(FINDING)], "problems": [], "result": "pass"}
+            return mutate
+
+        for baseline, enough, short in (("v1.2.3", "2.0.0", "1.3.0"), ("v0.4.1", "0.5.0", "0.4.2")):
+            with self.subTest(f"boundary control: {baseline} to {enough}"):
+                self.assertDerived(breaking_pass(baseline, enough), "pass", [], True)
+            with self.subTest(f"{baseline} to {short}"):
+                self.assertProblems([("report.compat_inconsistent", "compatibility")], breaking_pass(baseline, short))
+        with self.subTest("the baseline's own version"):
+            self.assertProblems([("report.compat_inconsistent", "compatibility")], breaking_pass("v1.2.3", "1.2.3"))
+
     def test_gate_section_inconsistent_refused(self) -> None:
         later = "2026-01-02T03:04:05.001Z"
         with self.subTest("boundary control: a warning that expires 1 ms after generation is consistent"):
