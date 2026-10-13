@@ -111,6 +111,21 @@ async function withLintProbe(check) {
   }
 }
 
+async function lintRefusals(files) {
+  const result = await run("python", [path.join(ROOT, "scripts", "lint_spec.py"), "--refusal-specs", ...files]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const batch = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(batch).sort(), ["cli_exit_code", "documents"]);
+  assert.equal(batch.cli_exit_code, result.status);
+  assert.equal(batch.documents.length, files.length);
+  for (const [index, document] of batch.documents.entries()) {
+    assert.deepEqual(Object.keys(document).sort(), ["findings", "source"]);
+    assert.equal(document.source, files[index].split(path.sep).join("/"));
+    assert.ok(Array.isArray(document.findings) && document.findings.length > 0, document.source);
+  }
+  return batch;
+}
+
 test("lint subprocess helper preserves complete stdout, stderr and zero/nonzero exit codes", async () => {
   for (const status of [0, 1, 2]) {
     const result = await run(process.execPath, ["-e",
@@ -784,7 +799,8 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
     direct: { calls: 0, elapsedNs: 0n },
     intermediate: { calls: 0, elapsedNs: 0n },
   };
-  await withLintProbe(async (lint) => {
+  await withLintProbe(async (_lint, directory) => {
+    const documents = [];
     const annotations = {
       title: "Synthetic scalar", description: "Synthetic scalar.", default: null,
       example: null, examples: null, deprecated: true, "x-pennilogic-strict-provider": false,
@@ -819,14 +835,23 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
         assert.deepEqual(compiled.schemas, control.schemas, annotation);
         assert.deepEqual(compiled.roots, control.roots, annotation);
         assert.equal(noAddress(doc).length, 2, `${annotation}/${intermediate}`);
-        const result = await lint(doc);
-        assert.equal(result.status, 1, result.stdout + result.stderr);
-        for (const [member, role] of [["target", "host"], ["segment", "pathPrefix"]]) {
-          assert.ok(result.stderr.split(/\r?\n/).some((line) =>
-            line.includes("[pl-no-inference-address]") && line.includes(`properties.${member}.$ref)`) &&
-            line.includes(`registration-only ${role} address schema`) && line.includes("destinationId/custom_model_id")),
-          `${annotation}/${intermediate}: ${result.stdout}${result.stderr}`);
-        }
+        const file = path.join(directory, `annotation-${String(documents.length).padStart(2, "0")}.json`);
+        fs.writeFileSync(file, JSON.stringify(doc), { flag: "wx" });
+        documents.push({ file, annotation, intermediate });
+      }
+    }
+    assert.equal(documents.length, 20);
+    const batch = await lintRefusals(documents.map(({ file }) => file));
+    for (const [index, { annotation, intermediate }] of documents.entries()) {
+      const actual = batch.documents[index].findings;
+      for (const [member, role] of [["target", "host"], ["segment", "pathPrefix"]]) {
+        const at = ["paths", "/ai/inference", "post", "requestBody", "content", "application/json", "schema", "properties", member, "$ref"];
+        assert.equal(actual.filter((finding) =>
+          finding.code === "pl-no-inference-address" && finding.severity === 0 &&
+          JSON.stringify(finding.path) === JSON.stringify(at) &&
+          finding.message.includes(`registration-only ${role} address schema`) &&
+          finding.message.includes("destinationId/custom_model_id")).length, 1,
+        `${annotation}/${intermediate}/${member}: ${JSON.stringify(actual)}`);
       }
     }
   });

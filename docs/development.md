@@ -98,9 +98,11 @@ Cold runs download Gradle and the Kotlin toolchain (several minutes).
 ### Source-test scheduling and timing
 
 The custom-destination Node suite uses the built-in test runner's concurrency limit of two.
-Each lint test still starts the real `python scripts/lint_spec.py` and pinned Spectral CLI for
-every original complete input. Tests own separate temporary directories and companion files;
-within a test, each lint process and its assertions finish before that document is changed.
+Lint tests use the real `python scripts/lint_spec.py` and pinned Spectral CLI for every
+original complete input. Only the enrollment-annotation case batches its twenty immutable
+negative documents into one CLI invocation. Other cases retain the single-spec route.
+Tests own separate temporary directories and companion files; mutable single-spec probes
+finish their lint process and assertions before the document is changed.
 Asynchronous cleanup waits for the callback, including failures. Launch errors, output overflow
 and abnormal termination fail rather than becoming clean lint results. Dedicated controls check
 exit codes, complete stdout/stderr, concurrent positive/negative isolation and cleanup.
@@ -130,7 +132,7 @@ in place with `process.hrtime.bigint()`. After every case and probe cleanup succ
 ten direct and ten intermediate calls and emits one `pre_annotation_compile` JSON diagnostic
 through the Node test reporter. Each shape contains numeric `calls` and a decimal-string
 `elapsed_ns` cumulative total. The twenty annotated compiles, address checks and real lint
-invocations remain unchanged; no control is cached or hoisted. These are monotonic wall-clock
+evaluations remain; no control is cached or hoisted. These are monotonic wall-clock
 measurements around the control calls, not CPU time, net savings, lint-time attribution or
 evidence of a 600-second improvement. No timing threshold is asserted.
 
@@ -144,6 +146,29 @@ its own actual hosted job and whole-run measurements. Contract/runtime acceptanc
 and the documented stock Spectral example-resolution limitation are unchanged.
 
 ## Lint
+
+The additive `python scripts/lint_spec.py --refusal-specs <files...>` route is deliberately
+limited to immutable negative fixtures. It runs the same CLI/ruleset/fail-severity/output flags
+once, retains the actual global exit separately and emits JSON with every complete finding
+attributed to its input. It does not invent per-document process exits. Every input must have
+at least one error or warning: a clean document, missing attribution, duplicate input/finding,
+foreign source, malformed finding/JSON or CLI error fails explicitly with exit 2 and no partial
+success report. `--spec`, the `lint()` API and their existing text/error behavior are unchanged;
+the two input flags are mutually exclusive.
+
+The annotation case serializes each complete post-compile document at its original lint-input
+point into a distinct create-only, zero-padded filename. No compiler object, mutable probe or
+compiled result is shared. The same owned directory keeps companion bytes unchanged until
+callback/cleanup completion. Ordered filenames accommodate Spectral's path sorting; results are
+matched by exact source, never aggregate exit alone. Each of the twenty documents must retain
+both specific error-severity address refusals with their complete request paths. The CLI creates
+fresh per-document inventories but shares a resolver and directory-keyed registry cache within
+that invocation, so this batching is not suitable for inputs or companions mutated between
+documents. Regression controls compare complete findings with the real single-spec route and
+cover reordered inputs, clean/parser-refused first/middle/last inputs, malformed attribution and
+tool failures. The former local `annotated_compile`/`annotation_lint` profiling additions are not
+retained; no twenty-call counter describes the one batch process. Local equivalence or shorter
+elapsed time does not establish hosted-job or whole-workflow under-600 acceptance.
 
 `spec/.spectral.yaml` extends `spectral:oas` (recommended set, every rule raised to error) and adds:
 

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import unittest
+from unittest import mock
 
 from support import SpecDir, replace_in_section, replace_once, replace_section, run_script, section_text, spec_text, with_probe_paths
+import lint_spec
 
 
 class LintCleanTest(unittest.TestCase):
@@ -206,6 +210,151 @@ class PlantedDefectTest(unittest.TestCase):
         completed = run_script("lint_spec.py", "--spec", str(self.spec.write(spec_text())))
         self.assertEqual(completed.returncode, 2)
         self.assertIn("currency-registry.v1.json is missing", completed.stderr)
+
+
+class LintRefusalBatchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.spec = SpecDir()
+        self.addCleanup(self.spec.cleanup)
+        self.files = [self.spec.write("{}", f"{index:02}.json") for index in range(3)]
+
+    def finding(self, index: int) -> dict:
+        return {
+            "code": "synthetic-rule", "message": f"synthetic refusal {index}", "severity": 0,
+            "path": ["components", "schemas", "Synthetic", index],
+            "range": {"start": {"line": index, "character": 1}, "end": {"line": index, "character": 2}},
+            "source": self.files[index].as_posix(),
+        }
+
+    def test_batch_preserves_full_findings_and_original_cli_flags(self) -> None:
+        findings = [self.finding(index) for index in range(3)]
+        findings[1]["severity"] = 1
+        findings[1]["additional"] = {"retained": "not a conveniently filtered pair"}
+        completed = subprocess.CompletedProcess([], 1, json.dumps(findings), "")
+        requested = [self.files[2], self.files[0], self.files[1]]
+        with mock.patch.object(lint_spec, "run", return_value=completed) as run, \
+                mock.patch.object(lint_spec, "node_executable", return_value="synthetic-node"):
+            batch = lint_spec.lint_refusals(requested)
+        self.assertEqual(batch, {"cli_exit_code": 1, "documents": [
+            {"source": self.files[index].as_posix(), "findings": [findings[index]]} for index in (2, 0, 1)
+        ]})
+        run.assert_called_once_with(
+            ["synthetic-node", str(lint_spec.SPECTRAL), "lint", *(str(file) for file in requested),
+             "--ruleset", str(lint_spec.RULESET), "--fail-severity", "warn",
+             "--display-only-failures", "--format", "json"], capture=True, check=False,
+        )
+
+    def test_batch_rejects_missing_duplicate_glob_and_registry_inputs_before_launch(self) -> None:
+        requests = [[], [self.files[0], self.files[0]], [self.spec.path / "glob[0].json"]]
+        for index in range(3):
+            files = list(self.files)
+            files[index] = self.spec.path / "missing.json"
+            requests.append(files)
+        with mock.patch.object(lint_spec, "run") as run:
+            for files in requests:
+                with self.subTest(files=files), self.assertRaises(lint_spec.PipelineError):
+                    lint_spec.lint_refusals(files)
+            (self.spec.path / "currency-registry.v1.json").unlink()
+            with self.assertRaisesRegex(lint_spec.PipelineError, "currency-registry.v1.json is missing"):
+                lint_spec.lint_refusals(self.files)
+            run.assert_not_called()
+
+    def test_batch_rejects_bad_global_outcomes_or_json(self) -> None:
+        cases = [(0, "[]"), (2, "[]"), (-9, "[]"), (1, ""), (1, "{}"), (1, "[]"),
+                 (1, "[null]"), (1, "[NaN]"), (1, '[{"code":"first","code":"second"}]'),
+                 (1, "[]\nUnexpected trailing output")]
+        for code, stdout in cases:
+            with self.subTest(code=code, stdout=stdout), \
+                    mock.patch.object(lint_spec, "run", return_value=subprocess.CompletedProcess([], code, stdout, "synthetic stderr")), \
+                    self.assertRaises(lint_spec.PipelineError):
+                lint_spec.lint_refusals(self.files)
+
+    def test_batch_rejects_missing_foreign_duplicate_and_malformed_findings(self) -> None:
+        original = [self.finding(index) for index in range(3)]
+        cases = [original[:index] + original[index + 1:] for index in range(3)]
+        cases.append(original + [self.finding(0)])
+        for field, value in [
+            ("source", None), ("source", "00.json"), ("source", (self.spec.path / "foreign.json").as_posix()),
+            ("code", None), ("message", None), ("severity", True), ("severity", 2), ("severity", "0"),
+            ("path", None), ("path", [False]), ("path", [-1]), ("path", [{}]), ("range", None),
+            ("range", {"start": {"line": -1, "character": 0}, "end": {"line": 0, "character": 0}}),
+            ("range", {"start": {"line": 2, "character": 1}, "end": {"line": 2, "character": 0}}),
+        ]:
+            changed = [self.finding(index) for index in range(3)]
+            changed[1][field] = value
+            cases.append(changed)
+        for findings in cases:
+            with self.subTest(findings=findings), \
+                    mock.patch.object(lint_spec, "run", return_value=subprocess.CompletedProcess([], 1, json.dumps(findings), "")), \
+                    self.assertRaises(lint_spec.PipelineError):
+                lint_spec.lint_refusals(self.files)
+
+    def test_real_batch_matches_complete_single_findings_with_reordered_inputs(self) -> None:
+        changes = [
+            (("components", "schemas", "Money"), "          maxLength: 21\n", "          maxLength: 22\n"),
+            (("components", "schemas", "Instant"), "      minLength: 24\n", "      minLength: 20\n"),
+            (("components", "schemas", "TimeZone"), "      maxLength: 64\n", "      maxLength: 128\n"),
+        ]
+        files = [self.spec.write(replace_in_section(spec_text(), section, old, new), f"{index:02}.yaml")
+                 for index, (section, old, new) in enumerate(changes)]
+        originals = {file: file.read_bytes() for file in self.spec.path.iterdir()}
+        singles = {}
+        for file in files:
+            code, findings = lint_spec.lint(file)
+            self.assertEqual(code, 1)
+            self.assertTrue(findings)
+            singles[file.as_posix()] = findings
+        requested = [files[2], files[0], files[1]]
+        completed = run_script("lint_spec.py", "--refusal-specs", *(str(file) for file in requested))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        batch = json.loads(completed.stdout)
+        self.assertEqual(batch["cli_exit_code"], 1)
+        self.assertEqual([item["source"] for item in batch["documents"]], [file.as_posix() for file in requested])
+        for item in batch["documents"]:
+            self.assertEqual(item["findings"], singles[item["source"]])
+        self.assertEqual({file: file.read_bytes() for file in self.spec.path.iterdir()}, originals)
+
+    def test_real_batch_rejects_clean_input_at_first_middle_and_last(self) -> None:
+        negative = replace_in_section(spec_text(), ("components", "schemas", "TimeZone"),
+                                      "      maxLength: 64\n", "      maxLength: 128\n")
+        for position in range(3):
+            with self.subTest(position=position):
+                files = [self.spec.write(spec_text() if index == position else negative, f"{index:02}.yaml")
+                         for index in range(3)]
+                completed = run_script("lint_spec.py", "--refusal-specs", *(str(file) for file in reversed(files)))
+                self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+                self.assertEqual(completed.stdout, "")
+                self.assertIn("refusal batch has no findings for: " + str(files[position]), completed.stderr)
+
+    def test_real_batch_retains_parser_refusals_at_first_middle_and_last(self) -> None:
+        negative = replace_in_section(spec_text(), ("components", "schemas", "TimeZone"),
+                                      "      maxLength: 64\n", "      maxLength: 128\n")
+        malformed = spec_text() + "\n  this is: [not: valid\n"
+        for position in range(3):
+            with self.subTest(position=position):
+                files = [self.spec.write(malformed if index == position else negative, f"{index:02}.yaml")
+                         for index in range(3)]
+                code, expected = lint_spec.lint(files[position])
+                self.assertEqual(code, 1)
+                completed = run_script("lint_spec.py", "--refusal-specs", *(str(file) for file in files))
+                self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+                batch = json.loads(completed.stdout)
+                self.assertEqual(batch["cli_exit_code"], 1)
+                self.assertEqual(len(batch["documents"]), 3)
+                self.assertTrue(all(item["findings"] for item in batch["documents"]))
+                self.assertEqual(batch["documents"][position]["findings"], expected)
+                self.assertTrue(any(item["code"] in ("parser", "oas3-schema") for item in expected))
+
+    def test_batch_cli_keeps_spec_flags_exclusive_and_ruleset_errors(self) -> None:
+        completed = run_script("lint_spec.py", "--spec", str(self.files[0]), "--refusal-specs", str(self.files[1]))
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("not allowed with argument", completed.stderr)
+        self.assertEqual(completed.stdout, "")
+        completed = run_script("lint_spec.py", "--refusal-specs", str(self.files[0]),
+                               "--ruleset", str(self.spec.path / "missing-ruleset.yaml"))
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("Spectral could not lint", completed.stderr)
+        self.assertEqual(completed.stdout, "")
 
 
 if __name__ == "__main__":
