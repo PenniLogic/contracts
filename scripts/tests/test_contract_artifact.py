@@ -10,12 +10,14 @@ written inside this repository.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import gzip
 import io
 import json
 import os
 import shutil
+import subprocess
 import tarfile
 import time
 import unittest
@@ -282,8 +284,38 @@ class TagProvenanceTest(LoaderTestCase):
 
     def test_git_unavailable_refused(self) -> None:
         self.load(self.release_dir)
-        with mock.patch.object(contract_artifact.shutil, "which", return_value=None):
+        with mock.patch.dict(os.environ, {"PATH": str(self.work)}):
             self.assertRefused("git.unavailable", self.release_dir)
+
+    def test_git_never_comes_from_the_current_or_release_directory(self) -> None:
+        """Review round 2, PSEC-R2-4: shutil.which searched an empty, '.' or relative PATH entry in the current directory
+        (on Windows the current directory first, always), and that can be the downloaded release directory: a planted
+        git ran seven times before the loader refused the directory. Only absolute entries outside it count now."""
+        trusted = contract_artifact.trusted_git()
+        self.assertIsNotNone(trusted)
+        release_dir = self.fresh_release()
+        planted = release_dir / contract_artifact.GIT_EXECUTABLE
+        planted.write_bytes(b"#!/bin/sh\nexit 1\n")
+        planted.chmod(0o755)
+        started: list[str] = []
+        run = subprocess.run
+
+        def recording_run(argv, *args, **kwargs):
+            started.append(argv[0])
+            return run(argv, *args, **kwargs)
+
+        entries = {"an empty entry": "", "the entry '.'": os.curdir, "a relative entry": os.path.join(os.pardir, release_dir.name),
+                   "the release directory": str(release_dir)}
+        for label, entry in entries.items():
+            with self.subTest(label), contextlib.chdir(release_dir), \
+                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join([entry, os.environ["PATH"]])}), \
+                    mock.patch.object(contract_artifact.subprocess, "run", recording_run):
+                started.clear()
+                self.assertEqual(contract_artifact.trusted_git(Path(os.curdir)), trusted)
+                self.assertRefused("asset.unexpected", Path(os.curdir))  # the planted file is no Release asset
+                self.assertEqual(set(started), {trusted})
+        with self.subTest("no git outside the release directory"), mock.patch.dict(os.environ, {"PATH": str(release_dir)}):
+            self.assertRefused("git.unavailable", release_dir)
 
 
 class PublicationIdentityTest(LoaderTestCase):

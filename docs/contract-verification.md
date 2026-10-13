@@ -107,7 +107,7 @@ Release was published. Every other check it reports passed, except `tag.pinned_i
 | Rule | Refused when |
 | --- | --- |
 | `tag.grammar` | The tag does not fully match `check_breaking_changes.TAG`. That covers leading zeros, a trailing newline, branch names, commit IDs, `refs/tags/...` and pre-release suffixes. |
-| `git.unavailable` | `git` is not on `PATH`. |
+| `git.unavailable` | There is no `git` (on Windows `git.exe`) in an absolute `PATH` entry outside the release directory. An empty, `.` or relative entry is never searched, nor the current directory that Windows searches first: the current directory can hold the downloaded Release assets, and git runs before they are checked. |
 | `repository.invalid` | `repo` is not the top level of a git checkout. |
 | `release_dir.missing` | The release directory does not exist. |
 | `release_dir.inside_repository` | The release directory is inside the checkout, for example `build/dist/<tag>`. That is a working-tree build, not the downloaded assets. |
@@ -471,7 +471,8 @@ rule ID.
 - The PenniLogic/infra#22 hold remains.
 - GitHub Release presence is not checked (`not_run`). Tags are not signed, so there is no signature
   verification. When `git ls-remote` times out, git itself is stopped; transport helpers that git
-  started may outlive it.
+  started may outlive it. Only the `git` executable is bound to an absolute `PATH` entry; the helpers
+  git starts itself (for example `ssh`) follow git's own lookup.
 - ADR-015 money vectors are not processed here.
 - Open owner decisions: whether the rollout starts with a warning window, the longest warning
   allowed, and how a first published version without a baseline is reported.

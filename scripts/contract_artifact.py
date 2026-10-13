@@ -52,7 +52,6 @@ import functools
 import io
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -278,7 +277,7 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
         raise ArtifactRefused("tag.grammar", f"{ascii(tag)} is not a published version tag vMAJOR.MINOR.PATCH")
     version = tag[1:]
     repo, release_dir = Path(repo), Path(release_dir)
-    git = _Git(repo)
+    git = _Git(repo, release_dir)
     top_level, shallow = _check_repository(git, repo)
     _check_release_dir(release_dir, top_level)
     remote_url = _check_remote(git, remote, CANONICAL_REMOTE_URLS if accepted_remote_urls is None else accepted_remote_urls)
@@ -318,14 +317,42 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
 
 # --- git ---------------------------------------------------------------------------------------------
 
-class _Git:
-    """Plumbing commands against exactly one repository, with a resolved executable and bounded time."""
+GIT_EXECUTABLE = "git.exe" if os.name == "nt" else "git"
 
-    def __init__(self, repo: Path) -> None:
-        executable = shutil.which("git")
+
+def trusted_git(release_dir: Path | None = None) -> str | None:
+    """The first git executable in an absolute PATH entry, never one inside `release_dir`; None if there is none.
+
+    shutil.which also searches an empty, '.' or relative PATH entry, which stands for the current
+    directory, and on Windows it searches the current directory first. The current directory can be the
+    downloaded release directory (`gh release download` without --dir), whose files anyone who can
+    replace a Release asset controls, and git runs before that directory is checked (review round 2,
+    PSEC-R2-4). So only absolute entries are searched, a git that resolves into the release directory is
+    skipped, and on Windows only git.exe is taken, never a .bat or .cmd file.
+    """
+    path = os.environ.get("PATH")
+    excluded = None if release_dir is None else Path(os.path.abspath(release_dir)).resolve()
+    for entry in (os.defpath if path is None else path).split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        candidate = Path(os.path.abspath(os.path.join(entry, GIT_EXECUTABLE)))
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        resolved = candidate.resolve()
+        if excluded is not None and (resolved == excluded or excluded in resolved.parents):
+            continue
+        return str(candidate)
+    return None
+
+
+class _Git:
+    """Plumbing commands against exactly one repository, with a trusted executable and bounded time."""
+
+    def __init__(self, repo: Path, release_dir: Path | None = None) -> None:
+        executable = trusted_git(release_dir)
         if executable is None:
-            raise ArtifactRefused("git.unavailable", "git was not found on PATH")
-        self.executable = os.path.abspath(executable)
+            raise ArtifactRefused("git.unavailable", "git was not found in an absolute PATH entry outside the release directory")
+        self.executable = executable
         self.repo = repo
         environment = {key: value for key, value in os.environ.items() if key not in REPOSITORY_ENVIRONMENT}
         environment.update({
