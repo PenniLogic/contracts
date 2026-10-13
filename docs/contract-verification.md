@@ -31,7 +31,7 @@ python scripts/verify_contract.py report --report FILE [--json]
 | --- | --- |
 | 0 | Pass. `compat` also exits 0 for a warning under an unexpired warning gate; the output says WARN and when the warning ends. |
 | 1 | Fail or refused: a refused artifact (including a missing release directory, which is a missing artifact) or gate state, a failing comparison, an invalid report, or a report whose verdict is fail. |
-| 2 | Usage error, or a missing, unreadable or malformed input, including detector output or an acknowledgement the comparison cannot use. |
+| 2 | Usage error, or a missing, unreadable or malformed input, including detector output or an acknowledgement the comparison cannot use. The `--gate-state` of `compat` is the exception: `compat` applies a missing or unusable gate state as `block` and exits 0 or 1 as the comparison does. |
 
 Results go to stdout. With `--json` the command prints one JSON document (two-space indent, ASCII),
 also for a usage error: `{"command": ..., "usage_error": {"rule": ..., "detail": ...}}`, where
@@ -41,9 +41,14 @@ subcommand; options cannot be abbreviated), `input.missing`, `input.unreadable` 
 the loader's `git.unavailable`, `repository.invalid` and `remote.invalid`, and the `compat.*` refusals
 below.
 
-A missing input file of `compat`, `gate` or `report` exits 2, not 1: the command could not evaluate
-anything, and 2 keeps that apart from an evaluated failure. A missing input is still never a pass; a
-pipeline treats every non-zero exit as a failure.
+A missing input file of `compat` (a document, detector output or a named acknowledgement), of `gate`
+or of `report` exits 2, not 1: the command could not evaluate anything, and 2 keeps that apart from an
+evaluated failure. A missing input is still never a pass; a pipeline treats every non-zero exit as a
+failure. The one exception is the `--gate-state` of `compat`. Like every reader of the gate state,
+`compat` resolves a missing, unreadable or malformed state to `block` and evaluates under it, so its
+exit code is the comparison's and its output names the reason (`gate.reason`, for example
+`gate.missing`). A mistyped path therefore never applies a warning, but it is not refused either; `gate`
+with the same path exits 2 (`input.missing`).
 
 There is no clock option: the commands use the real UTC clock, and tests inject one through
 `verify_contract.main(argv, clock=...)`. Nothing is written to disk except the loader's temporary
@@ -135,8 +140,16 @@ at the tag, parsed and never run), `spec/fixtures/*.json`, the three client arch
 The rest of the release format is this runner's: the three client languages (the tag's `LANGUAGES`
 literal must name the same three) and the key sets of `release-manifest.json`, its client records,
 `generator/golden.json` records and the embedded `contracts-manifest.json` (`release.py` and
-`generate_clients.py` schema version 1). A tag in another format is refused with
-`release.format_unsupported` or `manifest.malformed`, never verified against the wrong expectations.
+`generate_clients.py` schema version 1). A tag in another format is refused, never verified against the
+wrong expectations, but the rule depends on where the format differs: `release.format_unsupported` for
+the tag's `LANGUAGES` or `PROVIDER_SOURCE_NAMES` literal, a generator configuration without
+`generatorName` or a `release.py` without one literal publication text; `manifest.malformed` for the
+key sets of `release-manifest.json`, its client records and their generator records;
+`anchor.golden_invalid` for a `generator/golden.json` record with other keys; and
+`archive.manifest_invalid` for an embedded `contracts-manifest.json` key or generator-record key that
+this runner's `generate_clients.py` never writes. Those last two rules also cover corrupt or tampered
+files, so for a genuine release they can mean that the tag was cut with another `generate_clients.py`
+format than this runner's.
 
 | Rule | Refused when |
 | --- | --- |
@@ -174,7 +187,7 @@ tag commit instead:
 | `anchor.asset_blob_mismatch` | The specification, registry, a provider source or a fixture differs from its blob at the tag commit. The blob gets the same CRLF-to-LF normalization the builder applies. |
 | `anchor.toolchain_mismatch` | The manifest `toolchain`, or a client's generator version or jar digest, differs from `toolchain/versions.json` at the tag commit. |
 | `anchor.manifest_metadata_mismatch` | A client's `runtime_sha256` (the tree digest of `runtime/<language>`), generator `generator_name`, `config` or `config_sha256` (`generator/<language>.json`) or `ignore_override_sha256` (`generator/openapi-generator-ignore`), or the release's `publication` text (the literal in the tag's `scripts/release.py`), differs from what those files at the tag commit give. `release.format_unsupported` refuses a tag whose configuration has no `generatorName` or whose `release.py` writes no single literal publication text. |
-| `anchor.golden_invalid` | `generator/golden.json` at the tag commit lacks a language, has a malformed record or is internally inconsistent (`generate_clients.golden_inconsistency`). |
+| `anchor.golden_invalid` | `generator/golden.json` at the tag commit lacks a language, has a malformed record (including a record with other keys than this runner's format) or is internally inconsistent (`generate_clients.golden_inconsistency`). |
 | `anchor.golden_spec_mismatch` | A golden record pins another specification digest or version than the release ships. |
 | `anchor.golden_tree_mismatch` | An archive's recomputed tree digest is not `golden.json[language].tree_sha256` at the tag commit. |
 
@@ -228,7 +241,7 @@ zeros, and both forms are accepted), and `release.py` runs on the owner's machin
 | `archive.outside_prefix` | A member is not inside `pennilogic-contracts-<language>-<tag>/`. |
 | `archive.link_member` / `archive.special_member` | A member is a symlink or hard link, or anything other than a regular file or directory (a device, a FIFO, a contiguous file). |
 | `archive.duplicate_member` / `archive.case_collision` | Two members share a name, or differ only in case and would collide on Windows or macOS. |
-| `archive.manifest_missing` / `archive.manifest_invalid` | `contracts-manifest.json` is absent or malformed, including a key or generator-record key that `generate_clients.py` never writes. |
+| `archive.manifest_missing` / `archive.manifest_invalid` | `contracts-manifest.json` is absent or malformed, including a key or generator-record key that this runner's `generate_clients.py` never writes (also the case for a genuine archive generated with another format). |
 | `archive.tree_mismatch` | The unpacked files differ from the archive's own `contracts-manifest.json` (tree digest, file count or per-file list). |
 | `archive.manifest_mismatch` | `contracts-manifest.json` disagrees with the release on target, version, specification, registry, provider sources, generator, runtime, tree digest or file count. The release side of that agreement is anchored by the rules above; the agreement alone only compares two files that a consistent swap can edit together. |
 

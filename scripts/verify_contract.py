@@ -15,13 +15,14 @@ compat    Classify a revision against its published baseline from already-parsed
 report    Validate a compatibility report and recompute its verdict (contract_report.py).
 
 Exit codes: 0 pass (including a warning under an unexpired warning gate), 1 fail or refused (a missing
-release directory is a refused artifact), 2 usage error or a missing, unreadable or malformed input. Results
-go to stdout (with --json, one JSON document, also for a usage error); without --json usage errors go to
-stderr. Nothing is written to disk except the
-loader's temporary unpack directory, which is removed before the command returns. The only network
-access is the loader's `git ls-remote` against the configured remote. No run of this command is product
-verification unless its report says acceptance_eligible, which needs a published artifact whose every
-check passed (the held GitHub Release presence check included), the live provider and every live
+release directory is a refused artifact), 2 usage error or a missing, unreadable or malformed input. The
+--gate-state of compat is the exception: compat applies a missing or unusable gate state as block, names
+the reason in its output and exits as the comparison does. Results go to stdout (with --json, one JSON
+document, also for a usage error); without --json usage errors go to stderr. Nothing is written to disk
+except the loader's temporary unpack directory, which is removed before the command returns. The only
+network access is the loader's `git ls-remote` against the configured remote. No run of this command is
+product verification unless its report says acceptance_eligible, which needs a published artifact whose
+every check passed (the held GitHub Release presence check included), the live provider and every live
 consumer.
 """
 

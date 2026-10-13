@@ -382,6 +382,26 @@ class CompatCommandTest(CommandTestCase):
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn(f"[{rule}]", err)
 
+    def test_compat_applies_a_missing_gate_state_as_block(self) -> None:
+        """Review round 2, CVR2-2: unlike `gate`, `compat` applies a missing --gate-state as block and exits as the
+        comparison does. The behaviour is unchanged; the help text and the guide said every missing input exits 2."""
+        code, payload = self.run_json(*self.compat_argv("base.json", "no-changes.json", "no-diff.json"))
+        self.assertEqual((code, payload["result"], payload["gate"]["reason"]), (0, "pass", "gate.block"))  # control
+        missing = self.path("absent-gate-state.json")
+        for label, argv, expected in (
+                ("identical documents", self.compat_argv("base.json", "no-changes.json", "no-diff.json", "--gate-state", missing),
+                 (0, "pass")),
+                ("an unacknowledged removal", self.compat_argv("removal.json", "removal-breaking.json", "removal-diff.json",
+                                                                "--gate-state", missing), (1, "fail"))):
+            with self.subTest(label):
+                code, payload = self.run_json(*argv)
+                self.assertEqual((code, payload["result"], payload["gate"]["mode"], payload["gate"]["reason"]),
+                                 (*expected, "block", "gate.missing"))
+        code, out, _ = self.run_command("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--gate-state of compat is the exception: compat applies a missing or unusable gate state as block",
+                      " ".join(out.split()))
+
     def test_compat_text_output_is_printable_ascii(self) -> None:
         """Detector text comes from the compared documents; it cannot restyle or reorder the terminal or a log viewer."""
         def printable(text: str) -> bool:
