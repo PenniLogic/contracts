@@ -188,7 +188,7 @@ nothing in this one parses YAML or runs oasdiff.
 | `compat.document_invalid` | A document is not an object with an `info` object. |
 | `compat.version_invalid` | A document's `info.version` is not `MAJOR.MINOR.PATCH`. |
 | `compat.baseline_version_mismatch` | The base document does not declare the baseline's version. |
-| `compat.detector_output_invalid` | The `oasdiff breaking` output is not a list of changes with an `id`, an integer `level` 1-3 and string locations; the `oasdiff diff` output is not an object; identical documents come with reported changes; or the imported classifier cannot process the output (for example a string bound compared with a number, or nesting beyond the recursion limit). |
+| `compat.detector_output_invalid` | The `oasdiff breaking` output is not a list of changes with an `id` of at most 128 characters (the report's identifier bound), an integer `level` 1-3 and string locations; the `oasdiff diff` output is not an object; identical documents come with reported changes; or the imported classifier cannot process the output (for example a string bound compared with a number, or nesting beyond the recursion limit). |
 | `compat.acknowledgement_invalid` | A named acknowledgement file is absent or too large, or `load_acknowledgement` refuses it. |
 
 The input checks exist because the imported functions alone do not refuse malformed detector output:
@@ -257,8 +257,11 @@ records:
 The verdict is `fail` when a required language has no consumer row, when any row is `not_run` or
 `fail`, or when the compatibility result is `not_run` or `fail`. It is `warn` when only the
 compatibility result is `warn`, and `pass` otherwise. A missing Python row is therefore a failure,
-never an omission. `acceptance_eligible` is true exactly when the mode is `published`, the provider row
-is `live` and every consumer row is `live`; a `synthetic-fixture` report is never acceptance-eligible.
+never an omission. Rows are required per language: the validator does not know which consumer
+repositories exist, so with two TypeScript consumers a report that names only one of them still passes.
+Naming the required consumers belongs to the held consumer adapters. `acceptance_eligible` is true
+exactly when the mode is `published`, the provider row is `live` and every consumer row is `live`; a
+`synthetic-fixture` report is never acceptance-eligible.
 The first published version has no baseline, so its compatibility result is `not_run` and its verdict
 is `fail` until the owner decides how a first baseline is reported.
 
@@ -270,9 +273,9 @@ is `fail` until the owner decides how a first baseline is reported.
 | `report.contract_identity` | A tag is not `v<version>`, or a published report lacks the tag, tag commit or release-manifest digest. |
 | `report.duplicate_consumer` | Two consumer rows share a language and a name. |
 | `report.row_status_inconsistent` | `mode` and `result` disagree about `not_run`, or a `not_run` row names a version. |
-| `report.synthetic_row_name` | A synthetic row is not named `synthetic-<language>` (`synthetic-provider`), or a live row is named `synthetic-*`. |
+| `report.synthetic_row_name` | A `synthetic-fixture` row is not named `synthetic-<language>` (`synthetic-provider`), or a `live` row is named `synthetic-*`. A `not_run` row may carry either kind of name. |
 | `report.live_row_unidentified` | A live row does not name the version it verified. |
-| `report.contract_version_mismatch` | A verified row names another contract version than the report. |
+| `report.contract_version_mismatch` | A row that ran names another contract version than the report. |
 | `report.compat_inconsistent` | The class, findings, problems, result, baseline and gate of the compatibility section contradict each other or the contract version. |
 | `report.gate_inconsistent` | The gate mode, reason and `warn_until` contradict each other or `generated_at`. |
 | `report.missing_languages_inconsistent`, `report.verdict_inconsistent`, `report.acceptance_eligible_inconsistent` | The declared value differs from the recomputed one. |

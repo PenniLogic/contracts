@@ -98,6 +98,17 @@ def acknowledgement_for(findings: list, baseline: str = BASELINE, target: str = 
             "acknowledged": [{"id": finding.id, "location": finding.location, "reason": REASON} for finding in findings]}
 
 
+def report_for(result: contract_compat.CompatResult) -> dict:
+    """A synthetic-fixture report (contract_report.build_report) whose compatibility section and gate are `result`'s."""
+    parts = support.synthetic_report_parts()
+    version = result.revision_version
+    parts["contract"] = dict(parts["contract"], version=version, tag=f"v{version}")
+    for row in [parts["provider"], *parts["consumers"]]:
+        row["verified_contract_version"] = version
+    parts.update(compatibility=result.section(), gate=result.gate.as_dict())
+    return contract_report.build_report(**parts)
+
+
 class GateStateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.root = temporary_root()
@@ -386,21 +397,30 @@ class CompatibilityTest(unittest.TestCase):
         escape = dict(removal_inputs().oasdiff_breaking[0], operation="GET\x1b[31m")
         for label, data, gate in (("none", identical_inputs(), BLOCK), ("additive", additive_inputs(), BLOCK),
                                   ("breaking, blocked", removal_inputs(), BLOCK), ("breaking, warned", removal_inputs(), WARN),
-                                  ("terminal escape in a detector location", dataclasses.replace(removal_inputs(), oasdiff_breaking=[escape]),
-                                   BLOCK)):
+                                  ("terminal escape in a detector location",
+                                   dataclasses.replace(removal_inputs(), oasdiff_breaking=[escape]), BLOCK)):
             with self.subTest(label):
                 result = check_compatibility(data, gate)
-                parts = support.synthetic_report_parts()
-                version = result.revision_version
-                parts["contract"] = dict(parts["contract"], version=version, tag=f"v{version}")
-                for row in [parts["provider"], *parts["consumers"]]:
-                    row["verified_contract_version"] = version
-                parts.update(compatibility=result.section(), gate=result.gate.as_dict())
-                report = contract_report.build_report(**parts)
+                report = report_for(result)
                 assessment = contract_report.assess_report(report)
                 self.assertEqual(assessment.problems, ())
                 self.assertEqual(assessment.verdict, result.result)  # every synthetic row passes
         self.assertIn("GET\\u001b[31m /probe", [finding["location"] for finding in report["compatibility"]["findings"]])
+
+    def test_change_id_longer_than_the_report_bound_refused(self) -> None:
+        """Boundary pair: an oasdiff id of the report's identifier bound is classified and reported; one more is refused."""
+        change = removal_inputs().oasdiff_breaking[0]
+        longest = "r" * contract_report.MAX_IDENTIFIER
+        result = check_compatibility(dataclasses.replace(removal_inputs(), oasdiff_breaking=[dict(change, id=longest)]), BLOCK)
+        self.assertIn(longest, [finding["id"] for finding in report_for(result)["compatibility"]["findings"]])
+        with self.assertRaises(CompatRefused) as caught:
+            check_compatibility(dataclasses.replace(removal_inputs(), oasdiff_breaking=[dict(change, id=longest + "r")]), BLOCK)
+        self.assertEqual(caught.exception.rule, "compat.detector_output_invalid")
+
+    def test_result_vocabulary_matches_the_report_schema(self) -> None:
+        schema = contract_schema.load_schema(contract_report.REPORT_SCHEMA)["definitions"]["compatibility"]["properties"]
+        self.assertEqual((schema["change_class"]["enum"], schema["result"]["enum"]),
+                         ([*contract_compat.CHANGE_CLASSES, "not_run"], [*contract_compat.RESULTS, "not_run"]))
 
 
 class RuleCoverageTest(unittest.TestCase):

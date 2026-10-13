@@ -87,7 +87,8 @@ class ReportTestCase(unittest.TestCase):
         self.assertEqual(notes(assessment.problems), [])
         self.assertEqual((assessment.verdict, notes(assessment.reasons), assessment.acceptance_eligible, assessment.missing_languages),
                          (verdict, reasons, eligible, missing))
-        self.assertEqual((report["verdict"], report["acceptance_eligible"], report["missing_languages"]), (verdict, eligible, list(missing)))
+        self.assertEqual((report["verdict"], report["acceptance_eligible"], report["missing_languages"]),
+                         (verdict, eligible, list(missing)))
 
 
 class ReportVerdictTest(ReportTestCase):
@@ -128,6 +129,23 @@ class ReportVerdictTest(ReportTestCase):
             with self.subTest(language):
                 self.assertDerived(lambda report, index=index: report["consumers"].pop(index), "fail",
                                    [("report.required_language_missing", language)], False, (language,))
+
+    def test_report_missing_kotlin_or_typescript_row_fails(self) -> None:
+        """A language is missing only when none of its rows is left (boundary pair per language)."""
+        for language in ("kotlin", "typescript"):
+            def drop_one_of_two(report: dict, language: str = language) -> None:
+                first = next(row for row in report["consumers"] if row["language"] == language)
+                report["consumers"].append(dict(first, name=f"fixture-{language}-second-consumer"))
+                report["consumers"].remove(first)
+
+            def drop_the_only_row(report: dict, language: str = language) -> None:
+                report["consumers"][:] = [row for row in report["consumers"] if row["language"] != language]
+
+            with self.subTest(language, control="one of two rows removed"):
+                self.assertDerived(drop_one_of_two, "pass", [], True)
+            with self.subTest(language, mutation="its only row removed"):
+                self.assertDerived(drop_the_only_row, "fail", [("report.required_language_missing", language)], False,
+                                   (language,))
 
     def test_report_missing_python_row_fails(self) -> None:
         """Criterion 7: the Python row is required by language; an omission is a failure, never a pass."""
@@ -248,7 +266,7 @@ class ReportRuleTest(ReportTestCase):
                 self.assertProblems([("report.contract_identity", "contract")], mutate)
 
     def test_duplicate_consumer_refused(self) -> None:
-        self.assertProblems([("report.duplicate_consumer", "consumers/3")],
+        self.assertProblems([("report.duplicate_consumer", "/consumers/3")],
                             lambda report: report["consumers"].append(dict(report["consumers"][2])))
 
     def test_live_row_without_version_refused(self) -> None:
@@ -337,6 +355,18 @@ class SyntheticReportRuleTest(ReportTestCase):
             with self.subTest(subject):
                 self.assertProblems([("report.synthetic_row_name", subject)], mutate)
 
+    def test_not_run_synthetic_row_fails_without_a_naming_problem(self) -> None:
+        """A synthetic run with a row that did not run is a valid report whose verdict fails."""
+        def not_run(row: dict) -> None:
+            row.update(mode="not_run", result="not_run", version=None, verified_contract_version=None)
+
+        for subject, mutate in {
+            "python/synthetic-python": lambda report: not_run(report["consumers"][2]),
+            "provider/synthetic-provider": lambda report: not_run(report["provider"]),
+        }.items():
+            with self.subTest(subject):
+                self.assertDerived(mutate, "fail", [("report.row_not_run", subject)], False)
+
     def test_row_status_inconsistent_refused(self) -> None:
         mutations = {
             "not_run mode with a result": lambda report: report["consumers"][2].update(mode="not_run"),
@@ -379,6 +409,11 @@ class SchemaSubsetTest(unittest.TestCase):
                     self.assertTrue(pattern.startswith("^") and pattern.endswith("(?![\\s\\S])"), pattern)
                     self.assertNotRegex(pattern.replace("[\\s\\S]", ""), r"\\[dwsDWS]|\$", pattern)
         report = contract_schema.load_schema(contract_report.REPORT_SCHEMA)
+        gate = contract_schema.load_schema(contract_gate.GATE_SCHEMA)
+        self.assertEqual((report["properties"]["schema"]["const"], gate["properties"]["schema"]["const"]),
+                         (contract_report.SCHEMA_ID, contract_gate.SCHEMA_ID))
+        self.assertEqual(gate["properties"]["mode"]["enum"], list(contract_gate.MODES))
+        self.assertEqual(report["definitions"]["gate"]["properties"]["mode"]["enum"], list(contract_gate.MODES))
         self.assertEqual(report["properties"]["required_languages"]["const"], list(contract_report.REQUIRED_LANGUAGES))
         self.assertEqual(contract_report.REQUIRED_LANGUAGES, pl_contracts.LANGUAGES)
         self.assertEqual(report["definitions"]["gate"]["properties"]["reason"]["enum"], list(contract_gate.DECISIONS))

@@ -10,12 +10,15 @@ adds the rules the schema subset cannot express:
   row and a not_run compatibility section make the verdict fail: missing is a failure, not an omission.
 - A synthetic-fixture report is never acceptance_eligible. acceptance_eligible is true exactly when the
   mode is published and the provider and every consumer row are live.
-- Synthetic rows are named synthetic-<language> (synthetic-provider) and live rows never are; live rows
-  name the version they verified; every verified row names the report's contract version.
+- Synthetic-fixture rows are named synthetic-<language> (synthetic-provider) and live rows never are
+  (a not_run row may carry either kind of name); live rows name the version they verified; every row
+  that ran names the report's contract version.
 - The declared verdict, missing_languages and acceptance_eligible must equal the recomputed values.
 
-Every problem and every verdict reason carries one static rule ID and a subject (a language, a row as
-<language>/<name> or provider/<name>, or a JSON pointer); values from the document are never echoed.
+Every problem and every verdict reason carries one static rule ID and a subject: a required language,
+a row as <language>/<name> or provider/<name>, a field or section name (contract, compatibility, gate,
+missing_languages, verdict, acceptance_eligible) or a JSON pointer. Row names are schema-checked before
+they appear in a subject; other values from the document are never echoed.
 """
 
 from __future__ import annotations
@@ -124,7 +127,8 @@ def _bounds_problem(report: dict) -> Note | None:
                   (f"/compatibility/findings/{index}/location", finding["location"], MAX_TEXT),
                   (f"/compatibility/findings/{index}/detector", finding["detector"], MAX_NAME)]
     texts += [(f"/compatibility/problems/{index}", problem, MAX_TEXT) for index, problem in enumerate(compat["problems"])]
-    for pointer, row in [("/provider", report["provider"])] + [(f"/consumers/{index}", row) for index, row in enumerate(report["consumers"])]:
+    rows = [("/provider", report["provider"])] + [(f"/consumers/{index}", row) for index, row in enumerate(report["consumers"])]
+    for pointer, row in rows:
         texts += [(f"{pointer}/name", row["name"], MAX_NAME), (f"{pointer}/version", row["version"] or "", MAX_IDENTIFIER)]
     for pointer, text, bound in texts:
         if len(text) > bound:
@@ -149,7 +153,7 @@ def _consistency_problems(report: dict) -> list[Note]:
     seen: set[tuple[str, str]] = set()
     for index, row in enumerate(report["consumers"]):
         if (row["language"], row["name"]) in seen:
-            problems.append(Note("report.duplicate_consumer", f"consumers/{index}"))
+            problems.append(Note("report.duplicate_consumer", f"/consumers/{index}"))
         seen.add((row["language"], row["name"]))
     for subject, row, synthetic_name in _rows(report):
         not_run = row["mode"] == "not_run"
@@ -157,7 +161,7 @@ def _consistency_problems(report: dict) -> list[Note]:
                 not_run and (row["version"] is not None or row["verified_contract_version"] is not None)):
             problems.append(Note("report.row_status_inconsistent", subject))
             continue
-        if (row["mode"] == "synthetic-fixture") != (row["name"] == synthetic_name) or (
+        if (row["mode"] == "synthetic-fixture" and row["name"] != synthetic_name) or (
                 row["mode"] == "live" and row["name"].startswith("synthetic-")):
             problems.append(Note("report.synthetic_row_name", subject))
         if row["mode"] == "live" and row["version"] is None:
@@ -251,15 +255,6 @@ def contract_section(artifact: object) -> dict:
 def not_run_compatibility(baseline: str | None = None) -> dict:
     return {"baseline": baseline, "revision_version": None, "change_class": "not_run", "findings": [], "problems": [],
             "result": "not_run"}
-
-
-def row(name: str, *, mode: str, result: str, version: str | None = None, verified_contract_version: str | None = None,
-        language: str | None = None) -> dict:
-    """A provider row, or a consumer row when `language` is given."""
-    entry = {"language": language} if language is not None else {}
-    entry.update({"name": name, "version": version, "verified_contract_version": verified_contract_version,
-                  "mode": mode, "result": result})
-    return entry
 
 
 def build_report(*, mode: str, contract: dict, compatibility: dict, gate: dict, provider: dict, consumers: list[dict],

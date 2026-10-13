@@ -15,10 +15,11 @@ report    Validate a compatibility report and recompute its verdict (contract_re
 
 Exit codes: 0 pass (including a warning under an unexpired warning gate), 1 fail or refused, 2 usage error
 or a missing, unreadable or malformed input. Results go to stdout (with --json, one JSON document); usage
-errors go to stderr. Nothing is written to disk except the loader's temporary unpack directory, which is
-removed before the command returns. The only network access is the loader's `git ls-remote` against the
-configured remote. No run of this command is product verification unless its report says
-acceptance_eligible, which needs a published artifact, the live provider and every live consumer.
+errors go to stderr, or into that JSON document with --json. Nothing is written to disk except the
+loader's temporary unpack directory, which is removed before the command returns. The only network
+access is the loader's `git ls-remote` against the configured remote. No run of this command is product
+verification unless its report says acceptance_eligible, which needs a published artifact, the live
+provider and every live consumer.
 """
 
 from __future__ import annotations
@@ -30,10 +31,15 @@ from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import contract_compat  # noqa: E402
 from contract_artifact import ArtifactRefused, load_published_artifact  # noqa: E402
-from contract_compat import ACKNOWLEDGEMENT_NAME, CompatRefused, DetectorInputs, check_compatibility, read_acknowledgement  # noqa: E402
-from contract_gate import GATE_STATE, GateRefused, decide, format_instant, load_gate_state, require_utc, resolve_gate, utc_now  # noqa: E402
-from contract_report import assess_report_file  # noqa: E402
+from contract_compat import (  # noqa: E402
+    ACKNOWLEDGEMENT_NAME, CompatRefused, DetectorInputs, check_compatibility, read_acknowledgement,
+)
+from contract_gate import (  # noqa: E402
+    GATE_STATE, GateRefused, decide, format_instant, load_gate_state, require_utc, resolve_gate, utc_now,
+)
+from contract_report import MAX_TEXT, assess_report_file  # noqa: E402
 from contract_schema import (  # noqa: E402
     InputMissing, InputUnavailable, StrictJsonError, dumps, parse_strict_json, printable_text, read_bounded,
 )
@@ -43,6 +49,7 @@ EXIT_PASS, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
 RULES = ("input.missing", "input.unreadable", "input.not_json")
 # Loader refusals about the command's own arguments or environment rather than about the artifact.
 ARTIFACT_USAGE_RULES = frozenset({"git.unavailable", "repository.invalid", "release_dir.missing", "remote.invalid"})
+USAGE_RULES = frozenset(RULES) | ARTIFACT_USAGE_RULES | frozenset(contract_compat.RULES)
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_LINE_TEXT = 400
 
@@ -51,6 +58,8 @@ class UsageProblem(Exception):
     """The command cannot evaluate: a missing, unreadable or malformed input (exit 2)."""
 
     def __init__(self, rule: str, detail: str) -> None:
+        if rule not in USAGE_RULES:
+            raise ValueError(f"unknown usage rule {rule!r}")
         super().__init__(f"{rule}: {detail}")
         self.rule = rule
         self.detail = detail
@@ -173,7 +182,7 @@ def _compat(args: argparse.Namespace, clock: Callable[[], datetime]) -> int:
     if result.result == "warn":
         lines.append(f"  the warning gate downgrades these problems until {gate.warn_until}; they block from then on")
     _emit(args, {"command": "compat", "result": result.result, "compatibility": section, "gate": gate.as_dict(),
-                 "warnings": [printable_text(warning, 2000) for warning in result.warnings]}, lines)
+                 "warnings": [printable_text(warning, MAX_TEXT) for warning in result.warnings]}, lines)
     return EXIT_FAIL if result.result == "fail" else EXIT_PASS
 
 

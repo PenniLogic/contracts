@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_breaking_changes as cbc  # noqa: E402
 from contract_gate import MODES, GateDecision  # noqa: E402
+from contract_report import MAX_IDENTIFIER, MAX_TEXT  # noqa: E402 - the result becomes the report's compatibility section
 from contract_schema import json_equal, printable_text  # noqa: E402
 from pl_contracts import SEMVER, PipelineError  # noqa: E402
 
@@ -42,8 +43,7 @@ RULES = (
 )
 ACKNOWLEDGEMENT_NAME = cbc.ACKNOWLEDGEMENT.name
 MAX_ACKNOWLEDGEMENT_BYTES = 1024 * 1024
-MAX_REPORT_TEXT = 2000
-CHANGE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+CHANGE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")  # the report's finding ID, at most MAX_IDENTIFIER characters
 OASDIFF_LEVELS = (1, 2, 3)  # INFO, WARN, ERR; operation_findings counts 3 as breaking and 2 as a warning
 
 
@@ -84,16 +84,17 @@ class CompatResult:
         """The report's `compatibility` section (scripts/verification/compat-report.schema.v1.json)."""
         return {
             "baseline": self.baseline, "revision_version": self.revision_version, "change_class": self.change_class,
-            "findings": [{"id": finding.id, "location": printable_text(finding.location, MAX_REPORT_TEXT),
+            "findings": [{"id": finding.id, "location": printable_text(finding.location, MAX_TEXT),
                           "detector": finding.detector} for finding in self.findings],
-            "problems": [printable_text(problem, MAX_REPORT_TEXT) for problem in self.problems],
+            "problems": [printable_text(problem, MAX_TEXT) for problem in self.problems],
             "result": self.result,
         }
 
 
 def _is_oasdiff_change(change: object) -> bool:
     """The fields operation_findings reads, with the types it assumes; other oasdiff fields pass through."""
-    return (isinstance(change, dict) and isinstance(change.get("id"), str) and CHANGE_ID.fullmatch(change["id"]) is not None
+    return (isinstance(change, dict) and isinstance(change.get("id"), str) and len(change["id"]) <= MAX_IDENTIFIER
+            and CHANGE_ID.fullmatch(change["id"]) is not None
             and type(change.get("level")) is int and change["level"] in OASDIFF_LEVELS
             and all(isinstance(change.get(key, ""), str) for key in ("operation", "path", "section", "text")))
 
@@ -101,7 +102,8 @@ def _is_oasdiff_change(change: object) -> bool:
 def check_inputs(inputs: DetectorInputs) -> str:
     """Refuse inputs the comparison cannot rely on; return the revision's info.version."""
     if not isinstance(inputs.baseline, str) or cbc.TAG.fullmatch(inputs.baseline) is None:
-        raise CompatRefused("compat.baseline_invalid", f"{ascii(inputs.baseline)} is not a published version tag vMAJOR.MINOR.PATCH")
+        raise CompatRefused("compat.baseline_invalid",
+                            f"{ascii(inputs.baseline)} is not a published version tag vMAJOR.MINOR.PATCH")
     versions: dict[str, str] = {}
     for label, document in (("base", inputs.base_document), ("revision", inputs.revision_document)):
         if not isinstance(document, dict) or not isinstance(document.get("info"), dict):
@@ -112,11 +114,13 @@ def check_inputs(inputs: DetectorInputs) -> str:
         versions[label] = version
     if versions["base"] != inputs.baseline[1:]:
         raise CompatRefused("compat.baseline_version_mismatch",
-                            f"the base document declares {versions['base']}; the published baseline {inputs.baseline} declares {inputs.baseline[1:]}")
+                            f"the base document declares {versions['base']}; "
+                            f"the published baseline {inputs.baseline} declares {inputs.baseline[1:]}")
     breaking, diff = inputs.oasdiff_breaking, inputs.oasdiff_diff
     if not isinstance(breaking, list) or not all(_is_oasdiff_change(change) for change in breaking):
         raise CompatRefused("compat.detector_output_invalid",
-                            "the oasdiff breaking output is not a list of changes with an id, a level 1-3 and string locations")
+                            "the oasdiff breaking output is not a list of changes with a bounded id, a level 1-3 "
+                            "and string locations")
     if not isinstance(diff, dict):
         raise CompatRefused("compat.detector_output_invalid", "the oasdiff diff output is not a JSON object")
     if (breaking or diff) and json_equal(inputs.base_document, inputs.revision_document):
@@ -148,7 +152,7 @@ def read_acknowledgement(path: Path) -> dict:
             raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement exceeds {MAX_ACKNOWLEDGEMENT_BYTES} bytes")
         acknowledgement = cbc.load_acknowledgement(path)
     except PipelineError as error:
-        raise CompatRefused("compat.acknowledgement_invalid", printable_text(str(error), MAX_REPORT_TEXT)) from None
+        raise CompatRefused("compat.acknowledgement_invalid", printable_text(str(error), MAX_TEXT)) from None
     except (OSError, UnicodeDecodeError) as error:
         raise CompatRefused("compat.acknowledgement_invalid", f"the acknowledgement cannot be read ({type(error).__name__})") from None
     assert acknowledgement is not None

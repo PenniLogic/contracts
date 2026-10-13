@@ -23,12 +23,14 @@ from unittest import mock
 
 import verification_support as support
 from verification_support import (
-    PROBE_SCHEMA, FIXTURE_NAMES, SyntheticContracts, copy_release, probe_path, synthetic_document, synthetic_report_parts,
+    FIXTURE_NAMES, PROBE_SCHEMA, SyntheticContracts, copy_release, probe_path, synthetic_document, synthetic_report_parts,
     temporary_root, version_diff,
 )
 
 import contract_report  # noqa: E402 - verification_support puts scripts/ on sys.path
 import contract_schema  # noqa: E402
+import verify_contract  # noqa: E402
+from contract_artifact import load_published_artifact  # noqa: E402
 from contract_gate import parse_instant  # noqa: E402
 from verify_contract import main  # noqa: E402
 
@@ -110,7 +112,8 @@ class CommandTestCase(unittest.TestCase):
         removal = synthetic_document("2.0.0", properties=("amount", "currency"), paths={"/probe": probe_path()})
         change = {"id": "response-property-removed", "level": 3, "operation": "GET", "path": "/probe",
                   "text": "removed the optional property 'note' from the response with the '200' status"}
-        diff = {**version_diff("1.2.3", "2.0.0"), "components": {"schemas": {"modified": {PROBE_SCHEMA: {"properties": {"deleted": ["note"]}}}}}}
+        diff = {**version_diff("1.2.3", "2.0.0"),
+                "components": {"schemas": {"modified": {PROBE_SCHEMA: {"properties": {"deleted": ["note"]}}}}}}
         acknowledged = [{"id": "response-property-removed", "location": "GET /probe", "reason": REASON},
                         {"id": "component-schema-property-removed", "location": f"components/schemas/{PROBE_SCHEMA}/properties/note",
                          "reason": REASON}]
@@ -152,9 +155,9 @@ class CommandTestCase(unittest.TestCase):
         assert isinstance(payload, dict)
         return code, payload
 
-    def artifact_argv(self, release_dir: Path | None = None, tag: str | None = None) -> list[str]:
+    def artifact_argv(self, release_dir: Path | None = None, tag: str | None = None, repo: Path | None = None) -> list[str]:
         return ["artifact", "--tag", tag or self.contracts.tag, "--release-dir", str(release_dir or self.release_dir),
-                "--repo", str(self.contracts.repo)]
+                "--repo", str(repo or self.contracts.repo)]
 
     def compat_argv(self, revision: str = "removal.json", breaking: str = "removal-breaking.json", diff: str = "removal-diff.json",
                     *extra: str, baseline: str = "v1.2.3") -> list[str]:
@@ -200,11 +203,30 @@ class ArtifactCommandTest(CommandTestCase):
                 self.assertEqual((code, payload["refusal"]["rule"], payload["verified"]), (*expected, False))
         for label, argv, rule in (
                 ("missing release directory", self.artifact_argv(work / "absent"), "release_dir.missing"),
+                ("a directory that is not a checkout", self.artifact_argv(repo=work), "repository.invalid"),
                 ("unconfigured remote", self.artifact_argv() + ["--remote", "upstream"], "remote.invalid")):
             with self.subTest(label):
                 code, out, err = self.run_command(*argv)
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn(f"[{rule}]", err)
+        rule = "git.unavailable"
+        with self.subTest("git not on PATH"), mock.patch.dict(os.environ, {"PATH": str(work)}):
+            code, out, err = self.run_command(*self.artifact_argv())
+            self.assertEqual((code, out), (2, ""))
+            self.assertIn(f"[{rule}]", err)
+
+    def test_verified_artifact_fills_the_report_contract_section(self) -> None:
+        artifact = load_published_artifact(self.contracts.tag, self.release_dir, repo=self.contracts.repo)
+        section = contract_report.contract_section(artifact)
+        self.assertEqual(section, {
+            "version": self.contracts.version, "tag": self.contracts.tag,
+            "commit": support.git(self.contracts.repo, "rev-parse", f"{self.contracts.tag}^{{commit}}"),
+            "spec_sha256": support.sha256_bytes((self.release_dir / artifact.spec_asset).read_bytes()),
+            "release_manifest_sha256": support.sha256_bytes((self.release_dir / "release-manifest.json").read_bytes()),
+        })
+        report = contract_report.build_report(**dict(synthetic_report_parts(), contract=section))
+        assessment = contract_report.assess_report(report)
+        self.assertEqual((assessment.problems, assessment.verdict, assessment.acceptance_eligible), ((), "pass", False))
 
 
 class GateCommandTest(CommandTestCase):
@@ -221,7 +243,8 @@ class GateCommandTest(CommandTestCase):
             code, payload = self.run_json("gate", "--gate-state", self.path("gate-warn-no-expiry.json"))
             self.assertEqual((code, payload["valid"], payload["refusal"]["rule"], payload["gate"]["mode"]),
                              (1, False, "gate.warn_until_missing", "block"))
-        for label, path, rule in (("missing", self.path("absent.json"), "input.missing"), ("a directory", str(self.inputs), "input.unreadable")):
+        for label, path, rule in (("missing", self.path("absent.json"), "input.missing"),
+                                  ("a directory", str(self.inputs), "input.unreadable")):
             with self.subTest(label):
                 code, payload = self.run_json("gate", "--gate-state", path)
                 self.assertEqual((code, payload["usage_error"]["rule"]), (2, rule))
@@ -283,8 +306,9 @@ class ReportCommandTest(CommandTestCase):
         code, payload = self.run_json("report", "--report", self.path("report-python-missing.json"))
         self.assertEqual((code, payload["valid"], payload["verdict"], payload["missing_languages"], payload["reasons"]),
                          (1, True, "fail", ["python"], [{"rule": "report.required_language_missing", "subject": "python"}]))
-        for label, name, rule in (("an omission declared as a pass", "report-omission-as-pass.json", "report.missing_languages_inconsistent"),
-                                  ("not JSON", "not-json.json", "report.not_json")):
+        for label, name, rule in (
+                ("an omission declared as a pass", "report-omission-as-pass.json", "report.missing_languages_inconsistent"),
+                ("not JSON", "not-json.json", "report.not_json")):
             with self.subTest(label):
                 code, payload = self.run_json("report", "--report", self.path(name))
                 self.assertEqual((code, payload["valid"], payload["verdict"], payload["problems"][0]["rule"]), (1, False, None, rule))
@@ -320,6 +344,16 @@ class WriteBoundaryTest(CommandTestCase):
         for argv in recorder.processes:
             self.assertEqual((Path(argv[0]).name, argv[1:3]), ("git", ["-C", str(self.contracts.repo)]), argv)
             self.assertIn(argv[3], READ_ONLY_GIT, argv)
+
+
+class RuleCoverageTest(unittest.TestCase):
+    def test_every_usage_rule_is_asserted(self) -> None:
+        self.assertEqual(verify_contract.UsageProblem("input.missing", "synthetic").rule, "input.missing")
+        with self.assertRaises(ValueError):
+            verify_contract.UsageProblem("input.unknown", "synthetic")
+        source = Path(__file__).read_text(encoding="utf-8")
+        rules = verify_contract.RULES + tuple(sorted(verify_contract.ARTIFACT_USAGE_RULES))
+        self.assertEqual([rule for rule in rules if f'"{rule}"' not in source], [])
 
 
 if __name__ == "__main__":
