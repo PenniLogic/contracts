@@ -779,7 +779,11 @@ test("enrollment scalar provenance follows its declared role rather than a fixed
     finding.message.includes("registration-only host address schema")));
 });
 
-test("real Spectral CLI preserves enrollment roles through each compiler-supported annotation on direct and intermediate refs", async () => {
+test("real Spectral CLI preserves enrollment roles through each compiler-supported annotation on direct and intermediate refs", async (t) => {
+  const controlTiming = {
+    direct: { calls: 0, elapsedNs: 0n },
+    intermediate: { calls: 0, elapsedNs: 0n },
+  };
   await withLintProbe(async (lint) => {
     const annotations = {
       title: "Synthetic scalar", description: "Synthetic scalar.", default: null,
@@ -800,7 +804,12 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
             registration[field] = { $ref: `#/components/schemas/EnrollmentAlias${field}` };
           }
         }
+        const timing = controlTiming[intermediate ? "intermediate" : "direct"];
+        const controlStarted = process.hrtime.bigint();
         const control = compile(doc);
+        const controlElapsed = process.hrtime.bigint() - controlStarted;
+        timing.calls += 1;
+        timing.elapsedNs += controlElapsed;
         for (const field of ["host", "pathPrefix"]) {
           const target = intermediate ? doc.components.schemas[`EnrollmentAlias${field}`] : registration[field];
           const example = field === "host" ? "synthetic.example" : "/v1";
@@ -821,6 +830,14 @@ test("real Spectral CLI preserves enrollment roles through each compiler-support
       }
     }
   });
+  assert.equal(controlTiming.direct.calls, 10);
+  assert.equal(controlTiming.intermediate.calls, 10);
+  t.diagnostic(JSON.stringify({
+    pre_annotation_compile: {
+      direct: { calls: controlTiming.direct.calls, elapsed_ns: controlTiming.direct.elapsedNs.toString() },
+      intermediate: { calls: controlTiming.intermediate.calls, elapsed_ns: controlTiming.intermediate.elapsedNs.toString() },
+    },
+  }));
 });
 
 test("supported annotations do not taint constrained general-text bases or widen the compiler vocabulary", async () => {

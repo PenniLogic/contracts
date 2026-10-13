@@ -125,6 +125,15 @@ in the failing assertion, and the nested lint helpers' existing byte caps are un
 Synthetic source-runner controls cover this transport with stubbed Node execution; they do not
 replace the real Node suite or establish native runtime savings or the 600-second qualification.
 
+The enrollment-annotation test times the original twenty pre-annotation `compile(doc)` calls
+in place with `process.hrtime.bigint()`. After every case and probe cleanup succeeds, it checks
+ten direct and ten intermediate calls and emits one `pre_annotation_compile` JSON diagnostic
+through the Node test reporter. Each shape contains numeric `calls` and a decimal-string
+`elapsed_ns` cumulative total. The twenty annotated compiles, address checks and real lint
+invocations remain unchanged; no control is cached or hoisted. These are monotonic wall-clock
+measurements around the control calls, not CPU time, net savings, lint-time attribution or
+evidence of a 600-second improvement. No timing threshold is asserted.
+
 The normal source command above includes this suite; `node --test scripts/tests/custom_destinations.test.cjs`
 is the focused command. When measuring, record the whole elapsed span as well as step times,
 dependency/cache state and Gradle executed/up-to-date tasks. Accepted-main run `37432699878`
