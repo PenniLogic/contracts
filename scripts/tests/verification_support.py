@@ -121,12 +121,29 @@ def git(cwd: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def temporary_root_problem(path: Path) -> str | None:
+    """Why the tests may not write under `path`, or None.
+
+    A temporary root is allowed outside this checkout, and inside its gitignored build/ directory:
+    scripts/run_source_tests.py (the CI test runner on main) gives every lane its own TMPDIR under
+    build/source-tests/run-*/state/<lane>/temp. Anywhere else inside the checkout is refused, so a test
+    never writes into tracked or reviewable paths.
+    """
+    root = ROOT.resolve()
+    if path != root and root not in path.parents:
+        return None
+    if (root / "build") in path.parents:
+        return None
+    return "the temporary directory is inside the repository but outside its gitignored build/; set TMPDIR elsewhere"
+
+
 def temporary_root(prefix: str = "pl-verify-") -> Path:
-    """A new temporary directory outside this repository; the caller removes it."""
+    """A new temporary directory in the process temporary directory (see temporary_root_problem); the caller removes it."""
     path = Path(tempfile.mkdtemp(prefix=prefix)).resolve()
-    if path == ROOT.resolve() or ROOT.resolve() in path.parents:
+    problem = temporary_root_problem(path)
+    if problem is not None:
         shutil.rmtree(path, ignore_errors=True)
-        raise AssertionError("the temporary directory is inside the repository; set TMPDIR elsewhere")
+        raise AssertionError(problem)
     return path
 
 

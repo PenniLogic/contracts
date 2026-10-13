@@ -365,6 +365,36 @@ class WriteBoundaryTest(CommandTestCase):
             self.assertIn(argv[3], READ_ONLY_GIT, argv)
 
 
+class TemporaryRootTest(unittest.TestCase):
+    """Where the tests may write. On main, CI runs scripts/run_source_tests.py, which sets each lane's TMPDIR inside the
+    checkout's gitignored build/ (build/source-tests/run-*/state/<lane>/temp). Checked against a fake checkout that
+    lives in a temporary directory, so nothing is written inside this repository."""
+
+    def test_temporary_root_allows_the_runner_temp_area_but_no_other_checkout_path(self) -> None:
+        base = temporary_root("pl-verify-fake-")
+        self.addCleanup(shutil.rmtree, base, True)
+        checkout, outside = base / "checkout", base / "elsewhere"
+        lane_temp = checkout / "build" / "source-tests" / "run-synthetic" / "state" / "serial" / "temp"
+        tracked = checkout / "scripts" / "tests"
+        for directory in (outside, lane_temp, tracked):
+            directory.mkdir(parents=True)
+
+        def make(tempdir: Path) -> Path:
+            with mock.patch.object(support, "ROOT", checkout), mock.patch.object(tempfile, "tempdir", str(tempdir)):
+                return support.temporary_root()
+
+        self.assertEqual(make(outside).parent, outside.resolve())  # control: outside the checkout
+        with self.subTest("the runner lane's TMPDIR inside the gitignored build/"):
+            self.assertEqual(make(lane_temp).parent, lane_temp.resolve())
+        for label, tempdir in (("a tracked directory of the checkout", tracked), ("the checkout itself", checkout)):
+            with self.subTest(label):
+                with self.assertRaises(AssertionError) as caught:
+                    make(tempdir)
+                self.assertEqual(str(caught.exception), "the temporary directory is inside the repository but outside its "
+                                                         "gitignored build/; set TMPDIR elsewhere")
+                self.assertEqual([path.name for path in tempdir.iterdir() if path.name.startswith("pl-verify-")], [])
+
+
 class RuleCoverageTest(unittest.TestCase):
     def test_every_usage_rule_is_asserted(self) -> None:
         self.assertEqual(verify_contract.UsageProblem("input.missing", "synthetic").rule, "input.missing")

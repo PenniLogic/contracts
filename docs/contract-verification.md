@@ -326,6 +326,11 @@ python -B -m unittest discover -s scripts/tests -p "test_contract_*.py" -v
 python -B -m unittest discover -s scripts/tests -p "test_verify_contract.py" -v
 ```
 
+The modules are also part of the repository's complete test run. On main that run is
+`python scripts/run_source_tests.py` (CI and `.github/agent-policy.json`, added by PR #38). It runs every
+`test_*.py` module in lanes and gives each lane its own `TMPDIR` inside the checkout's gitignored
+`build/source-tests/run-*/state/<lane>/temp`.
+
 - `test_contract_artifact.py`: the loader. `scripts/tests/verification_support.py` builds synthetic
   releases with the real `release.build_release_set`, with its module-level paths patched into a
   temporary directory. It uses hermetic git (`-c user.name`, `-c user.email`, signing off, no global or
@@ -346,8 +351,13 @@ python -B -m unittest discover -s scripts/tests -p "test_verify_contract.py" -v
   an audit hook, and requires the writes to be inside the temporary directory and the processes to be
   read-only git commands.
 
-No archive is committed and no network is used. Nothing is written inside the checkout. Every refusal
-test runs a passing control, applies exactly one mutation and asserts the exact rule ID.
+No archive is committed and no network is used. The tests write only inside their own temporary
+directories (`verification_support.temporary_root`): under `TMPDIR` outside the checkout or, under the
+complete test run, inside the lane's temporary directory in the gitignored `build/`. A temporary
+directory anywhere else inside the checkout is refused;
+`test_temporary_root_allows_the_runner_temp_area_but_no_other_checkout_path` checks both cases on a fake
+checkout. Every refusal test runs a passing control, applies exactly one mutation and asserts the exact
+rule ID.
 
 ## Held criteria and open questions
 
@@ -362,8 +372,8 @@ test runs a passing control, applies exactly one mutation and asserts the exact 
   Criterion 6 is unmet. Criteria 3, 4 and 7 are shown only with synthetic inputs and rows.
 - contracts#1 integration is held.
 - The contracts#13 owner (the coordinator) decides runner-lane registration of these test modules in
-  PR #38's `run_source_tests.py`, the whole-run budget and the merge order relative to PR #38. Until
-  then the modules are unregistered and would run in the serial lane.
+  `scripts/run_source_tests.py` (added to main by PR #38) and the whole-run budget. Until then the
+  modules are unregistered and run in its serial lane.
 - CI wiring (through the infra governance generator) and branch protection are held.
 - The core attestation and the separate Core, QA, Contract, Security and Release reviews are pending.
 - The PenniLogic/infra#22 hold remains.
