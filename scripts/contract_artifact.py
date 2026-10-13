@@ -309,7 +309,7 @@ def load_published_artifact(tag: str, release_dir: Path, *, repo: Path = pl_cont
         tag=tag, version=version, tag_object=tag_object, commit=commit, remote=remote, remote_url=remote_url,
         release_dir=release_dir, spec_asset=spec_name, spec_sha256=sums[spec_name], manifest_sha256=sums[RELEASE_MANIFEST],
         assets=dict(sorted(sums.items())), clients=clients,
-        checks=(tuple((check, "pass") for check in PASSED_CHECKS) + (("tag.pinned_identity", pinned), ("tag.on_remote_main", on_main))
+        checks=(tuple((check, "pass") for check in PASSED_CHECKS) + tuple(zip(CONDITIONAL_CHECKS, (pinned, on_main)))
                 + tuple((check, "not_run") for check in HELD_CHECKS)),
     )
 
@@ -567,6 +567,8 @@ class _TagTree:
     def read(self, paths: list[str]) -> None:
         """Read the listed files of the tag commit with one git process, in order; refuse a missing one."""
         object_ids = {path: self.require_regular_file(path) for path in paths}
+        if not object_ids:
+            return
         unique = sorted(set(object_ids.values()))
         what = f"the files of the tag commit {self.commit}"
         objects = dict(zip(unique, _read_objects(self.git, unique, "anchor.tag_file_missing", what)))
