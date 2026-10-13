@@ -11,8 +11,11 @@ adds the rules the schema subset cannot express:
 - A synthetic-fixture report is never acceptance_eligible. acceptance_eligible is true exactly when the
   mode is published and the provider and every consumer row are live.
 - Synthetic-fixture rows are named synthetic-<language> (synthetic-provider) and live rows never are
-  (a not_run row may carry either kind of name); live rows name the version they verified; every row
-  that ran names the report's contract version.
+  (a not_run row may carry either kind of name); live rows name the version and the repository commit
+  they verified; every row that ran names the report's contract version.
+- A published report names the tag, the tag commit, the annotated tag object and the release manifest.
+  The join keys other records use are contract.{version, tag, tag_commit, spec_sha256} and
+  consumers[].{name, language, version, commit, verified_contract_version}.
 - The declared verdict, missing_languages and acceptance_eligible must equal the recomputed values.
 
 Every problem and every verdict reason carries one static rule ID and a subject: a required language,
@@ -147,8 +150,8 @@ def _consistency_problems(report: dict) -> list[Note]:
     problems: list[Note] = []
     contract, compat, gate = report["contract"], report["compatibility"], report["gate"]
     version = contract["version"]
-    if (contract["tag"] is not None and contract["tag"] != f"v{version}") or (report["mode"] == "published" and (
-            contract["tag"] is None or contract["commit"] is None or contract["release_manifest_sha256"] is None)):
+    if (contract["tag"] is not None and contract["tag"] != f"v{version}") or (report["mode"] == "published" and any(
+            contract[key] is None for key in ("tag", "tag_commit", "tag_object", "release_manifest_sha256"))):
         problems.append(Note("report.contract_identity", "contract"))
     seen: set[tuple[str, str]] = set()
     for index, row in enumerate(report["consumers"]):
@@ -157,14 +160,14 @@ def _consistency_problems(report: dict) -> list[Note]:
         seen.add((row["language"], row["name"]))
     for subject, row, synthetic_name in _rows(report):
         not_run = row["mode"] == "not_run"
-        if not_run != (row["result"] == "not_run") or (
-                not_run and (row["version"] is not None or row["verified_contract_version"] is not None)):
+        if not_run != (row["result"] == "not_run") or (not_run and any(
+                row[key] is not None for key in ("version", "commit", "verified_contract_version"))):
             problems.append(Note("report.row_status_inconsistent", subject))
             continue
         if (row["mode"] == "synthetic-fixture" and row["name"] != synthetic_name) or (
                 row["mode"] == "live" and row["name"].startswith("synthetic-")):
             problems.append(Note("report.synthetic_row_name", subject))
-        if row["mode"] == "live" and row["version"] is None:
+        if row["mode"] == "live" and (row["version"] is None or row["commit"] is None):
             problems.append(Note("report.live_row_unidentified", subject))
         if not not_run and row["verified_contract_version"] != version:
             problems.append(Note("report.contract_version_mismatch", subject))
@@ -247,8 +250,9 @@ def assess_report_file(path: Path) -> Assessment:
 def contract_section(artifact: object) -> dict:
     """The `contract` section for a contract_artifact.PublishedArtifact."""
     return {
-        "version": getattr(artifact, "version"), "tag": getattr(artifact, "tag"), "commit": getattr(artifact, "commit"),
-        "spec_sha256": getattr(artifact, "spec_sha256"), "release_manifest_sha256": getattr(artifact, "manifest_sha256"),
+        "version": getattr(artifact, "version"), "tag": getattr(artifact, "tag"), "tag_commit": getattr(artifact, "commit"),
+        "tag_object": getattr(artifact, "tag_object"), "spec_sha256": getattr(artifact, "spec_sha256"),
+        "release_manifest_sha256": getattr(artifact, "manifest_sha256"),
     }
 
 

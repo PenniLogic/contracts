@@ -186,6 +186,13 @@ class UsageTest(CommandTestCase):
                 code, out, err = self.run_command(*argv)
                 self.assertEqual((code, out), (2, ""))
                 self.assertIn("usage: verify_contract.py", err)
+        for label, argv, command in (
+                ("a missing required option", ["compat", "--baseline", "v1.2.3"], "compat"),
+                ("an abbreviated option (abbreviations are refused)", ["gate", "--gate", str(self.inputs)], "gate"),
+                ("no subcommand", [], None)):
+            with self.subTest(f"--json: {label}"):
+                code, payload = self.run_json(*argv)
+                self.assertEqual((code, payload["command"], payload["usage_error"]["rule"]), (2, command, "usage.arguments"))
 
 
 class ArtifactCommandTest(CommandTestCase):
@@ -207,13 +214,13 @@ class ArtifactCommandTest(CommandTestCase):
         (tampered / FIXTURE_NAMES[0]).write_bytes((tampered / FIXTURE_NAMES[0]).read_bytes() + b" ")
         for label, argv, expected in (
                 ("an asset changed after publication", self.artifact_argv(tampered), (1, "sums.digest_mismatch")),
+                ("a missing release directory: a missing artifact", self.artifact_argv(work / "absent"), (1, "release_dir.missing")),
                 ("a branch name instead of a tag", self.artifact_argv(tag="main"), (1, "tag.grammar")),
                 ("another pinned tag object", self.artifact_argv() + ["--expect-tag-object", "0" * 40], (1, "tag.pin_mismatch"))):
             with self.subTest(label):
                 code, payload = self.run_json(*argv)
                 self.assertEqual((code, payload["refusal"]["rule"], payload["verified"]), (*expected, False))
         for label, argv, rule in (
-                ("missing release directory", self.artifact_argv(work / "absent"), "release_dir.missing"),
                 ("a directory that is not a checkout", self.artifact_argv(repo=work), "repository.invalid"),
                 ("unconfigured remote", self.artifact_argv() + ["--remote", "upstream"], "remote.invalid")):
             with self.subTest(label):
@@ -254,7 +261,8 @@ class ArtifactCommandTest(CommandTestCase):
         section = contract_report.contract_section(artifact)
         self.assertEqual(section, {
             "version": self.contracts.version, "tag": self.contracts.tag,
-            "commit": support.git(self.contracts.repo, "rev-parse", f"{self.contracts.tag}^{{commit}}"),
+            "tag_commit": support.git(self.contracts.repo, "rev-parse", f"{self.contracts.tag}^{{commit}}"),
+            "tag_object": support.git(self.contracts.repo, "rev-parse", f"refs/tags/{self.contracts.tag}"),
             "spec_sha256": support.sha256_bytes((self.release_dir / artifact.spec_asset).read_bytes()),
             "release_manifest_sha256": support.sha256_bytes((self.release_dir / "release-manifest.json").read_bytes()),
         })

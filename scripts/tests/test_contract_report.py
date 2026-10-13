@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from verification_support import (
-    SYNTHETIC_INSTANT, fixture_report_parts, synthetic_digest, synthetic_report_parts, temporary_root,
+    FIXTURE_COMMIT, SYNTHETIC_INSTANT, fixture_report_parts, synthetic_digest, synthetic_report_parts, temporary_root,
 )
 
 import contract_gate  # noqa: E402 - verification_support puts scripts/ on sys.path
@@ -159,13 +159,13 @@ class ReportVerdictTest(ReportTestCase):
 
     def test_not_run_consumer_row_fails(self) -> None:
         def not_run(report: dict) -> None:
-            report["consumers"][2].update(mode="not_run", result="not_run", version=None, verified_contract_version=None)
+            report["consumers"][2].update(mode="not_run", result="not_run", version=None, commit=None, verified_contract_version=None)
 
         self.assertDerived(not_run, "fail", [("report.row_not_run", PYTHON_ROW)], False)
 
     def test_not_run_provider_or_compatibility_fails(self) -> None:
         with self.subTest("provider not run"):
-            self.assertDerived(lambda report: report["provider"].update(mode="not_run", result="not_run", version=None,
+            self.assertDerived(lambda report: report["provider"].update(mode="not_run", result="not_run", version=None, commit=None,
                                                                         verified_contract_version=None),
                                "fail", [("report.row_not_run", PROVIDER_ROW)], False)
         with self.subTest("compatibility not run (eligibility is about liveness, the verdict still fails)"):
@@ -262,7 +262,8 @@ class ReportRuleTest(ReportTestCase):
         mutations = {
             "published without a tag": lambda report: report["contract"].update(tag=None),
             "tag of another version": lambda report: report["contract"].update(tag="v1.2.4"),
-            "published without the tag commit": lambda report: report["contract"].update(commit=None),
+            "published without the tag commit": lambda report: report["contract"].update(tag_commit=None),
+            "published without the tag object": lambda report: report["contract"].update(tag_object=None),
             "published without the release manifest digest": lambda report: report["contract"].update(release_manifest_sha256=None),
         }
         for label, mutate in mutations.items():
@@ -273,8 +274,11 @@ class ReportRuleTest(ReportTestCase):
         self.assertProblems([("report.duplicate_consumer", "/consumers/3")],
                             lambda report: report["consumers"].append(dict(report["consumers"][2])))
 
-    def test_live_row_without_version_refused(self) -> None:
-        self.assertProblems([("report.live_row_unidentified", PYTHON_ROW)], lambda report: report["consumers"][2].update(version=None))
+    def test_live_row_without_version_or_commit_refused(self) -> None:
+        for field in ("version", "commit"):
+            with self.subTest(field):
+                self.assertProblems([("report.live_row_unidentified", PYTHON_ROW)],
+                                    lambda report: report["consumers"][2].update({field: None}))
 
     def test_live_row_with_a_synthetic_name_refused(self) -> None:
         self.assertProblems([("report.synthetic_row_name", "kotlin/synthetic-kotlin")],
@@ -378,10 +382,24 @@ class SyntheticReportRuleTest(ReportTestCase):
             "a not_run row naming a verified version": lambda report: report["consumers"][2].update(mode="not_run", result="not_run"),
             "a not_run row naming its version": lambda report: report["consumers"][2].update(
                 mode="not_run", result="not_run", verified_contract_version=None, version="0.0.0-fixture"),
+            "a not_run row naming a commit": lambda report: report["consumers"][2].update(
+                mode="not_run", result="not_run", verified_contract_version=None, commit=FIXTURE_COMMIT),
         }
         for label, mutate in mutations.items():
             with self.subTest(label):
                 self.assertProblems([("report.row_status_inconsistent", "python/synthetic-python")], mutate)
+
+
+class JoinKeyTest(unittest.TestCase):
+    def test_report_carries_the_join_keys_consumers_and_the_release_checklist_use(self) -> None:
+        """contract.{version, tag, tag_commit, spec_sha256} and consumers[].{name, language, version, commit,
+        verified_contract_version} (review round 1, CVR-4); the provider row names its commit too."""
+        definitions = contract_schema.load_schema(contract_report.REPORT_SCHEMA)["definitions"]
+        self.assertLessEqual({"version", "tag", "tag_commit", "spec_sha256"}, set(definitions["contract"]["required"]))
+        self.assertLessEqual({"name", "language", "version", "commit", "verified_contract_version"},
+                             set(definitions["consumer"]["required"]))
+        self.assertIn("commit", definitions["provider"]["required"])
+        self.assertNotIn("commit", definitions["contract"]["properties"])
 
 
 class SchemaSubsetTest(unittest.TestCase):

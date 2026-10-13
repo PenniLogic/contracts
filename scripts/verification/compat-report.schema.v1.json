@@ -107,13 +107,14 @@
       "pattern": "^[ -~]+(?![\\s\\S])"
     },
     "contract": {
-      "description": "The contract version this report verified; a published report names its tag, tag commit and release manifest.",
+      "description": "The contract version this report verified, with the join keys consumers and the release checklist use (version, tag, tag_commit, spec_sha256); a published report names its tag, tag commit, annotated tag object and release manifest.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "version",
         "tag",
-        "commit",
+        "tag_commit",
+        "tag_object",
         "spec_sha256",
         "release_manifest_sha256"
       ],
@@ -128,7 +129,14 @@
           ],
           "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
         },
-        "commit": {
+        "tag_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?(?![\\s\\S])"
+        },
+        "tag_object": {
           "type": [
             "string",
             "null"
@@ -277,6 +285,7 @@
       "required": [
         "name",
         "version",
+        "commit",
         "verified_contract_version",
         "mode",
         "result"
@@ -291,6 +300,14 @@
             "null"
           ],
           "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]*(?![\\s\\S])"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?(?![\\s\\S])",
+          "description": "The provider or consumer repository commit that was verified; required for a live row."
         },
         "verified_contract_version": {
           "type": [
@@ -322,6 +339,7 @@
         "language",
         "name",
         "version",
+        "commit",
         "verified_contract_version",
         "mode",
         "result"
@@ -339,6 +357,14 @@
             "null"
           ],
           "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]*(?![\\s\\S])"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?(?![\\s\\S])",
+          "description": "The provider or consumer repository commit that was verified; required for a live row."
         },
         "verified_contract_version": {
           "type": [

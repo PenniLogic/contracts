@@ -620,6 +620,12 @@ def generator_record_keys() -> set[str]:
 
 SYNTHETIC_INSTANT = "2026-01-02T03:04:05.000Z"  # SYNTHETIC_EPOCH as the fixed 24-character UTC instant
 FIXTURE_COMMIT = synthetic_digest("fixture tag commit")[:40]
+FIXTURE_TAG_OBJECT = synthetic_digest("fixture tag object")[:40]
+
+
+def fixture_row_commit(name: str) -> str:
+    """A fixture repository commit for a report row (an object ID shape, not a real commit)."""
+    return synthetic_digest(f"fixture commit of {name}")[:40]
 PROBE_SCHEMA = "SyntheticProbe"
 
 
@@ -659,16 +665,17 @@ def fixture_report_parts() -> dict:
     row name is a fixture name, not a real repository, and no such report is ever written or published.
     """
     rows = [{"language": language, "name": f"fixture-{language}-consumer", "version": "0.0.0-fixture",
-             "verified_contract_version": "1.2.3", "mode": "live", "result": "pass"} for language in pl_contracts.LANGUAGES]
+             "commit": fixture_row_commit(f"fixture-{language}-consumer"), "verified_contract_version": "1.2.3", "mode": "live",
+             "result": "pass"} for language in pl_contracts.LANGUAGES]
     return {
         "mode": "published",
-        "contract": {"version": "1.2.3", "tag": "v1.2.3", "commit": FIXTURE_COMMIT, "spec_sha256": synthetic_digest("spec"),
-                     "release_manifest_sha256": synthetic_digest("release manifest")},
+        "contract": {"version": "1.2.3", "tag": "v1.2.3", "tag_commit": FIXTURE_COMMIT, "tag_object": FIXTURE_TAG_OBJECT,
+                     "spec_sha256": synthetic_digest("spec"), "release_manifest_sha256": synthetic_digest("release manifest")},
         "compatibility": {"baseline": "v1.2.2", "revision_version": "1.2.3", "change_class": "additive", "findings": [],
                           "problems": [], "result": "pass"},
         "gate": {"mode": "block", "reason": "gate.block", "warn_until": None, "state_sha256": synthetic_digest("gate state")},
-        "provider": {"name": "fixture-provider", "version": "0.0.0-fixture", "verified_contract_version": "1.2.3",
-                     "mode": "live", "result": "pass"},
+        "provider": {"name": "fixture-provider", "version": "0.0.0-fixture", "commit": fixture_row_commit("fixture-provider"),
+                     "verified_contract_version": "1.2.3", "mode": "live", "result": "pass"},
         "consumers": rows,
         "generated_at": parse_instant(SYNTHETIC_INSTANT),
     }
@@ -678,7 +685,7 @@ def synthetic_report_parts() -> dict:
     """The same report as this repository's own runs produce it: synthetic-fixture mode and synthetic rows."""
     parts = fixture_report_parts()
     parts["mode"] = "synthetic-fixture"
-    parts["provider"] = dict(parts["provider"], name="synthetic-provider", mode="synthetic-fixture", version=None)
-    parts["consumers"] = [dict(row, name=f"synthetic-{row['language']}", mode="synthetic-fixture", version=None)
+    parts["provider"] = dict(parts["provider"], name="synthetic-provider", mode="synthetic-fixture", version=None, commit=None)
+    parts["consumers"] = [dict(row, name=f"synthetic-{row['language']}", mode="synthetic-fixture", version=None, commit=None)
                           for row in parts["consumers"]]
     return parts

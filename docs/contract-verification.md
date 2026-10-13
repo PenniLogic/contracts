@@ -30,14 +30,20 @@ python scripts/verify_contract.py report --report FILE [--json]
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Pass. `compat` also exits 0 for a warning under an unexpired warning gate; the output says WARN and when the warning ends. |
-| 1 | Fail or refused: a refused artifact or gate state, a failing comparison, an invalid report, or a report whose verdict is fail. |
+| 1 | Fail or refused: a refused artifact (including a missing release directory, which is a missing artifact) or gate state, a failing comparison, an invalid report, or a report whose verdict is fail. |
 | 2 | Usage error, or a missing, unreadable or malformed input, including detector output or an acknowledgement the comparison cannot use. |
 
-Results go to stdout. With `--json` the command prints one JSON document (two-space indent, ASCII);
-a usage error then becomes `{"command": ..., "usage_error": {"rule": ..., "detail": ...}}`. Without
-`--json`, usage errors go to stderr. Usage rule IDs are `input.missing`, `input.unreadable` and
-`input.not_json`, the loader's `git.unavailable`, `repository.invalid`, `release_dir.missing` and
-`remote.invalid`, and the `compat.*` refusals below.
+Results go to stdout. With `--json` the command prints one JSON document (two-space indent, ASCII),
+also for a usage error: `{"command": ..., "usage_error": {"rule": ..., "detail": ...}}`, where
+`command` is null when no subcommand was recognized. Without `--json`, usage errors go to stderr.
+Usage rule IDs are `usage.arguments` (the command line itself: an unknown or missing option or
+subcommand; options cannot be abbreviated), `input.missing`, `input.unreadable` and `input.not_json`,
+the loader's `git.unavailable`, `repository.invalid` and `remote.invalid`, and the `compat.*` refusals
+below.
+
+A missing input file of `compat`, `gate` or `report` exits 2, not 1: the command could not evaluate
+anything, and 2 keeps that apart from an evaluated failure. A missing input is still never a pass; a
+pipeline treats every non-zero exit as a failure.
 
 There is no clock option: the commands use the real UTC clock, and tests inject one through
 `verify_contract.main(argv, clock=...)`. Nothing is written to disk except the loader's temporary
@@ -326,13 +332,19 @@ builds it (`build_report`) and validates it (`assess_report`, `verify_contract.p
 records:
 
 - `generated_at` and `mode`: `published` for a loader-verified artifact, otherwise `synthetic-fixture`;
-- `contract`: version, tag, tag commit, specification and release-manifest digests;
+- `contract`: version, tag, tag commit (`tag_commit`), annotated tag object (`tag_object`),
+  specification and release-manifest digests;
 - `required_languages`: always `["kotlin", "typescript", "python"]`;
 - `compatibility` and `gate`: the result above and the gate decision;
 - `provider` and `consumers`: one row each, with name, language (consumers), the version verified, the
-  contract version it was verified against, `mode` (`live`, `synthetic-fixture` or `not_run`) and
-  `result` (`pass`, `fail` or `not_run`);
+  repository commit verified (`commit`), the contract version it was verified against, `mode` (`live`,
+  `synthetic-fixture` or `not_run`) and `result` (`pass`, `fail` or `not_run`);
 - `missing_languages`, `verdict` and `acceptance_eligible`, which must equal the recomputed values.
+
+Consumer repositories and the release checklist join a report on `contract.{version, tag, tag_commit,
+spec_sha256}` and `consumers[].{name, language, version, commit, verified_contract_version}`. A live
+row must name its commit. The report schema version `pennilogic-compat-report@1` is a proposal of this
+pull request until it is reviewed and merged; field names can still change before then.
 
 The verdict is `fail` when a required language has no consumer row, when any row is `not_run` or
 `fail`, or when the compatibility result is `not_run` or `fail`. It is `warn` when only the
@@ -357,11 +369,11 @@ rules.
 | `report.not_json` | The file is not strict JSON. |
 | `report.schema` | The report is outside the closed schema, or `generated_at` is not a real instant. The subject is a JSON pointer and the failing keyword; values are never echoed. |
 | `report.bounds` | The file exceeds 4 MiB, or a row count, finding or problem count, or text length exceeds its bound. |
-| `report.contract_identity` | A tag is not `v<version>`, or a published report lacks the tag, tag commit or release-manifest digest. |
+| `report.contract_identity` | A tag is not `v<version>`, or a published report lacks the tag, tag commit, tag object or release-manifest digest. |
 | `report.duplicate_consumer` | Two consumer rows share a language and a name. |
-| `report.row_status_inconsistent` | `mode` and `result` disagree about `not_run`, or a `not_run` row names a version. |
+| `report.row_status_inconsistent` | `mode` and `result` disagree about `not_run`, or a `not_run` row names a version or a commit. |
 | `report.synthetic_row_name` | A `synthetic-fixture` row is not named `synthetic-<language>` (`synthetic-provider`), or a `live` row is named `synthetic-*`. A `not_run` row may carry either kind of name. |
-| `report.live_row_unidentified` | A live row does not name the version it verified. |
+| `report.live_row_unidentified` | A live row does not name the version or the repository commit it verified. |
 | `report.contract_version_mismatch` | A row that ran names another contract version than the report. |
 | `report.compat_inconsistent` | The class, findings, problems, result, baseline and gate of the compatibility section contradict each other or the contract version. |
 | `report.gate_inconsistent` | The gate mode, reason and `warn_until` contradict each other or `generated_at`. |
@@ -435,7 +447,11 @@ rule ID.
   request.
 - The real consumers and their compile drift checks are held (criteria 2 and 6). The second pull
   request compiles or type-checks each consumer against the unpacked published archive, in CI only.
-  Criterion 6 is unmet. Criteria 3, 4 and 7 are shown only with synthetic inputs and rows.
+  Criterion 6 is unmet. Criterion 3 is shown only for the compatibility classification: an additive
+  change classifies as additive and passes the gate (synthetic documents). Its "without consumer
+  changes" half needs consumer verification and is held with criteria 2 and 6. Criteria 4 and 7 are
+  shown only with synthetic inputs and rows, and criterion 4 only per language (see the report
+  section).
 - contracts#1 integration is held.
 - The contracts#13 owner (the coordinator) decides runner-lane registration of these test modules in
   `scripts/run_source_tests.py` (added to main by PR #38) and the whole-run budget. Until then the

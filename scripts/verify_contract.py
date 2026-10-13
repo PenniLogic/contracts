@@ -14,9 +14,10 @@ compat    Classify a revision against its published baseline from already-parsed
           apply the acknowledgement protocol and the gate (contract_compat.py).
 report    Validate a compatibility report and recompute its verdict (contract_report.py).
 
-Exit codes: 0 pass (including a warning under an unexpired warning gate), 1 fail or refused, 2 usage error
-or a missing, unreadable or malformed input. Results go to stdout (with --json, one JSON document); usage
-errors go to stderr, or into that JSON document with --json. Nothing is written to disk except the
+Exit codes: 0 pass (including a warning under an unexpired warning gate), 1 fail or refused (a missing
+release directory is a refused artifact), 2 usage error or a missing, unreadable or malformed input. Results
+go to stdout (with --json, one JSON document, also for a usage error); without --json usage errors go to
+stderr. Nothing is written to disk except the
 loader's temporary unpack directory, which is removed before the command returns. The only network
 access is the loader's `git ls-remote` against the configured remote. No run of this command is product
 verification unless its report says acceptance_eligible, which needs a published artifact, the live
@@ -47,9 +48,11 @@ from contract_schema import (  # noqa: E402
 from pl_contracts import ROOT  # noqa: E402
 
 EXIT_PASS, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
-RULES = ("input.missing", "input.unreadable", "input.not_json")
-# Loader refusals about the command's own arguments or environment rather than about the artifact.
-ARTIFACT_USAGE_RULES = frozenset({"git.unavailable", "repository.invalid", "release_dir.missing", "remote.invalid"})
+RULES = ("input.missing", "input.unreadable", "input.not_json", "usage.arguments")
+COMMANDS = ("artifact", "gate", "compat", "report")
+# Loader refusals about the command's own arguments or environment rather than about the artifact. A missing
+# release directory is not among them: it is a missing artifact, which is refused (exit 1).
+ARTIFACT_USAGE_RULES = frozenset({"git.unavailable", "repository.invalid", "remote.invalid"})
 USAGE_RULES = frozenset(RULES) | ARTIFACT_USAGE_RULES | frozenset(contract_compat.RULES)
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_LINE_TEXT = 400
@@ -66,11 +69,25 @@ class UsageProblem(Exception):
         self.detail = detail
 
 
+class ArgumentsRefused(Exception):
+    """argparse refused the command line (exit 2); raised instead of argparse printing and exiting."""
+
+    def __init__(self, prog: str, usage: str, message: str) -> None:
+        super().__init__(message)
+        self.prog, self.usage, self.message = prog, usage, message
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):  # type: ignore[override]
+        raise ArgumentsRefused(self.prog, self.format_usage(), message)
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="verify_contract.py", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = _Parser(prog="verify_contract.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                     allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True, metavar="{artifact,gate,compat,report}")
-    artifact = commands.add_parser("artifact", help="verify downloaded Release assets against their published tag")
+    artifact = commands.add_parser("artifact", help="verify downloaded Release assets against their published tag",
+                                   allow_abbrev=False)
     artifact.add_argument("--tag", required=True, help="published version tag vMAJOR.MINOR.PATCH")
     artifact.add_argument("--release-dir", required=True, type=Path,
                           help="directory outside the checkout holding exactly the downloaded Release assets")
@@ -79,9 +96,10 @@ def _parser() -> argparse.ArgumentParser:
                           help="configured remote that fetches from the canonical PenniLogic/contracts repository (default: origin)")
     artifact.add_argument("--expect-tag-object", metavar="OBJECT_ID",
                           help="refuse unless the tag is this annotated tag object, the one verified before (trust on first use otherwise)")
-    gate = commands.add_parser("gate", help="validate the warn/block gate state and print the effective gate now")
+    gate = commands.add_parser("gate", help="validate the warn/block gate state and print the effective gate now",
+                               allow_abbrev=False)
     gate.add_argument("--gate-state", type=Path, default=GATE_STATE, help="gate state file (default: the committed one)")
-    compat = commands.add_parser("compat", help="classify a revision against its published baseline")
+    compat = commands.add_parser("compat", help="classify a revision against its published baseline", allow_abbrev=False)
     compat.add_argument("--baseline", required=True, help="published baseline tag vMAJOR.MINOR.PATCH")
     compat.add_argument("--base-document", required=True, type=Path, help="baseline OpenAPI document as parsed JSON")
     compat.add_argument("--revision-document", required=True, type=Path, help="revision OpenAPI document as parsed JSON")
@@ -89,7 +107,7 @@ def _parser() -> argparse.ArgumentParser:
     compat.add_argument("--oasdiff-diff", required=True, type=Path, help="`oasdiff diff --format json` output")
     compat.add_argument("--acknowledgement", type=Path, help="breaking-change acknowledgement file, when the revision has one")
     compat.add_argument("--gate-state", type=Path, default=GATE_STATE, help="gate state file (default: the committed one)")
-    report = commands.add_parser("report", help="validate a compatibility report and recompute its verdict")
+    report = commands.add_parser("report", help="validate a compatibility report and recompute its verdict", allow_abbrev=False)
     report.add_argument("--report", required=True, type=Path, help="report file (compat-report.schema.v1.json)")
     for command in (artifact, gate, compat, report):
         command.add_argument("--json", action="store_true", help="print one JSON document instead of text")
@@ -216,9 +234,18 @@ def _report(args: argparse.Namespace, clock: Callable[[], datetime]) -> int:
 
 def main(argv: list[str] | None = None, *, clock: Callable[[], datetime] = utc_now) -> int:
     """Run one subcommand. `clock` is injected for tests; the command line always uses the real UTC clock."""
+    argv = sys.argv[1:] if argv is None else list(argv)
     try:
         args = _parser().parse_args(argv)
-    except SystemExit as exit_:
+    except ArgumentsRefused as refused:
+        if "--json" in argv:
+            command = next((item for item in argv if item in COMMANDS), None)
+            sys.stdout.write(dumps({"command": command, "usage_error": {"rule": "usage.arguments", "detail": refused.message}}))
+        else:
+            sys.stderr.write(refused.usage)
+            print(f"{refused.prog}: error: {refused.message}", file=sys.stderr)
+        return EXIT_USAGE
+    except SystemExit as exit_:  # --help
         return EXIT_PASS if exit_.code in (0, None) else EXIT_USAGE
     handlers = {"artifact": _artifact, "gate": _gate, "compat": _compat, "report": _report}
     try:
