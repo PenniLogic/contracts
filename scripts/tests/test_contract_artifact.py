@@ -982,6 +982,18 @@ class ArchiveReaderDifferentialTest(LoaderTestCase):
                 self.swap_raw(release_dir, "python", raw + END_OF_ARCHIVE)
                 self.assertRefused("archive.ambiguous", release_dir)
 
+    def test_extended_header_link_name_differential_refused(self) -> None:
+        """Review round 2, PSEC-R2-1: one link-name byte in the Kotlin archive's extended header block. tarfile and GNU
+        tar unpacked the golden tree; node-tar dropped the long golden file and wrote .../models/SyntheticProbeRes."""
+        release_dir = self.fresh_release()
+        raw = gzip.decompress((release_dir / archive_name("kotlin", self.base.tag)).read_bytes())
+        long_name = (f"{archive_prefix('kotlin', self.base.tag)}/src/main/kotlin/com/pennilogic/synthetic/models/"
+                     "SyntheticProbeResponseWithALongGeneratedName.kt")
+        start = member_offsets(raw)[long_name][0]
+        self.assertEqual(raw[start + 156:start + 157], tarfile.XHDTYPE)
+        self.swap_raw(release_dir, "kotlin", patch_header(raw, start, 157, b"x"))
+        self.assertRefused("archive.noncanonical", release_dir)
+
     def test_noncanonical_mode_or_extra_directory_refused(self) -> None:
         """Modes and directories are outside the tree digest; GNU tar unpacked gradlew without its executable bit."""
         prefix = archive_prefix("kotlin", self.base.tag)
@@ -1150,6 +1162,31 @@ class ArchiveMemberRulesTest(unittest.TestCase):
         for label, raw in cases.items():
             with self.subTest(label):
                 self.assertRawRule("archive.ambiguous", raw)
+
+    def test_extended_header_block_other_than_the_builders_refused(self) -> None:
+        """The extended header block's own fields (review round 2, PSEC-R2-1). node-tar refuses a link name or an empty
+        name there and unpacks the member under its truncated ustar name; tarfile and GNU tar use the `path` record."""
+        start = self.offsets[self.LONG][0]
+        self.assertEqual((self.raw[start + 156:start + 157], self.raw[start:start + 15]), (tarfile.XHDTYPE, b"././@PaxHeader\0"))
+        older_python = patch_header(patch_header(self.raw, start, 329, b"0000000\0"), start, 337, b"0000000\0")
+        self.assertEqual(len(contract_artifact.inspect_archive_members(older_python, self.PREFIX, self.NAME)), len(self.clean))
+        cases = {
+            "a link name": (157, b"x"),
+            "an empty name": (0, b"\0" * 100),
+            "another name": (0, b"../../../../tmp/synthetic".ljust(100, b"\0")),
+            "a mode": (100, b"0007777\0"),
+            "a numeric owner": (108, b"0000001\0"),
+            "a numeric group": (116, b"0000001\0"),
+            "a modification time": (136, b"%011o\0" % SYNTHETIC_EPOCH),
+            "an owner name": (265, b"root"),
+            "a group name": (297, b"root"),
+            "a device major number": (329, b"0000001\0"),
+            "a device minor number": (337, b"0000001\0"),
+            "header padding": (500, b"Z"),
+        }
+        for label, (field, value) in cases.items():
+            with self.subTest(label):
+                self.assertRawRule("archive.noncanonical", patch_header(self.raw, start, field, value))
 
     def test_header_fields_that_readers_decode_differently_refused(self) -> None:
         readme, package = self.header("README.md"), self.header("pkg")

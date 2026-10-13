@@ -29,11 +29,12 @@ docs/contract-verification.md lists them.
 5. Archives. Each client archive is one gzip member, decompressed with a size bound. A strict reader
    accepts only the tar subset release.deterministic_tar_gz writes, so that GNU tar, npm's node-tar
    and Python's tarfile read the same members: POSIX ustar headers with plain octal numbers, regular
-   files and directories only, at most one extended header holding one `path` record before a member,
-   nothing after the end-of-archive marker. The members must be the builder's canonical form (its
-   modes, owner 0, one modification time, sorted names, directories exactly the parents of the files)
-   with bounded printable ASCII names inside one prefix: no absolute or parent paths, no links or
-   devices, no duplicates or case collisions. tarfile must read the same members at the same offsets.
+   files and directories only, at most one extended header before a member, exactly as tarfile writes
+   it (its own fields included) and holding one `path` record, nothing after the end-of-archive marker.
+   The members must be the builder's canonical form (its modes, owner 0, one modification time,
+   sorted names, directories exactly the parents of the files) with bounded printable ASCII names
+   inside one prefix: no absolute or parent paths, no links or devices, no duplicates or case
+   collisions. tarfile must read the same members at the same offsets.
    The archive is then unpacked with the tarfile data filter. The tree digest is recomputed with
    pl_contracts.tree_hash, excluding contracts-manifest.json exactly as generate_clients.py does. It
    must equal the archive's own manifest, the release manifest and golden.json[language].tree_sha256
@@ -950,9 +951,11 @@ def _check_golden(tree: _TagTree, spec_digest: str, version: str) -> dict[str, d
 # Every reader of a client archive must see the tree that was verified. Python's tarfile is lenient where
 # other readers (GNU tar, npm's node-tar) are not: it skips by the header size and then applies a pax
 # global `size`, keeps a GNU long name over a following pax `path`, stops quietly at an unreadable header
-# and reads the next header right after a directory that declares data. So a strict reader first accepts
-# only the subset release.deterministic_tar_gz writes and refuses everything else; tarfile must then read
-# the same members at the same offsets before anything is unpacked.
+# and reads the next header right after a directory that declares data. node-tar in turn refuses a link name
+# or an empty name in a pax extended header block and then falls back to the member's truncated ustar name.
+# So a strict reader first accepts only the subset release.deterministic_tar_gz writes, every field of every
+# header block included, and refuses everything else; tarfile must then read the same members at the same
+# offsets before anything is unpacked.
 
 TAR_BLOCK = tarfile.BLOCKSIZE
 POSIX_MAGIC = b"ustar\x0000"
@@ -964,6 +967,8 @@ DEVICE_FIELDS, PREFIX_FIELD, HEADER_PADDING = ((329, 8), (337, 8)), (345, 155), 
 # zeros in earlier ones; both mean "no device" to every reader.
 ZERO_DEVICE_FIELDS = (b"\0" * 8, b"0000000\0")
 USTAR_NAME_LENGTH = 100
+# The name field of the extended header block tarfile writes before a member whose name needs a `path` record.
+PAX_HEADER_NAME = b"././@PaxHeader".ljust(USTAR_NAME_LENGTH, b"\0")
 MEMBER_TYPES = (tarfile.REGTYPE, tarfile.DIRTYPE)
 SPECIAL_TYPES = (tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE, tarfile.CONTTYPE)
 # Bounds on member names; the real clients' longest path is under 130 characters and 10 components.
@@ -1068,6 +1073,25 @@ def _extended_path(records: bytes, where: str) -> str:
         raise ArtifactRefused("archive.unsafe_path", f"{where}: a member name is not printable ASCII") from None
 
 
+def _extended_header_problem(header: bytes, numbers: dict[str, int | None]) -> str | None:
+    """Why an extended header block is not the one release.deterministic_tar_gz writes, or None.
+
+    tarfile writes the name ././@PaxHeader, mode, owner and modification time 0, no link or owner names, no
+    device numbers and NUL header padding. Readers differ on anything else there: node-tar refuses a link
+    name or an empty name in this block and then unpacks the member under its truncated ustar name, while
+    tarfile and GNU tar use the `path` record (review round 2, PSEC-R2-1).
+    """
+    if _field(header, NAME_FIELD) != PAX_HEADER_NAME:
+        return "with a name other than the builder's ././@PaxHeader"
+    if any(numbers[field] for field in ("mode", "uid", "gid", "mtime")):
+        return "with a mode, owner or modification time other than 0"
+    if any(_field(header, field).strip(b"\0") for field in (LINKNAME_FIELD, UNAME_FIELD, GNAME_FIELD)):
+        return "with a link name or an owner name"
+    if any(_field(header, field) not in ZERO_DEVICE_FIELDS for field in DEVICE_FIELDS) or _field(header, HEADER_PADDING).strip(b"\0"):
+        return "with device numbers or header padding the builder never writes"
+    return None
+
+
 def _member_header_problem(header: bytes, member: str, kind: bytes, full_name: str, extended: bool,
                            padding: bytes) -> str | None:
     """Why a readable member is not one release.deterministic_tar_gz writes, or None."""
@@ -1093,11 +1117,12 @@ def _strict_members(raw: bytes, prefix: str, name: str) -> list[_Member]:
     """Read an uncompressed tar as the subset release.deterministic_tar_gz writes; refuse anything else.
 
     The subset: POSIX ustar headers with a valid checksum, plain octal numbers and no prefix field;
-    regular files and directories only; at most one extended header, holding exactly one `path` record,
-    directly before a member; NUL padding; a two-block end-of-archive marker with nothing after it. The
-    members are in the builder's canonical form: printable ASCII names inside one prefix, the builder's
-    modes, owner 0 without names, sorted names, one shared modification time, and directories that are
-    exactly the parents of the files.
+    regular files and directories only; at most one extended header, directly before a member, whose
+    own block is the one tarfile writes (name ././@PaxHeader, mode, owner and time 0, no link, owner or
+    device fields) and whose data is exactly one `path` record; NUL padding; a two-block end-of-archive
+    marker with nothing after it. The members are in the builder's canonical form: printable ASCII names
+    inside one prefix, the builder's modes, owner 0 without names, sorted names, one shared modification
+    time, and directories that are exactly the parents of the files.
     """
     members: list[_Member] = []
     folded: dict[str, str] = {}
@@ -1128,6 +1153,9 @@ def _strict_members(raw: bytes, prefix: str, name: str) -> list[_Member]:
             raise ArtifactRefused("archive.malformed", f"{where} declares data beyond the end of the archive")
         padding = raw[data_offset + size:end]
         if kind == tarfile.XHDTYPE:
+            problem_text = _extended_header_problem(header, numbers)
+            if problem_text is not None:
+                raise ArtifactRefused("archive.noncanonical", f"{where} is an extended header {problem_text}")
             if path is not None:
                 raise ArtifactRefused("archive.ambiguous", f"{where} is a second extended header for one member")
             path, path_offset, offset = _extended_path(raw[data_offset:data_offset + size], where), offset, end

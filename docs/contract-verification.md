@@ -187,7 +187,11 @@ size bound, and a strict reader accepts only the tar subset `release.determinist
   numbers and an empty prefix field;
 - regular files and directories only, and directories without data;
 - at most one extended header before a member, holding exactly one `path` record, and only for a
-  name longer than the 100-character ustar name field;
+  name longer than the 100-character ustar name field. The extended header's own block must be the
+  one tarfile writes: name `././@PaxHeader`, mode, owner and modification time 0, no link, owner or
+  group name, no device numbers and NUL header padding. node-tar refuses a link name or an empty name
+  in that block and then unpacks the member under its truncated ustar name, while tarfile and GNU tar
+  use the `path` record;
 - NUL padding, and a two-block end-of-archive marker with nothing after it.
 
 The members must also be in the builder's canonical form: mode 0755 for directories, `gradlew` and
@@ -208,7 +212,7 @@ zeros, and both forms are accepted), and `release.py` runs on the owner's machin
 | --- | --- |
 | `archive.malformed` | The archive is not gzip or not a complete tar: a bad header checksum, data cut off, no two-block end-of-archive marker, data after that marker (a reader that skips zero blocks would unpack it), a length that is not a multiple of 512 bytes, or unpacking fails. |
 | `archive.ambiguous` | Tar or gzip readers would read different members: a pax global header; a GNU long name or long link; a sparse, old-style or vendor type; an extended header record other than one `path` (for example `size`, `linkpath` or `hdrcharset`) or a malformed record; two extended headers for one member, or one that precedes no member; a GNU or V7 header; a numeric field that is not plain octal; a used prefix field; a directory that declares data; more than one gzip member or data after it; or tarfile reading other members than the strict reader. |
-| `archive.noncanonical` | The tar is readable and unambiguous but not what the builder writes: another mode, owner, owner name or link name; device numbers or header padding; bytes after the end of a name; a directory name without its trailing slash; an extended header for a short name, or one whose `path` does not start with the ustar name; data in padding; members out of order; an empty, extra or missing directory; or more than one modification time. |
+| `archive.noncanonical` | The tar is readable and unambiguous but not what the builder writes: another mode, owner, owner name or link name; device numbers or header padding; bytes after the end of a name; a directory name without its trailing slash; an extended header for a short name, or one whose `path` does not start with the ustar name; an extended header block with another name, mode, owner, modification time, link or owner name, device numbers or header padding; data in padding; members out of order; an empty, extra or missing directory; or more than one modification time. |
 | `archive.too_large` / `archive.too_many_members` | The decompressed size, a member's size or the member count exceeds its bound. |
 | `archive.unsafe_path` | A member name is not printable ASCII (a control or non-ASCII character, or bytes that are not UTF-8), is absolute, uses a backslash, exceeds the length or depth bounds, or has an empty, `.`, `..`, drive or stream component. |
 | `archive.outside_prefix` | A member is not inside `pennilogic-contracts-<language>-<tag>/`. |
