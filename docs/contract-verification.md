@@ -103,10 +103,10 @@ of this repository's `main`, not from the tag's own checkout: the tag's tree car
 that its tagger controlled.
 
 The loader downloads nothing: it reads the tag's files from the checkout's own objects. It unpacks the
-archives into a temporary directory and removes it before it returns. It refuses with `ArtifactRefused`, whose `rule` is one of the static IDs below.
-It stops at the first failing rule. The `detail` text names at most five assets, keys or paths and
-counts the rest, and shows at most 200 characters of one value, so a hostile release cannot flood a
-log through it.
+archives into a temporary directory and removes it before it returns. It refuses with
+`ArtifactRefused`, whose `rule` is one of the static IDs below. It stops at the first failing rule.
+The `detail` text names at most five assets, keys or paths and counts the rest, and shows at most 200
+characters of one value, so a hostile release cannot flood a log through it.
 
 A loaded artifact reports `github_release.presence` as `not_run`. Checking that the GitHub Release
 exists needs the network and is held. A loaded artifact therefore never shows by itself that the
@@ -162,7 +162,7 @@ format than this runner's.
 | --- | --- |
 | `release.format_unsupported` | The tag commit has no `scripts/pl_contracts.py` with one literal `PROVIDER_SOURCE_NAMES` tuple of distinct plain file names and one literal `LANGUAGES` naming exactly Kotlin, TypeScript and Python. |
 | `anchor.asset_name_collision` | Two sources at the tag would produce the same asset name in the flat release directory. |
-| `anchor.tag_file_missing` | A file the release is built from (specification, registry, provider source, fixture, `generator/golden.json` or `toolchain/versions.json`) is not a regular file at the tag commit. |
+| `anchor.tag_file_missing` | A file the release or its manifests are built from is not a regular file at the tag commit: the specification, the registry, a provider source, a fixture, `generator/golden.json`, `toolchain/versions.json`, `scripts/release.py`, a generator configuration `generator/<language>.json` or `generator/openapi-generator-ignore`. A missing `scripts/pl_contracts.py` is `release.format_unsupported`, and a file the tag's tree lists but this checkout lacks is `repository.objects_missing`. |
 | `asset.not_regular_file` | An entry in the release directory is a symlink, a directory or another non-regular file. |
 | `sums.missing_file` | There is no `SHA256SUMS`. |
 | `asset.too_large` | An asset, or a file at the tag commit, exceeds its size bound. |
@@ -193,7 +193,7 @@ tag commit instead:
 | --- | --- |
 | `anchor.asset_blob_mismatch` | The specification, registry, a provider source or a fixture differs from its blob at the tag commit. The blob gets the same CRLF-to-LF normalization the builder applies. |
 | `anchor.toolchain_mismatch` | The manifest `toolchain`, or a client's generator version or jar digest, differs from `toolchain/versions.json` at the tag commit. |
-| `anchor.manifest_metadata_mismatch` | A client's `runtime_sha256` (the tree digest of `runtime/<language>`), generator `generator_name`, `config` or `config_sha256` (`generator/<language>.json`) or `ignore_override_sha256` (`generator/openapi-generator-ignore`), or the release's `publication` text (the literal in the tag's `scripts/release.py`), differs from what those files at the tag commit give. `release.format_unsupported` refuses a tag whose configuration has no `generatorName` or whose `release.py` writes no single literal publication text. |
+| `anchor.manifest_metadata_mismatch` | A client's `runtime_sha256` (the tree digest of `runtime/<language>`), generator `generator_name`, `config` or `config_sha256` (`generator/<language>.json`) or `ignore_override_sha256` (`generator/openapi-generator-ignore`), or the release's `publication` text (the literal in the tag's `scripts/release.py`), differs from what those files at the tag commit give. An absent `scripts/release.py`, generator configuration or ignore override is `anchor.tag_file_missing`; `release.format_unsupported` refuses one that is present but is a configuration without a `generatorName` string (or not strict JSON) or a `release.py` that writes no single literal publication text. |
 | `anchor.golden_invalid` | `generator/golden.json` at the tag commit lacks a language, has a malformed record (including a record with other keys than this runner's format) or is internally inconsistent (`generate_clients.golden_inconsistency`). |
 | `anchor.golden_spec_mismatch` | A golden record pins another specification digest or version than the release ships. |
 | `anchor.golden_tree_mismatch` | An archive's recomputed tree digest is not `golden.json[language].tree_sha256` at the tag commit. |
@@ -448,7 +448,8 @@ python -B -m unittest discover -s scripts/tests -p "test_verify_contract.py" -v
 The modules are also part of the repository's complete test run. On main that run is
 `python scripts/run_source_tests.py` (CI and `.github/agent-policy.json`, added by PR #38). It runs every
 `test_*.py` module in lanes and gives each lane its own `TMPDIR` inside the checkout's gitignored
-`build/source-tests/run-*/state/<lane>/temp`.
+`build/source-tests/run-*/state/<lane>/temp`. Until the modules are registered, they also switch off that
+run's serial/CLI overlap (see the held criteria below).
 
 - `test_contract_artifact.py`: the loader. `scripts/tests/verification_support.py` builds synthetic
   releases with the real `release.build_release_set`, with its module-level paths patched into a
@@ -456,7 +457,8 @@ The modules are also part of the repository's complete test run. On main that ru
   system configuration, fixed dates) and a temporary bare origin.
   `test_builder_and_loader_keys_agree` fails when the builder's output keys and the loader's expected
   keys diverge. `test_partial_clone_refused_without_fetching` refuses blob-less and treeless clones,
-  also with `GIT_NO_LAZY_FETCH` removed as an older git ignores it, and requires their `.git` unchanged. `ArchiveReaderDifferentialTest` replays the archives that verified as golden under
+  also with `GIT_NO_LAZY_FETCH` removed as an older git ignores it, and requires their `.git`
+  unchanged. `ArchiveReaderDifferentialTest` replays the archives that verified as golden under
   tarfile while GNU tar or node-tar unpacked other bytes, and `ArchiveMemberRulesTest` mutates the
   builder's own archive one header field at a time.
 - `test_contract_compat.py`: the gate (expiry boundary at `warn_until` minus 1 ms and at `warn_until`,
@@ -500,8 +502,12 @@ rule ID.
   section).
 - contracts#1 integration is held.
 - The contracts#13 owner (the coordinator) decides runner-lane registration of these test modules in
-  `scripts/run_source_tests.py` (added to main by PR #38) and the whole-run budget. Until then the
-  modules are unregistered and run in its serial lane.
+  `scripts/run_source_tests.py` (added to main by PR #38) and the whole-run budget. Until then the four
+  modules are unregistered, and they do more than run in its serial lane: they are not among its
+  `REVIEWED_SERIAL_MODULES`, so its `overlap_profile` turns the serial/CLI overlap off for the whole
+  run ("unproved serial resource writer retains the SDK barrier"; checked on this branch merged with
+  main `12b6f72e`, while main alone has no such module). The budget decision has to cover that loss
+  of overlap, not only the modules' own time.
 - CI wiring (through the infra governance generator) and branch protection are held.
 - The core attestation and the separate Core, QA, Contract, Security and Release reviews are pending.
 - The PenniLogic/infra#22 hold remains.

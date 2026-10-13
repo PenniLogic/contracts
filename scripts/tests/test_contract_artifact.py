@@ -891,7 +891,10 @@ class TagTreeAnchorTest(LoaderTestCase):
             self.assertRefused("anchor.toolchain_mismatch", published, contracts=contracts)
 
     def test_tag_tree_missing_source_file_refused(self) -> None:
-        for relative in (f"{SPEC_DIRECTORY}/{PROVIDER}", GOLDEN_RELATIVE, VERSIONS_RELATIVE):
+        # The last three are read for the manifest metadata anchors; the guide's rule table names all of them (review
+        # round 3, CVR3-5).
+        for relative in (f"{SPEC_DIRECTORY}/{PROVIDER}", GOLDEN_RELATIVE, VERSIONS_RELATIVE, support.RELEASE_RELATIVE,
+                         support.generator_relative("python", "config"), support.IGNORE_RELATIVE):
             with self.subTest(relative):
                 contracts, published = self.own_release(relative.replace("/", "-"), uncommitted=(relative,))
                 self.assertRefused("anchor.tag_file_missing", published, contracts=contracts)
