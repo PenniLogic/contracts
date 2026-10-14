@@ -221,7 +221,11 @@ size bound, and a strict reader accepts only the tar subset `release.determinist
 The members must also be in the builder's canonical form: mode 0755 for directories, `gradlew` and
 `*.sh` files and 0644 for every other file; owner 0 without owner or link names; one modification
 time; sorted names; and directories that are exactly the parents of the files, so an empty or extra
-directory is refused. Member names are at most 1024 characters and 64 components of at most 255
+directory is refused. The builder (`release.deterministic_tar_gz`) archives every directory it finds,
+an empty one included, while the tree digest and `generator/golden.json` count files only, so a
+generated client holding an empty directory would be a genuine release this loader refuses as
+`archive.noncanonical`. No real release has been through the loader yet; the first run on real
+generated trees (held, with CI) has to confirm none holds one. Member names are at most 1024 characters and 64 components of at most 255
 characters, inside one prefix, and every component is made of the POSIX portable file name characters
 `[A-Za-z0-9._-]` (every real generated path is), does not end in `.` and is not a Windows device name
 (`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, also with an extension such as

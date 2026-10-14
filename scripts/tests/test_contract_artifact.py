@@ -1258,6 +1258,18 @@ class ArchiveMemberRulesTest(unittest.TestCase):
             contract_artifact.inspect_archive_members(raw, self.PREFIX, self.NAME)
         self.assertEqual(caught.exception.rule, rule, caught.exception.detail)
 
+    def test_builder_archive_with_an_empty_directory_is_refused(self) -> None:
+        """Fable review round 1, F4 (a documented limit, not a fix): the builder archives an empty directory that the
+        tree digest ignores, and the strict reader refuses that genuine archive. The guide names this rule so the
+        first such refusal of a real generated tree is understood; this test fails once either side changes."""
+        tree = self.root / "tree"
+        before = pl_contracts.tree_hash(tree)
+        (tree / "pkg" / "empty").mkdir()
+        self.assertEqual(pl_contracts.tree_hash(tree), before, "the tree digest now counts directories")
+        raw = gzip.decompress(release.deterministic_tar_gz(tree, self.PREFIX, SYNTHETIC_EPOCH))
+        self.assertIn(f"{self.PREFIX}/pkg/empty", [info.name for info in tarfile.open(fileobj=io.BytesIO(raw)).getmembers()])
+        self.assertRawRule("archive.noncanonical", raw)
+
     def header(self, relative: str) -> int:
         """Offset of the member's own ustar header block (after its extended header, if it has one)."""
         return self.offsets[relative][1] - tarfile.BLOCKSIZE
