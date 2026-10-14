@@ -16,8 +16,10 @@ import gzip
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 import unittest
@@ -267,6 +269,26 @@ class TagProvenanceTest(LoaderTestCase):
         absent = str(self.work / "no-such-origin.git")
         git(contracts.repo, "remote", "set-url", "origin", absent)
         self.assertRefused("tag.remote_unreachable", self.release_dir, contracts=contracts, accepted=(absent,))
+
+    @unittest.skipUnless(hasattr(os, "getsid"), "sessions and controlling terminals are POSIX")
+    def test_remote_transport_runs_outside_the_terminal_session(self) -> None:
+        """Fable review round 1, F3: ssh asks for an unknown host key or a key passphrase on /dev/tty, not on stdin, so
+        from an interactive shell `git ls-remote` over ssh waited for an answer until the 120 s bound and was then
+        refused as tag.remote_unreachable. Git now starts in its own session, without the caller's controlling
+        terminal, so ssh cannot prompt and fails at once. A stand-in ssh records its session; no network."""
+        contracts = self.fresh_contracts()
+        url = "ssh://git@example.invalid/PenniLogic/contracts.git"
+        git(contracts.repo, "remote", "set-url", "origin", url)
+        record = self.work / "ssh-session.txt"
+        stand_in = self.work / "stand-in-ssh"
+        stand_in.write_text(f"#!{sys.executable}\nimport os, sys\n"
+                            f"open({str(record)!r}, 'a').write(f'{{os.getsid(0)}}\\n')\nsys.exit(255)\n", encoding="utf-8")
+        stand_in.chmod(0o755)
+        with mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": shlex.quote(str(stand_in))}):
+            self.assertRefused("tag.remote_unreachable", self.release_dir, contracts=contracts, accepted=(url,))
+        sessions = [int(session) for session in record.read_text(encoding="utf-8").split()]  # git may first probe it with -G
+        self.assertTrue(sessions, "the stand-in ssh never ran")
+        self.assertNotIn(os.getsid(0), sessions, "ssh ran in the caller's session and could prompt on its terminal")
 
     def test_unknown_or_malformed_remote_refused(self) -> None:
         self.load(self.release_dir)

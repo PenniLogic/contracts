@@ -524,7 +524,11 @@ repositories there otherwise. A run from an NTFS checkout, with its own temporar
 - GitHub Release presence is not checked (`not_run`). Tags are not signed, so there is no signature
   verification. When `git ls-remote` times out, git itself is stopped; transport helpers that git
   started may outlive it. Only the `git` executable is bound to an absolute `PATH` entry; the helpers
-  git starts itself (for example `ssh`) follow git's own lookup.
+  git starts itself (for example `ssh`) follow git's own lookup. On POSIX git starts in its own session,
+  without the caller's controlling terminal, so ssh cannot ask on the terminal for an unknown host key
+  or a key passphrase and fails at once (`tag.remote_unreachable`) instead of waiting out the 120 s
+  bound; a graphical `SSH_ASKPASS` program can still ask when a display is set, and on Windows the
+  session is shared. Non-interactive ssh (`BatchMode yes`, known hosts) is the caller's environment.
 - ADR-015 money vectors are not processed here.
 - Open owner decisions: whether the rollout starts with a warning window, the longest warning
   allowed, and how a first published version without a baseline is reported.

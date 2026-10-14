@@ -413,11 +413,17 @@ class _Git:
         self.offline_environment = {**environment, **OFFLINE_ENVIRONMENT}
 
     def run(self, *args: str, input_data: bytes = b"", network: bool = False) -> subprocess.CompletedProcess[bytes] | None:
-        """Return the completed process, or None when git could not start or exceeded the time bound."""
+        """Return the completed process, or None when git could not start or exceeded the time bound.
+
+        stdin is always a pipe (input_data, empty by default). ssh prompts for an unknown host key or a passphrase on
+        the controlling terminal, not on stdin, so git starts in a new session without one (POSIX; ignored on
+        Windows): such a prompt fails at once instead of waiting out the time bound (Fable review round 1, F3).
+        """
         try:
             return subprocess.run(
                 [self.executable, "-C", str(self.repo), *args], input=input_data, capture_output=True,
                 env=self.environment if network else self.offline_environment, timeout=GIT_TIMEOUT_SECONDS, check=False,
+                start_new_session=True,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
