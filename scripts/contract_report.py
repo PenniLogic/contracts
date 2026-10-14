@@ -12,9 +12,11 @@ adds the rules the schema subset cannot express:
   (pass, or not_run when the checkout or this runner could not decide it). A synthetic-fixture report
   may carry null there.
 - A synthetic-fixture report is never acceptance_eligible. acceptance_eligible is true exactly when the
-  mode is published, every required language has a row, the provider and every consumer row are live
-  and every artifact check passed. The GitHub Release presence check is held and always not_run in this
-  runner, so none of its reports is acceptance-eligible yet (review round 2, PSEC-R2-3).
+  verdict is pass, the mode is published, every required language has a row, the provider and every
+  consumer row are live and every artifact check passed: a fail or warn verdict is never eligible
+  (Fable review round 1, F1), so acceptance_eligible true alone means a passing live run. The GitHub
+  Release presence check is held and always not_run in this runner, so none of its reports is
+  acceptance-eligible yet (review round 2, PSEC-R2-3).
 - Synthetic-fixture rows are named synthetic-<language> (synthetic-provider) and live rows never are
   (a not_run row may carry either kind of name); live rows name the version and the repository commit
   they verified; every row that ran names the report's contract version.
@@ -132,7 +134,7 @@ def _derive(report: dict) -> tuple[tuple[str, ...], tuple[Note, ...], str, bool]
     else:
         verdict = "warn" if reasons else "pass"
     checks = report["contract"]["checks"]
-    eligible = (report["mode"] == "published" and report["provider"]["mode"] == "live" and not missing
+    eligible = (verdict == "pass" and report["mode"] == "published" and report["provider"]["mode"] == "live" and not missing
                 and all(row["mode"] == "live" for row in consumers)
                 and checks is not None and all(check["status"] == "pass" for check in checks))
     return missing, tuple(reasons), verdict, eligible

@@ -180,9 +180,9 @@ class ReportVerdictTest(ReportTestCase):
             self.assertDerived(lambda report: report["provider"].update(mode="not_run", result="not_run", version=None, commit=None,
                                                                         verified_contract_version=None),
                                "fail", [("report.row_not_run", PROVIDER_ROW)], False)
-        with self.subTest("compatibility not run (eligibility is about liveness, the verdict still fails)"):
+        with self.subTest("compatibility not run (the verdict fails, so the run is not eligible either)"):
             self.assertDerived(lambda report: report.update(compatibility=not_run_compatibility("v1.2.2")), "fail",
-                               [("report.compat_not_run", "compatibility")], True)
+                               [("report.compat_not_run", "compatibility")], False)
 
     def test_failed_rows_and_compatibility_fail_and_a_warning_warns(self) -> None:
         mutations = {
@@ -197,7 +197,34 @@ class ReportVerdictTest(ReportTestCase):
         }
         for label, (mutate, verdict, reasons) in mutations.items():
             with self.subTest(label):
-                self.assertDerived(mutate, verdict, reasons, True)
+                self.assertDerived(mutate, verdict, reasons, False)
+
+    def test_acceptance_eligible_requires_a_passing_verdict(self) -> None:
+        """Fable review round 1, F1: eligibility was derived from liveness alone, so a live published run whose
+        Python consumer failed was a fail report with acceptance_eligible true. Every non-pass verdict on the
+        otherwise eligible control is now ineligible, and a report declaring it eligible is refused."""
+        not_passing = {
+            "consumer failed": (lambda report: report["consumers"][2].update(result="fail"), "fail"),
+            "provider failed": (lambda report: report["provider"].update(result="fail"), "fail"),
+            "unacknowledged break under the blocking gate": (lambda report: report.update(compatibility=breaking("fail")), "fail"),
+            "compatibility not run": (lambda report: report.update(compatibility=not_run_compatibility("v1.2.2")), "fail"),
+            "unacknowledged break under an unexpired warning gate": (
+                lambda report: report.update(compatibility=breaking("warn"), gate=dict(WARNING_GATE)), "warn"),
+        }
+        for label, (mutate, verdict) in not_passing.items():
+            with self.subTest(label, side="builder"):
+                report = rebuild(self.mutated(mutate))
+                self.assertEqual((report["verdict"], report["acceptance_eligible"]), (verdict, False))
+                assessment = assess_report(report)
+                self.assertEqual((notes(assessment.problems), assessment.verdict, assessment.acceptance_eligible), ([], verdict, False))
+            def declared_eligible(report: dict, mutate=mutate) -> None:
+                mutate(report)
+                report.update(rebuild(report), acceptance_eligible=True)
+
+            with self.subTest(label, side="validator: declared eligible"):
+                self.assertProblems([("report.acceptance_eligible_inconsistent", "acceptance_eligible")], declared_eligible)
+        with self.subTest("control: the passing live published run stays eligible"):
+            self.assertEqual((self.control["verdict"], self.control["acceptance_eligible"]), ("pass", True))
 
     def test_report_claims_unverified_consumer_version_refused(self) -> None:
         mutations = {

@@ -389,9 +389,11 @@ compatibility result is `warn`, and `pass` otherwise. A missing Python row is th
 never an omission. Rows are required per language: the validator does not know which consumer
 repositories exist, so with two TypeScript consumers a report that names only one of them still passes.
 Naming the required consumers belongs to the held consumer adapters. `acceptance_eligible` is true
-exactly when the mode is `published`, every required language has a row, the provider row is `live`,
-every consumer row is `live` and every check in `contract.checks` passed; a `synthetic-fixture` report
-is never acceptance-eligible. A `not_run` check is not a pass: without a pinned tag object
+exactly when the verdict is `pass`, the mode is `published`, every required language has a row, the
+provider row is `live`, every consumer row is `live` and every check in `contract.checks` passed; a
+`synthetic-fixture` report is never acceptance-eligible, and neither is a `fail` or `warn` verdict, so
+`acceptance_eligible: true` alone means a passing live run (a breaking change shipped under the warning
+window is never acceptance evidence). A `not_run` check is not a pass: without a pinned tag object
 (`--expect-tag-object`), in a shallow or stale clone, and while the GitHub Release presence check is
 held, a report is not acceptance-eligible. That check is `not_run` in every run of this pull request,
 so none of its reports is acceptance-eligible.

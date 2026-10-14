@@ -22,9 +22,9 @@ document, also for a usage error); without --json usage errors go to stderr. Not
 except the loader's temporary unpack directory, which is removed before the command returns. The only
 network access is the loader's `git ls-remote` against the configured remote: git never fetches the
 objects a partial clone lacks (repository.objects_missing, exit 2). No run of this command is
-product verification unless its report says acceptance_eligible, which needs a published artifact whose
-every check passed (the held GitHub Release presence check included), the live provider and every live
-consumer.
+product verification unless its report says acceptance_eligible, which needs a pass verdict (a fail or
+warn verdict is never eligible), a published artifact whose every check passed (the held GitHub Release
+presence check included), the live provider and every live consumer.
 """
 
 from __future__ import annotations
